@@ -294,15 +294,32 @@ public class FileServiceImpl implements FileService {
 
         File file = new File(fileDirectory + fileRequestDto.getFilePath());
 
-        boolean isSuccess = false;
-
+        //如果文件存在，执行删除
         if (file.exists()) {
-            //删除文件
-            isSuccess = file.delete();
-            if (isSuccess) {
-                //执行文件删除后置操作
-                fileDeleteAfter(file);
+            return deleteFile(file);
+        }
+
+        return false;
+    }
+
+    /**
+     * 删除文件或递归删除目录
+     */
+    private Boolean deleteFile(File deleteFile) {
+        boolean isSuccess = true;
+
+        //如果是文件夹，递归删除内部文件
+        if (deleteFile.isDirectory()) {
+            for (File subFile : deleteFile.listFiles()) {
+                deleteFile(subFile);
             }
+        }
+
+        //删除文件
+        isSuccess = isSuccess && deleteFile.delete();
+        if (isSuccess) {
+            //执行文件删除后置操作
+            fileDeleteAfter(deleteFile);
         }
 
         return isSuccess;

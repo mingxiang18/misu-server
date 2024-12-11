@@ -100,6 +100,7 @@
         <li @click="onMenuItemClick('download')">下载</li>
         <li @click="onMenuItemClick('rename')">重命名</li>
         <li @click="onMenuItemClick('delete')">删除</li>
+        <li @click="onMenuItemClick('share')">分享</li>
       </ul>
     </div>
   </div>
@@ -111,7 +112,13 @@ import {defineProps, onBeforeUnmount, onMounted, ref, watch} from "vue";
 import VideoViewer from '@/components/fileServer/VideoViewer.vue'
 import FileUpload from '@/components/fileServer/FileUpload.vue'
 import {ElMessage, ElMessageBox} from "element-plus";
-import {getFileList, moveFile, deleteFile as deleteFileApi, createDirectory as createDirectoryApi} from '@/api/fileServer/fileServer';
+import {
+  getFileList,
+  moveFile,
+  deleteFile as deleteFileApi,
+  createDirectory as createDirectoryApi,
+  getFileDownloadLink
+} from '@/api/fileServer/fileServer';
 import { useRouter, useRoute } from 'vue-router';
 
 // 接收外部传入的接口函数
@@ -278,6 +285,8 @@ const onMenuItemClick = (option) => {
     renameFile(menuChooseFile.value);
   }else if (option === 'delete') {
     deleteFile(menuChooseFile.value);
+  }else if (option === 'share') {
+    shareFile(menuChooseFile.value);
   }
   // 点击后隐藏菜单
   menuVisible.value = false;
@@ -317,12 +326,13 @@ const renameFile = (file) => {
 // 删除文件
 const deleteFile = (file) => {
   ElMessageBox.confirm(
-      '删除后文件将无法恢复，是否确认删除文件【' + file.fileName + '】？',
+      '删除后文件将无法恢复，是否确认删除文件【<span style="word-break: break-all;">' + file.fileName + '</span>】？',
       '是否确定',
       {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
         type: 'warning',
+        dangerouslyUseHTMLString: true,
       }
   ).then(() => {
     //删除文件
@@ -333,6 +343,23 @@ const deleteFile = (file) => {
     return done(true);
   }).catch(() => {
     return false;
+  })
+}
+
+// 分享文件
+const shareFile = (file) => {
+  getFileDownloadLink(file.filePath + file.fileName, props.openType).then((response) => {
+    let shareLink = downloadBaseUrl + response.data;
+
+    ElMessageBox.alert(
+        '当前链接1天内有效：<a style="word-break: break-all;">' + shareLink + '</a>',
+        '分享',
+        {
+          dangerouslyUseHTMLString: true,
+        }
+    )
+  }).catch(() => {
+    ElMessage.error('获取分享链接失败')
   })
 }
 
