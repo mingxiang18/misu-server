@@ -1,0 +1,58 @@
+logging:
+  level:
+    "ROOT": INFO
+    # 输出 SQL 绑定参数
+#    "org.hibernate.orm.jdbc.bind": TRACE
+
+server:
+  # 服务器端口
+  port: 30200
+
+spring:
+  profiles:
+    active: local
+  servlet:
+    multipart:
+      # 最大上传文件大小
+      max-file-size: 300MB
+      max-request-size: 300MB
+  # 数据源
+  datasource:
+    account:
+      type: com.zaxxer.hikari.HikariDataSource
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      url: jdbc:mysql://localhost:3316/misu_account?useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2b8&allowMultiQueries=true
+      username: root
+      password: root
+    file-server:
+      type: com.zaxxer.hikari.HikariDataSource
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      url: jdbc:mysql://localhost:3316/misu_file_server?useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2b8&allowMultiQueries=true
+      username: root
+      password: root
+
+  jpa:
+    # 输出 SQL
+    show-sql: true
+    properties:
+      # 格式化输出的 SQL
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+
+misu:
+  #静态文件保存目录
+  static:
+    path: /data/
+
+#natx客户端配置
+natx:
+  natxConfigMap:
+    natx-client1:
+      enable: true
+      serverAddress: localhost
+      serverPort: 30100
+      serverSecret: secret
+      proxyAddress: localhost
+      proxyPort: 8082
+      remotePort: 30101
