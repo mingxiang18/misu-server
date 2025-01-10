@@ -1,4 +1,4 @@
-package com.misu.security.dto;
+package com.misu.security.utils;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;

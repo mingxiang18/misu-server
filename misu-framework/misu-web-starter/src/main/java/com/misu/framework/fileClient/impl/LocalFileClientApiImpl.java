@@ -1,15 +1,19 @@
-package com.misu.framework.fileClient;
+package com.misu.framework.fileClient.impl;
 
+import com.misu.framework.fileClient.FileClientApi;
+import com.misu.framework.fileClient.domain.FileInfo;
 import com.misu.framework.util.FileUtils;
 import com.misu.framework.config.file.FilePathConfig;
 import com.misu.framework.config.common.ServerConfig;
+import jakarta.annotation.Resource;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 本地文件工具
@@ -19,10 +23,10 @@ import java.io.*;
 @ConditionalOnProperty(prefix="fileClient",name = "type", havingValue = "local", matchIfMissing = true)
 public class LocalFileClientApiImpl implements FileClientApi {
 
-    @Autowired
+    @Resource
     private ServerConfig serverConfig;
 
-    @Autowired
+    @Resource
     private FilePathConfig filePathConfig;
 
     @Override
@@ -61,5 +65,45 @@ public class LocalFileClientApiImpl implements FileClientApi {
     @Override
     public void deleteTmpFile() {
         FileUtils.deleteAllFileFromFolder(new File(filePathConfig.getFilePath() + "tmp"));
+    }
+
+    @Override
+    public List<FileInfo> downloadDirectory(String remotePath) throws FileNotFoundException {
+        List<FileInfo> fileInfoList = new ArrayList<>();
+        getAllFilesFromDirectory(remotePath, fileInfoList);
+        return fileInfoList;
+    }
+
+    @Override
+    public boolean isDirectory(String remotePath) throws FileNotFoundException {
+        File file = new File(filePathConfig.getFilePath() + remotePath);
+        if (file.exists()) {
+            return file.isDirectory();
+        } else {
+            throw new FileNotFoundException("文件不存在");
+        }
+    }
+
+    /**
+     * 递归获取目录下所有文件
+     */
+    private void getAllFilesFromDirectory(String remotePath, List<FileInfo> fileInfoList) throws FileNotFoundException {
+        File file = new File(filePathConfig.getFilePath() + remotePath);
+        if (file.isDirectory()) {
+            File[] files = file.listFiles();
+            if (files != null) {
+                for (File subFile : files) {
+                    if (subFile.isDirectory()) {
+                        getAllFilesFromDirectory(remotePath + "/" + subFile.getName(), fileInfoList);
+                    } else {
+                        FileInfo fileInfo = new FileInfo();
+                        fileInfo.setFileName(subFile.getName());
+                        fileInfo.setFilePath(remotePath);
+                        fileInfo.setInputStream(new FileInputStream(subFile));
+                        fileInfoList.add(fileInfo);
+                    }
+                }
+            }
+        }
     }
 }

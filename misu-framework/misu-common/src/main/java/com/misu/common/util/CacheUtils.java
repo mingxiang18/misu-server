@@ -14,7 +14,7 @@ import java.time.temporal.TemporalUnit;
  *
  * @author misu
  */
-public class LocalCacheUtils {
+public class CacheUtils {
 
     /**
      * Caffeine缓存

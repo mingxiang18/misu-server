@@ -2,8 +2,8 @@ package com.misu.security.config;
 
 import com.misu.security.filter.JwtAuthenticationFilter;
 import com.misu.security.properties.PermitAllUrlProperties;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -33,16 +33,16 @@ import org.springframework.web.filter.CorsFilter;
 public class SecurityConfiguration {
 
     // 将自定义JwtAuthenticationFilter注入
-    @Autowired
+    @Resource
     private JwtAuthenticationFilter jwtAuthenticationFilter;
 
     /**
      * 允许匿名访问的地址
      */
-    @Autowired
+    @Resource
     private PermitAllUrlProperties permitAllUrl;
 
-    @Autowired
+    @Resource
     private CorsFilter corsFilter;
 
     @Bean

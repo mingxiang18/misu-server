@@ -4,6 +4,7 @@ import com.misu.fileServer.domain.dto.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import java.io.IOException;
 import java.util.List;
 
 /**
@@ -32,6 +33,11 @@ public interface FileService {
      * 上传文件
      */
     FileUploadResponse uploadFile(FileUploadRequest fileUploadRequest);
+
+    /**
+     * 添加文件映射
+     */
+    void addFileInk(AddFileInkRequest addFileInkRequest) throws IOException;
 
     /**
      * 创建目录

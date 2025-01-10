@@ -25,6 +25,7 @@
 <script>
 import {login} from '@/api/auth/auth'
 import {setToken} from '@/api/auth/token'
+import {setUserInfo} from '@/api/user/user'
 
 /* 导出组件,并为组件定义数据,函数,生命周期函数 */
 export default {
@@ -55,6 +56,8 @@ export default {
       login(this.userName, this.password, this.captchaCode).then(response => {
         //设置token
         setToken(response.data.token)
+        //设置用户信息
+        setUserInfo();
         //跳转首页
         this.$router.push("/");
       });

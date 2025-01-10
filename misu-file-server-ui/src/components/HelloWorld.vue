@@ -11,9 +11,11 @@ defineProps({
   <div class="greetings">
     <h1 class="green">{{ msg }}</h1>
     <h3>
-      You’ve successfully created a project with
-      <a href="https://vite.dev/" target="_blank" rel="noopener">Vite</a> +
-      <a href="https://vuejs.org/" target="_blank" rel="noopener">Vue 3</a>.
+      欢迎来到Misu的应用服务器！！
+    </h3>
+    <h3>
+      <a target="_blank" rel="noopener">文件管理</a> +
+      <a target="_blank" rel="noopener">bb机器人</a>.
     </h3>
   </div>
 </template>

@@ -1,5 +1,8 @@
-package com.misu.framework.fileClient;
+package com.misu.framework.fileClient.impl;
 
+import com.alibaba.fastjson2.TypeReference;
+import com.misu.framework.fileClient.FileClientApi;
+import com.misu.framework.fileClient.domain.FileInfo;
 import com.misu.framework.util.RestUtils;
 import com.qcloud.cos.COSClient;
 import com.qcloud.cos.exception.CosClientException;
@@ -10,18 +13,20 @@ import com.qcloud.cos.model.StorageClass;
 import com.qcloud.cos.model.UploadResult;
 import com.qcloud.cos.transfer.TransferManager;
 import com.qcloud.cos.transfer.Upload;
+import jakarta.annotation.Resource;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Date;
+import java.util.List;
 
 /**
  * 腾讯对象存储的图片上传工具
@@ -32,10 +37,10 @@ import java.util.Date;
 @ConditionalOnProperty(prefix="fileClient",name = "type", havingValue = "tencentCos", matchIfMissing = false)
 public class TencentCosFileClientApiImpl implements FileClientApi {
 
-    @Autowired
+    @Resource
     private TransferManager transferManager;
 
-    @Autowired
+    @Resource
     private COSClient cosClient;
 
     /**
@@ -44,7 +49,7 @@ public class TencentCosFileClientApiImpl implements FileClientApi {
     @Value("${tencent.cos.bucketName:misutmp-1312130478}")
     private String bucketName;
 
-    @Autowired
+    @Resource
     private RestUtils restUtils;
 
     @Override
@@ -100,7 +105,7 @@ public class TencentCosFileClientApiImpl implements FileClientApi {
 
     @Override
     public InputStream downloadFile(String remotePath) {
-        return restUtils.getFileInputStream(remotePath);
+        return restUtils.get(remotePath, new TypeReference<InputStream>() {});
     }
 
     @Override
@@ -111,6 +116,16 @@ public class TencentCosFileClientApiImpl implements FileClientApi {
     @Override
     public void deleteTmpFile() {
 
+    }
+
+    @Override
+    public List<FileInfo> downloadDirectory(String remotePath) throws FileNotFoundException {
+        return List.of();
+    }
+
+    @Override
+    public boolean isDirectory(String remotePath) throws FileNotFoundException {
+        return false;
     }
 
     static long getSize(InputStream inputStream) throws IOException {

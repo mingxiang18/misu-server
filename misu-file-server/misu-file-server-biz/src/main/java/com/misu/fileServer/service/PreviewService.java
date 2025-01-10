@@ -10,9 +10,9 @@ import java.io.File;
 public interface PreviewService {
 
     /**
-     * 将图片文件添加到处理队列
+     * 异步生成缩略图
      */
-    void addImgFileToQueue(File imgFile);
+    void generatePreviewFile(File imgFile);
 
     /**
      * 删除当前文件的预览文件

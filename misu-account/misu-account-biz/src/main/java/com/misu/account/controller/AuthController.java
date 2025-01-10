@@ -8,7 +8,7 @@ import com.misu.account.service.AuthService;
 import com.misu.account.dao.impl.UserDaoImpl;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.annotation.Resource;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -22,10 +22,10 @@ import org.springframework.web.bind.annotation.*;
 @Api("认证相关接口")
 public class AuthController {
 
-    @Autowired
+    @Resource
     private UserDaoImpl userDaoImpl;
 
-    @Autowired
+    @Resource
     private AuthService authService;
 
     /**

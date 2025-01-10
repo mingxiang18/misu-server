@@ -14,8 +14,8 @@ import com.misu.account.repository.SysUserRepository;
 import com.misu.account.repository.SysUserRoleRepository;
 import com.misu.account.service.AuthService;
 import com.querydsl.core.types.dsl.BooleanExpression;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -27,19 +27,19 @@ import org.springframework.stereotype.Service;
 @Service
 public class AuthServiceImpl implements AuthService {
 
-    @Autowired
+    @Resource
     private UserDao userDao;
 
-    @Autowired
+    @Resource
     private SysUserRepository userRepository;
 
-    @Autowired
+    @Resource
     private SysUserRoleRepository userRoleRepository;
 
-    @Autowired
+    @Resource
     private PasswordEncoder passwordEncoder;
 
-    @Autowired
+    @Resource
     private TokenService tokenService;
 
     @Value("${register.enable:false}")

@@ -2,8 +2,8 @@
 const { app, BrowserWindow, screen } = require("electron");
 const path = require("path");
 
-const NODE_ENV = "development"; //开发环境;//process.env.NODE_ENV;
-// const NODE_ENV = "pro"; //开发环境;//process.env.NODE_ENV;
+// const NODE_ENV = "development"; //开发环境;//process.env.NODE_ENV;
+const NODE_ENV = "pro"; //生产环境;//process.env.NODE_ENV;
 
 // 创建主窗口
 const createWindow = () => {

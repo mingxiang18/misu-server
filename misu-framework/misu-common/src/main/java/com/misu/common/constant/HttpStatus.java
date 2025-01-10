@@ -70,6 +70,11 @@ public class HttpStatus {
     public static final int CONFLICT = 409;
 
     /**
+     * 资源已被永久删除
+     */
+    public static final int GONE = 410;
+
+    /**
      * 不支持的数据，媒体类型
      */
     public static final int UNSUPPORTED_TYPE = 415;

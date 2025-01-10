@@ -4,6 +4,7 @@
     <property name="log.path" value="logs"/>
     <!-- 日志输出格式 -->
     <property name="log.pattern" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{20} - [%method,%line] %msg%n"/>
+    <property name="net.log.pattern" value="%d{HH:mm:ss.SSS} [%thread] %-5level %.-2048msg%n"/>
 
     <!-- 控制台输出 -->
     <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
@@ -49,8 +50,30 @@
         </filter>
     </appender>
 
+    <!-- 时间滚动输出 发起网络请求 日志 -->
+    <appender name="net_request" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <!-- 正在记录的日志文件的路径及文件名 -->
+        <file>${log.path}/net_request.log</file>
+        <!--日志文件输出格式-->
+        <encoder>
+            <pattern>${net.log.pattern}</pattern>
+        </encoder>
+        <!-- 日志记录器的滚动策略，按日期，按大小记录 -->
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- 每天日志归档路径以及格式 -->
+            <fileNamePattern>${log.path}/net_request.%i.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>100MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <!--日志文件保留天数-->
+            <maxHistory>10</maxHistory>
+            <!-- 整个日志文件夹大小限制为1000M-->
+            <totalSizeCap>1000MB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
     <!-- 系统模块日志级别控制  -->
-    <logger name="com.bb" level="info"/>
+    <logger name="com.misu" level="info"/>
     <!-- Spring日志级别控制  -->
     <logger name="org.springframework" level="warn"/>
 
@@ -63,4 +86,10 @@
         <appender-ref ref="file_info"/>
         <appender-ref ref="file_error"/>
     </root>
+
+    <!--网络请求日志-->
+    <logger name="netRequestLogger" additivity="false">
+        <appender-ref ref="net_request"/>
+        <appender-ref ref="console"/>
+    </logger>
 </configuration>

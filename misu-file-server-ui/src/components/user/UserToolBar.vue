@@ -36,9 +36,7 @@ export default {
   },
   methods: {
     getUser() {
-      getUserInfo().then(response => {
-        this.user.userName = response.data.userName;
-      })
+      this.user.userName = getUserInfo().userName;
     },
     logOutAccount() {
       logOut();

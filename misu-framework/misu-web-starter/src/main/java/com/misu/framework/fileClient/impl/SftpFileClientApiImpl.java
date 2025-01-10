@@ -1,17 +1,21 @@
-package com.misu.framework.fileClient;
+package com.misu.framework.fileClient.impl;
 
 import com.jcraft.jsch.*;
 import com.misu.framework.config.file.FilePathConfig;
+import com.misu.framework.fileClient.FileClientApi;
+import com.misu.framework.fileClient.domain.FileInfo;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import jakarta.annotation.Resource;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 import java.util.Vector;
 
@@ -39,7 +43,7 @@ public class SftpFileClientApiImpl implements FileClientApi {
     @Value("${fileClient.sftp.remoteReadAddress:http://127.0.0.1:80}")
     private String remoteReadAddress;
 
-    @Autowired
+    @Resource
     private FilePathConfig filePathConfig;
 
     private ChannelSftp sftpChannel;
@@ -152,6 +156,68 @@ public class SftpFileClientApiImpl implements FileClientApi {
             if (!fileName.equals(".") && !fileName.equals("..")) {
                 String filePath = remotePathDir + "/" + fileName;
                 sftpChannel.rm(filePath);
+            }
+        }
+    }
+
+    /**
+     * 下载目录（返回目录下所有文件）
+     */
+    @Override
+    public List<FileInfo> downloadDirectory(String remotePath) throws FileNotFoundException {
+        List<FileInfo> fileInfoList = new ArrayList<>();
+        getAllFilesFromDirectory(remotePath, fileInfoList);
+        return fileInfoList;
+    }
+
+    /**
+     * 判断给定的路径是否是一个目录
+     */
+    @Override
+    public boolean isDirectory(String remotePath) throws FileNotFoundException {
+        try {
+            // 获取文件的状态信息
+            SftpATTRS entry = sftpChannel.lstat(remoteDir + remotePath);
+            return entry.isDir();
+        } catch (SftpException e) {
+            //文件不存在时特殊处理
+            if (ChannelSftp.SSH_FX_NO_SUCH_FILE == e.id) {
+                throw new FileNotFoundException();
+            }
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * 递归获取目录下所有文件
+     */
+    private void getAllFilesFromDirectory(String remotePath, List<FileInfo> fileInfoList) throws FileNotFoundException {
+        if (isDirectory(remotePath)) {
+            try {
+                Vector<ChannelSftp.LsEntry> files = sftpChannel.ls(remoteDir + remotePath);
+                // 遍历文件列表，逐个下载
+                for (ChannelSftp.LsEntry entry : files) {
+                    String remoteFileName = entry.getFilename();
+                    String remoteFullPath = remoteDir + remotePath + "/" + remoteFileName;
+
+                    // 检查是文件还是目录
+                    if (entry.getAttrs().isDir()) {
+                        // 忽略 "." 和 ".." 目录
+                        if (!remoteFileName.equals(".") && !remoteFileName.equals("..")) {
+                            // 递归下载子目录
+                            getAllFilesFromDirectory(remotePath + "/" + remoteFileName, fileInfoList);
+                        }
+                    } else {
+                        // 下载文件
+                        FileInfo fileInfo = new FileInfo();
+                        fileInfo.setFilePath(remotePath);
+                        fileInfo.setFileName(remoteFileName);
+                        fileInfo.setInputStream(sftpChannel.get(remoteFullPath));
+                        fileInfoList.add(fileInfo);
+                    }
+                }
+            } catch (SftpException e) {
+                throw new RuntimeException(e);
             }
         }
     }

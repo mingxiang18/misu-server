@@ -26,12 +26,11 @@
 
     <div class="file-container" v-loading="fileListLoading">
       <el-container class="file-card" v-for="file in fileList" :key="file.filePath"
-                    @click="openFile(file)"
                     @contextmenu.prevent="showContextMenu($event, file)"
                     @touchstart="fileTouchStart($event, file)"
-                    @touchend="fileTouchEnd"
+                    @touchend="fileTouchEnd($event, file)"
                     @touchcancel="fileTouchCancel">
-        <el-main class="file-card-main">
+        <el-main class="file-card-main" @click="openFile(file)">
           <Folder v-if="file.fileType === 'directory'" class="file-show"/>
           <el-image v-if="file.fileType === 'image' && !!file.previewLink" class="file-show"
                     :src="downloadBaseUrl + file.previewLink"
@@ -42,9 +41,15 @@
           <Film v-if="file.fileType === 'video'" class="file-show"/>
         </el-main>
         <el-footer class="file-card-footer">
-          <div class="wrap-and-ellipsis" :title="file.fileName">
-            {{ file.fileName }}
-          </div>
+          <el-tooltip
+              class="box-item"
+              effect="dark"
+              :content="file.fileName"
+              placement="bottom">
+            <div class="wrap-and-ellipsis">
+              {{ file.fileName }}
+            </div>
+          </el-tooltip>
         </el-footer>
       </el-container>
     </div>
@@ -61,6 +66,7 @@
 
     <VideoViewer v-if="videoVisible"
         :video-url="videoUrl"
+        video-type="file"
         @close="videoVisible = false"/>
 
     <!-- 拖拽区域 -->
@@ -79,7 +85,7 @@
     <el-dialog
         v-model="fileUploading"
         title="文件上传列表"
-        style="width: 70%;"
+        style="width: 80%;"
         :before-close="fileUploadClose">
       <file-upload
           v-if="fileUploading"
@@ -89,18 +95,43 @@
           @upload-all-complete="uploadAllComplete = true"/>
     </el-dialog>
 
+    <el-dialog
+        v-model="moveFileDialogVisible"
+        title="移动文件"
+        style="width: 90%;"
+        @close="closeMoveFileDialog()">
+      <div v-loading="moveFileLoading">
+        <el-form :model="moveFileInfo"
+                 ref="moveFileFormRef"
+                 :rules="moveFileRules"
+                 label-width="auto">
+          <el-form-item label="文件名称" prop="fileName">
+            <el-input v-model="moveFileInfo.fileName"/>
+          </el-form-item>
+          <el-form-item label="选择目录" prop="filePath">
+            <file-path-selector v-model="moveFileInfo.newFilePath" :open-type="props.openType"/>
+          </el-form-item>
+        </el-form>
+        <div style="display: flex; justify-content: center;">
+          <el-button @click="closeMoveFileDialog()">取消</el-button>
+          <el-button type="primary" @click="moveFile()">添加</el-button>
+        </div>
+      </div>
+    </el-dialog>
+
     <!-- 自定义右键菜单 -->
     <div
-        v-if="menuVisible"
+        v-show="menuVisible"
         ref="rightMenu"
         :style="menuStyles"
         class="context-menu"
     >
-      <ul>
+      <ul ref="rightMenuUl">
         <li @click="onMenuItemClick('download')">下载</li>
-        <li @click="onMenuItemClick('rename')">重命名</li>
-        <li @click="onMenuItemClick('delete')">删除</li>
+        <li @click="onMenuItemClick('move')">移动/重命名</li>
+        <li v-if="!!menuChooseFile && menuChooseFile.fileType === 'video'" @click="onMenuItemClick('createVideoRoom')">创建放映室</li>
         <li @click="onMenuItemClick('share')">分享</li>
+        <li @click="onMenuItemClick('delete')">删除</li>
       </ul>
     </div>
   </div>
@@ -114,12 +145,15 @@ import FileUpload from '@/components/fileServer/FileUpload.vue'
 import {ElMessage, ElMessageBox} from "element-plus";
 import {
   getFileList,
-  moveFile,
+  moveFile as moveFileApi,
   deleteFile as deleteFileApi,
   createDirectory as createDirectoryApi,
   getFileDownloadLink
 } from '@/api/fileServer/fileServer';
 import { useRouter, useRoute } from 'vue-router';
+import { createVideoRoom } from '@/api/fileServer/videoRoom';
+import FilePathSelector from "@/components/fileServer/FilePathSelector.vue";
+import {addUserTorrent as addUserTorrentApi} from "@/api/fileServer/torrent";
 
 // 接收外部传入的接口函数
 const props = defineProps({
@@ -166,6 +200,7 @@ const uploadAllComplete = ref(true);
 // 右键菜单显示
 const menuVisible = ref(false);
 const rightMenu = ref();
+const rightMenuUl = ref();
 const menuPosition = ref({ top: 0, left: 0 });
 const menuStyles = ref({ top: 0, left: 0 });
 // 菜单选择的文件
@@ -175,6 +210,29 @@ const LONG_PRESS_TIME = 600;
 let menuPressTimer = null;  // 用于存储定时器ID
 let isFileLongPress = false;  // 是否长按文件
 
+//移动文件相关
+const moveFileFormRef = ref();
+const moveFileDialogVisible = ref(false);
+const moveFileLoading = ref(false);
+const moveFileInfo = ref({
+  fileName: null,
+  originFilePath: null,
+  newFilePath: null
+});
+const moveFileRules = ref({
+  fileName: [
+    { required: true, message: '文件名称不能为空', trigger: 'blur' },
+    {
+      pattern: /^(?!.*[\/:*?"<>|])([^\0\\\/:*?"<>|]+(\.[^\\\/:*?"<>|]+)?)$/,
+      message: '文件名称存在不合法字符',
+      trigger: ['blur', 'change']
+    }
+  ],
+  newFilePath: [
+    { required: true, message: '文件路径不能为空', trigger: 'blur' }
+  ],
+});
+
 // 使用 Vue Router
 const router = useRouter();
 const route = useRoute();
@@ -183,8 +241,10 @@ const route = useRoute();
 const showContextMenu = (event, file) => {
   event.preventDefault(); // 阻止默认右键菜单
 
-  const menuWidth = 100; // 假设菜单宽度是 200px
-  const menuHeight = 150; // 假设菜单高度是 150px
+  menuChooseFile.value = file;
+
+  const menuWidth = 120; // 菜单宽度
+  const menuHeight = rightMenuUl.value.children.length * 45; // 菜单高度是li的数量 * 高度px
   const offset = 10; // 菜单距离边缘的间隔
 
   let top;
@@ -210,7 +270,7 @@ const showContextMenu = (event, file) => {
   // 设置菜单显示位置
   menuPosition.value = { top, left };
 
-  // 显示菜单
+  // 显示菜单的style属性
   menuStyles.value = {
     top: `${top}px`,
     left: `${left}px`,
@@ -218,18 +278,17 @@ const showContextMenu = (event, file) => {
     zIndex: 1000, // 保证菜单显示在最上面
   };
 
+  //显示右键菜单
   menuVisible.value = true;
-  menuChooseFile.value = file;
 };
 
 // 触摸开始事件
 const fileTouchStart = (event, file) => {
-  menuChooseFile.value = file;
-
   isFileLongPress = false;
   menuPressTimer = setTimeout(() => {
     // 达到长按阈值时触发长按事件
     isFileLongPress = true;
+    menuChooseFile.value = file;
     showContextMenu(event, file);
   }, LONG_PRESS_TIME);
 };
@@ -281,12 +340,27 @@ const hideContextMenu = (event) => {
 const onMenuItemClick = (option) => {
   if (option === 'download') {
     downloadFile(menuChooseFile.value);
-  }else if (option === 'rename') {
-    renameFile(menuChooseFile.value);
+  }else if (option === 'move') {
+    moveFileInfo.value = {
+      fileName: menuChooseFile.value.fileName,
+      originFilePath: menuChooseFile.value.filePath,
+      newFilePath: '/'
+    };
+    moveFileDialogVisible.value = true;
   }else if (option === 'delete') {
     deleteFile(menuChooseFile.value);
   }else if (option === 'share') {
     shareFile(menuChooseFile.value);
+  }else if (option === 'createVideoRoom') {
+    const createVideoRoomRequest = {
+      roomName: '',
+      videoPath: downloadBaseUrl + menuChooseFile.value.downloadLink,
+    }
+    createVideoRoom(createVideoRoomRequest).then((response) => {
+      ElMessage.success('创建放映室成功');
+      //跳转到/fileServer/videoRoom/:roomId
+      router.push(`/fileServer/videoRoom/${response.data.roomId}`);
+    });
   }
   // 点击后隐藏菜单
   menuVisible.value = false;
@@ -299,27 +373,34 @@ const downloadFile = (file) => {
   window.location.href = downloadBaseUrl + file.downloadLink;
 }
 
-// 重命名文件
-const renameFile = (file) => {
-  ElMessageBox.prompt('请输入修改后的名称', '修改文件名称', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    inputValue: file.fileName,
-    inputPattern: /^(?!.*[\/:*?"<>|])([^\0\\\/:*?"<>|]+(\.[^\\\/:*?"<>|]+)?)$/,
-    inputErrorMessage: '文件名称不合法',
-  }).then(({ value }) => {
-    if (value === file.fileName) {
-      ElMessage.warning('文件名称不存在修改')
-      return;
+//关闭移动文件选择框
+const closeMoveFileDialog = () => {
+  moveFileInfo.value = {
+    fileName: null,
+    originFilePath: null,
+    newFilePath: null
+  };
+  moveFileDialogVisible.value = false;
+}
+
+// 移动文件
+const moveFile = () => {
+  moveFileFormRef.value.validate((valid, fields) => {
+    if (valid) {
+      moveFileLoading.value = true;
+      //请求接口，注意要把路径开头的所有"/"符号去掉
+      moveFileApi(moveFileInfo.value.originFilePath.replace(/^\/+/, '') + moveFileInfo.value.fileName,
+          (moveFileInfo.value.newFilePath + '/').replace(/^\/+/, '') + moveFileInfo.value.fileName,
+          props.openType).then((response) => {
+        ElMessage.success("修改成功");
+        //关闭对话框
+        closeMoveFileDialog();
+        //重新查询文件列表
+        queryFileList();
+      }).finally(() => {
+        moveFileLoading.value = false;
+      })
     }
-
-    //移动文件
-    moveFile(file.filePath + file.fileName, file.filePath + value, props.openType).then((response) => {
-      ElMessage.success('修改成功')
-      queryFileList();
-    });
-  }).catch(() => {
-
   })
 }
 
@@ -714,7 +795,7 @@ queryFileList();
   background-color: white;
   border: 1px solid #ccc;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  width: 100px; /* 固定宽度 */
+  width: 120px; /* 固定宽度 */
 }
 
 .context-menu ul {

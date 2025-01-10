@@ -1,7 +1,10 @@
 package com.misu.framework.fileClient;
 
+import com.misu.framework.fileClient.domain.FileInfo;
+
 import java.io.FileNotFoundException;
 import java.io.InputStream;
+import java.util.List;
 
 /**
  * 文件服务器相关接口
@@ -31,4 +34,14 @@ public interface FileClientApi {
      * 删除临时文件
      */
     void deleteTmpFile();
+
+    /**
+     * 下载目录
+     */
+    List<FileInfo> downloadDirectory(String remotePath) throws FileNotFoundException;
+
+    /**
+     * 判断文件是否是目录
+     */
+    boolean isDirectory(String remotePath) throws FileNotFoundException;
 }

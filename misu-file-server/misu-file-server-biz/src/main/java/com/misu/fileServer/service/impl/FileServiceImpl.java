@@ -11,19 +11,19 @@ import com.misu.fileServer.util.FileTypeUtils;
 import com.misu.framework.config.file.FilePathConfig;
 import com.misu.framework.fileClient.FileClientApi;
 import com.misu.security.constant.UserRole;
-import com.misu.security.dto.AuthorityUtil;
+import com.misu.security.utils.AuthorityUtil;
 import com.misu.security.dto.LoginUser;
 import com.misu.security.service.TokenService;
 import com.misu.security.utils.LoginMessageUtil;
 import io.jsonwebtoken.Claims;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpRange;
 import org.springframework.http.MediaType;
@@ -37,6 +37,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 文件相关Service
@@ -53,16 +54,16 @@ public class FileServiceImpl implements FileService {
     @Value("${file-server.path}")
     private String fileServerPath;
 
-    @Autowired
+    @Resource
     private FilePathConfig filePathConfig;
 
-    @Autowired
+    @Resource
     private FileClientApi fileClientApi;
 
-    @Autowired
+    @Resource
     private TokenService tokenService;
     
-    @Autowired
+    @Resource
     private PreviewService previewService;
 
     /**
@@ -115,7 +116,7 @@ public class FileServiceImpl implements FileService {
             if (previewFile.exists()) {
                 responseDto.setPreviewLink(createFileDownloadLink(previewPath.replace(fileServerPath, "")));
             }else {
-                previewService.addImgFileToQueue(responseDto.getFile());
+                previewService.generatePreviewFile(responseDto.getFile());
             }
         }
     }
@@ -127,7 +128,7 @@ public class FileServiceImpl implements FileService {
         File directoryFile = new File(directory);
         File file = new File(directory + filePath);
         if (!file.exists()) {
-            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在");
+            return new ArrayList<>();
         }
 
         if (file.isDirectory()) {
@@ -245,6 +246,71 @@ public class FileServiceImpl implements FileService {
     }
 
     @Override
+    public void addFileInk(AddFileInkRequest addFileInkRequest) throws IOException {
+        if (addFileInkRequest.getOpenType() == 0 && StringUtils.isBlank(addFileInkRequest.getUserId())) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "添加私人文件时用户id不能为空");
+        }
+
+        //根据openType获取目录
+        String fileDirectory = addFileInkRequest.getOpenType() == 1 ?
+                fileServerPath + PUBLIC_DIRECTORY :
+                fileServerPath + PRIVATE_DIRECTORY + addFileInkRequest.getUserId();
+
+        // 拼接完整地址
+        String filePath = fileDirectory + "/" + addFileInkRequest.getFilePath().substring(1) + "/" + addFileInkRequest.getFileName();
+        File file = new File(filePath);
+        if (file.exists()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "目录下存在同名文件，无法同步至该目录");
+        } else {
+            // 判断源路径是否是文件夹
+            Path target = Paths.get(addFileInkRequest.getInkFilePath());
+            Path link = Paths.get(file.getAbsolutePath());
+
+            if (Files.isDirectory(target)) {
+                // 如果源文件是文件夹，递归处理文件夹中的文件
+                createSymbolicLinksForDirectory(link, target);
+            } else {
+                // 如果目录不存在则创建
+                Path linkParent = link.getParent();
+                if (Files.notExists(linkParent)) {
+                    Files.createDirectories(linkParent);
+                }
+                // 如果源路径是文件，直接创建符号链接
+                Files.createSymbolicLink(link, target);
+            }
+        }
+    }
+
+    // 递归处理文件夹并创建符号链接
+    private void createSymbolicLinksForDirectory(Path link, Path target) throws IOException {
+        if (Files.notExists(link)) {
+            Files.createDirectories(link);  // 创建目标文件夹
+        }
+
+        // 遍历源文件夹中的所有文件和子文件夹
+        try (Stream<Path> paths = Files.walk(target)) {
+            paths.filter(Files::isRegularFile)  // 只处理文件
+                    .forEach(sourceFile -> {
+                        try {
+                            Path relativePath = target.relativize(sourceFile);  // 获取相对路径
+                            Path linkFile = link.resolve(relativePath);    // 目标路径
+
+                            // 确保目标目录存在
+                            Path parentDir = linkFile.getParent();
+                            if (Files.notExists(parentDir)) {
+                                Files.createDirectories(parentDir);  // 创建父目录
+                            }
+
+                            // 创建符号链接
+                            Files.createSymbolicLink(linkFile, sourceFile);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+        }
+    }
+
+    @Override
     public Boolean createDirectory(FileRequestDto fileRequestDto) {
         String fileDirectory = fileRequestDto.getOpenType() == 1 ?
                 fileServerPath + PUBLIC_DIRECTORY :
@@ -308,8 +374,8 @@ public class FileServiceImpl implements FileService {
     private Boolean deleteFile(File deleteFile) {
         boolean isSuccess = true;
 
-        //如果是文件夹，递归删除内部文件
-        if (deleteFile.isDirectory()) {
+        //如果不是符号链接，且是文件夹，递归删除内部文件
+        if (!Files.isSymbolicLink(deleteFile.toPath()) && deleteFile.isDirectory()) {
             for (File subFile : deleteFile.listFiles()) {
                 deleteFile(subFile);
             }
@@ -455,7 +521,7 @@ public class FileServiceImpl implements FileService {
     private void fileAddAfter(File uploadFile) {
         //如果文件是图片，生成缩略图
         if (FileType.IMAGE_FILE.equals(FileTypeUtils.getFileType(uploadFile))) {
-            previewService.addImgFileToQueue(uploadFile);
+            previewService.generatePreviewFile(uploadFile);
         }
     }
 

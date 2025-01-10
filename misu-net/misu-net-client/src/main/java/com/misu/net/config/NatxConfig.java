@@ -2,8 +2,8 @@ package com.misu.net.config;
 
 import com.misu.net.NatxClient;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 
 import java.io.IOException;
@@ -16,7 +16,7 @@ import java.util.Map;
 @Configuration
 public class NatxConfig {
 
-    @Autowired
+    @Resource
     private NatxConfigMap natxConfigMap;
 
     @PostConstruct

@@ -12,7 +12,8 @@ const instance = axios.create({
   // axios中请求配置有baseURL选项，表示请求URL公共部分
   baseURL: import.meta.env.VITE_BASE_API,
   // 超时
-  timeout: 30000
+  // timeout: 30000
+  timeout: 3000000
 })
 
 // 请求拦截器
@@ -77,7 +78,7 @@ instance.interceptors.response.use(
             return Promise.reject('error')
         } else if (code !== 200) {
             ElMessage({ message: msg, type: 'error' })
-            return Promise.reject('error')
+            return Promise.reject({ msg: msg, code: code })
         } else {
             return response.data
         }

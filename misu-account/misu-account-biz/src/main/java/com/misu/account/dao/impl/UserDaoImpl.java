@@ -7,8 +7,7 @@ import com.misu.account.domain.entity.QSysUserRole;
 import com.misu.account.domain.entity.SysUserRole;
 import com.querydsl.core.types.Projections;
 import com.querydsl.jpa.impl.JPAQueryFactory;
-import org.apache.commons.collections4.CollectionUtils;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.annotation.Resource;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -23,13 +22,13 @@ public class UserDaoImpl implements UserDao {
     private final QSysUser userModel = QSysUser.sysUser;
     private final QSysUserRole userRoleModel = QSysUserRole.sysUserRole;
 
-    @Autowired
-    private JPAQueryFactory jpaQueryFactory;
+    @Resource
+    private JPAQueryFactory accountJpaQueryFactory;
 
     @Override
     public LoginUserDto selectUserLoginInfo(String userName) {
         //查询对应的用户数据
-        LoginUserDto loginUserDto = jpaQueryFactory
+        LoginUserDto loginUserDto = accountJpaQueryFactory
                 .select(Projections.bean(
                         LoginUserDto.class,
                         userModel.userId,
@@ -43,7 +42,7 @@ public class UserDaoImpl implements UserDao {
 
         if (loginUserDto != null) {
             //查询用户的角色
-            List<SysUserRole> sysUserRoles = jpaQueryFactory
+            List<SysUserRole> sysUserRoles = accountJpaQueryFactory
                     .selectFrom(userRoleModel)
                     .where(userRoleModel.userId.eq(loginUserDto.getUserId()))
                     .fetch();

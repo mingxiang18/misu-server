@@ -14,21 +14,55 @@
 </template>
 
 <script setup>
-import {ref} from "vue";
+import { onMounted, onBeforeUnmount, ref } from "vue";
+import flvjs from "flv.js";
 
 // 接收外部传入的接口函数
 const props = defineProps({
   videoUrl: {
     type: String,
     required: true,
+  },
+  videoType: {
+    type: String,
+    required: true,
   }
 });
+
 
 // 声明自定义事件 `close`
 const emit = defineEmits(['close']);
 
 // 引用 video 元素
 const videoRef = ref(null);
+
+let flvPlayer = null;
+
+onMounted(() => {
+  if (props.videoType === 'flv') {
+    if (flvjs.isSupported()) {
+      flvPlayer = flvjs.createPlayer({
+        type: "flv",
+        url: props.videoUrl,
+      });
+
+      flvPlayer.attachMediaElement(videoRef.value);
+      flvPlayer.load();
+      flvPlayer.play().catch((error) => {
+        console.error("Error playing FLV stream:", error);
+      });
+    } else {
+      console.error("FLV.js is not supported in this browser.");
+    }
+  }
+});
+
+onBeforeUnmount(() => {
+  if (flvPlayer) {
+    flvPlayer.destroy();
+    flvPlayer = null;
+  }
+});
 
 // 点击遮罩触发关闭事件
 const onOverlayClick = () => {

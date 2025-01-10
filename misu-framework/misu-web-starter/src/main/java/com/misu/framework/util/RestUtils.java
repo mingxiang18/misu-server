@@ -1,12 +1,15 @@
 package com.misu.framework.util;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.TypeReference;
 import com.alibaba.fastjson2.annotation.JSONField;
+import com.misu.common.exception.ServiceException;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.*;
@@ -31,171 +34,126 @@ import java.util.zip.GZIPInputStream;
 /**
  * @author misu
  */
-@Slf4j
 @Component
 public class RestUtils {
 
-    @Autowired
+    @jakarta.annotation.Resource
     private RestClient restClient;
 
+    private static final Logger log = LoggerFactory.getLogger("netRequestLogger");
+
     @SneakyThrows
-    public <T> T get(String url, Class<T> clazz) {
-        return get(url, new HttpHeaders(), clazz);
+    public <T> T get(String url, TypeReference<T> typeReference) {
+        return get(url, new HttpHeaders(), typeReference, null);
     }
 
     @SneakyThrows
-    public <T> T get(String url, HttpHeaders httpHeaders, Class<T> clazz) {
+    public <T> T get(String url, HttpHeaders httpHeaders, TypeReference<T> typeReference) {
+        return get(url, new HttpHeaders(), typeReference, null);
+    }
+
+    @SneakyThrows
+    public <T> T get(String url, TypeReference<T> typeReference, Object requestParam) {
+        return get(url, new HttpHeaders(), typeReference, requestParam);
+    }
+
+    @SneakyThrows
+    public <T> T get(String url, HttpHeaders httpHeaders, TypeReference<T> typeReference, Object requestParam) {
         if (!httpHeaders.containsKey(HttpHeaders.USER_AGENT)) {
             httpHeaders.set("User-Agent", "Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)");
         }
 
+        //如果请求参数实体不为空，将参数封装到url后缀
+        if (requestParam != null) {
+            url = url + packageParamString(requestParam);
+        }
+
         log.info("向外部接口发起GET请求，url：{}", url);
-        String responseStr = restClient.get()
+        return restClient.get()
                 .uri(url)
                 .headers(h -> httpHeaders.forEach(h::addAll))
                 .exchange((request, response) -> {
-                    return packageResponse(response);
+                    return packageResponse(response, typeReference);
                 });
-
-        log.info("外部接口返回报文:{}", responseStr);
-
-        if (clazz == String.class) {
-            return (T) responseStr;
-        }else {
-            T t = JSON.parseObject(responseStr, clazz);
-            return t;
-        }
     }
 
-    public <T> T post(String url, HttpHeaders httpHeaders, Object params, Class<T> clazz) {
+    @SneakyThrows
+    public <T> T postByJson(String url, Object params, TypeReference<T> typeReference) {
+        HttpHeaders httpHeaders = new HttpHeaders();
+        httpHeaders.set("User-Agent", "Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)");
+        httpHeaders.setContentType(MediaType.APPLICATION_JSON);
+
+        return postByJson(url, httpHeaders, params, typeReference);
+    }
+
+    public <T> T postByJson(String url, HttpHeaders httpHeaders, Object params, TypeReference<T> typeReference) {
         String jsonParams = JSON.toJSONString(params);
 
         log.info("向外部接口发起POST请求，url：{}，请求报文：{}", url, jsonParams);
-        String responseStr = restClient.post()
+        return restClient.post()
                 .uri(url)
                 .headers(h -> httpHeaders.forEach(h::addAll))
                 .body(jsonParams)
                 .exchange((request, response) -> {
-                    return packageResponse(response);
+                    return packageResponse(response, typeReference);
                 });
-        log.info("外部接口返回报文:{}", responseStr);
+    }
 
-        T t = JSON.parseObject(responseStr, clazz);
-
-        return t;
+    public <T> T postByForm(String url, Object params, TypeReference<T> typeReference) {
+        return postByForm(url, new HttpHeaders(), params, typeReference);
     }
 
     @SneakyThrows
-    public <T> T post(String url, Object params, Class<T> clazz) {
-        HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.set("User-Agent", "Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)");
-        httpHeaders.setContentType(MediaType.APPLICATION_JSON);
-
-        return post(url, httpHeaders, params, clazz);
-    }
-
-    public <T> T postForForm(String url, Object params, Class<T> clazz) {
-        HttpHeaders httpHeaders = new HttpHeaders();
+    public <T> T postByForm(String url, HttpHeaders httpHeaders, Object params, TypeReference<T> typeReference) {
         //头部类型
-        httpHeaders.set("Content-Type", "multipart/form-data");
+        httpHeaders.set("Content-Type", MediaType.APPLICATION_FORM_URLENCODED_VALUE);
         httpHeaders.set("User-Agent", "Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)");
-        return postForForm(url, httpHeaders, params, clazz);
-    }
 
-    @SneakyThrows
-    public <T> T postForForm(String url, HttpHeaders httpHeaders, Object params, Class<T> clazz) {
         MultiValueMap<String, Object> map = packageParamMultiValueMap(params);
 
         log.info("向外部接口发起form-data类型的post请求，url：{}", url);
-        String resultString = restClient.post()
+        return restClient.post()
                 .uri(url)
                 .headers(h -> httpHeaders.forEach(h::addAll))
                 .body(map)
-                .retrieve()
-                .body(String.class);
-        log.info("外部接口返回报文:{}", resultString);
-
-        T t = JSON.parseObject(resultString, clazz);
-        return t;
-    }
-
-    @SneakyThrows
-    public <T> T put(String url, Object params, Class<T> clazz) {
-        String jsonParams = JSON.toJSONString(params);
-
-        HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setContentType(MediaType.APPLICATION_JSON);
-        httpHeaders.set("User-Agent", "Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)");
-
-        log.info("向外部接口发起PUT请求，url：{}，请求报文：{}", url, jsonParams);
-        String resultString = restClient.put()
-                .uri(url)
-                .headers(h -> httpHeaders.forEach(h::addAll))
-                .body(jsonParams)
-                .retrieve()
-                .body(String.class);
-        log.info("外部接口返回报文:{}", resultString);
-
-        T t = JSON.parseObject(resultString, clazz);
-        return t;
-    }
-
-    @SneakyThrows
-    public <T> T delete(String url, Class<T> clazz) {
-
-        HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setContentType(MediaType.APPLICATION_JSON);
-        httpHeaders.set("User-Agent", "Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)");
-
-        log.info("向外部接口发起DELETE请求，url：{}", url);
-        String resultString = restClient.delete()
-                .uri(url)
-                .headers(h -> httpHeaders.forEach(h::addAll))
-                .retrieve()
-                .body(String.class);
-        log.info("外部接口返回报文:{}", resultString);
-
-        T t = JSON.parseObject(resultString, clazz);
-        return t;
-    }
-
-    /**
-     * 读取网络文件
-     */
-    public InputStream getFileInputStream(String url) {
-        HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.set("User-Agent", "Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)");
-        return getFileInputStream(url, httpHeaders);
-    }
-
-    /**
-     * 读取网络文件
-     */
-    @SneakyThrows
-    public InputStream getFileInputStream(String url, HttpHeaders httpHeaders) {
-        log.info("向外部接口发起GET请求获取文件，url：{}", url);
-        Resource resource = restClient.get()
-                .uri(url)
-                .headers(h -> httpHeaders.forEach(h::addAll))
-                .retrieve()
-                .body(Resource.class);
-        return resource.getInputStream();
+                .exchange((request, response) -> {
+                    return packageResponse(response, typeReference);
+                });
     }
 
     /**
      * 封装网络请求响应体
      */
     @SneakyThrows
-    private String packageResponse(ClientHttpResponse response) {
+    private <T> T packageResponse(ClientHttpResponse response, TypeReference<T> typeReference) {
         if (!response.getStatusCode().is2xxSuccessful()) {
-            throw new RuntimeException("RestClientCallCodeException，code: " + response.getStatusCode().value() + ", message: " + IOUtils.toString(response.getBody(), StandardCharsets.UTF_8));
+            throw new ServiceException(response.getStatusCode().value(),
+                    "RestClientCallCodeException，" +
+                    ", statusText: " + response.getStatusText() +
+                    ", message: " + IOUtils.toString(response.getBody(), StandardCharsets.UTF_8));
         }
-        // 如果请求头是gzip格式，解压gzip响应体
-        if (response.getHeaders().containsKey(HttpHeaders.CONTENT_ENCODING)
-                && "gzip".equalsIgnoreCase(response.getHeaders().getFirst(HttpHeaders.CONTENT_ENCODING))) {
-            return new String(unGZip(response.getBody()), StandardCharsets.UTF_8);
+
+        if (typeReference.getRawType() == InputStream.class) {
+            //如果需要返回响应流，则不处理额外处理日志或格式等，直接返回
+            return (T) response.getBody();
+        }else if (typeReference.getRawType() == ClientHttpResponse.class) {
+            return (T) response;
         }else {
-            return IOUtils.toString(response.getBody(), StandardCharsets.UTF_8);
+            String bodyString = null;
+            // 如果header编码是gzip格式，解压gzip响应体
+            if (response.getHeaders().containsKey(HttpHeaders.CONTENT_ENCODING)
+                    && "gzip".equalsIgnoreCase(response.getHeaders().getFirst(HttpHeaders.CONTENT_ENCODING))) {
+                bodyString = new String(unGZip(response.getBody()), StandardCharsets.UTF_8);
+            }else {
+                bodyString = IOUtils.toString(response.getBody(), StandardCharsets.UTF_8);
+            }
+
+            log.info("外部接口返回报文:{}", bodyString);
+            if (typeReference.getRawType() == String.class) {
+                return (T) bodyString;
+            }else {
+                return JSON.parseObject(bodyString, typeReference);
+            }
         }
     }
 

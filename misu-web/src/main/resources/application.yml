@@ -14,8 +14,8 @@ spring:
   servlet:
     multipart:
       # 最大上传文件大小
-      max-file-size: 300MB
-      max-request-size: 300MB
+      max-file-size: 500MB
+      max-request-size: 500MB
   # 数据源
   datasource:
     account:

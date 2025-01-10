@@ -1,10 +1,11 @@
 package com.misu.framework.util;
 
+import com.alibaba.fastjson2.TypeReference;
 import com.misu.framework.config.file.FilePathConfig;
 import com.misu.framework.fileClient.FileClientApi;
-import com.misu.framework.fileClient.LocalFileClientApiImpl;
+import com.misu.framework.fileClient.impl.LocalFileClientApiImpl;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
@@ -20,13 +21,13 @@ import java.io.*;
 @Component
 public class ResourcesUtils {
 
-    @Autowired
+    @Resource
     private FileClientApi fileClientApi;
 
-    @Autowired
+    @Resource
     private FilePathConfig filePathConfig;
 
-    @Autowired
+    @Resource
     private RestUtils restUtils;
 
     /**
@@ -115,7 +116,7 @@ public class ResourcesUtils {
      * 网络请求资源后添加指定目录下的静态资源
      */
     public void addStaticResourceFromNet(String fileSubPath, String webUrl) {
-        try (InputStream inputStream = restUtils.getFileInputStream(webUrl);){
+        try (InputStream inputStream = restUtils.get(webUrl, new TypeReference<InputStream>() {});){
             addStaticResource(fileSubPath, inputStream);
         }catch (Exception e) {
             throw new RuntimeException(e);

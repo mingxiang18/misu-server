@@ -1,6 +1,7 @@
 package com.misu.common.domain;
 
 import com.misu.common.constant.HttpStatus;
+import org.springframework.data.domain.Page;
 
 import java.util.HashMap;
 
@@ -74,6 +75,15 @@ public class AjaxResult extends HashMap<String, Object> {
      */
     public static AjaxResult success(Object data) {
         return AjaxResult.success("操作成功", data);
+    }
+
+    /**
+     * 返回成功的分页数据
+     *
+     * @return 成功分页消息
+     */
+    public static AjaxResult success(Page<?> data) {
+        return AjaxResult.success("操作成功", PageResult.buildPageResult(data));
     }
 
     /**

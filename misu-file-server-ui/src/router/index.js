@@ -6,6 +6,9 @@ import Login from '@/components/login/Login.vue';
 import UserTest from '@/components/user/UserManagement.vue';
 import PublicFileServer from '@/components/fileServer/PublicFileServer.vue';
 import PrivateFileServer from '@/components/fileServer/PrivateFileServer.vue';
+import VideoRoom from '@/components/fileServer/VideoRoom.vue';
+import TorrentManagement from '@/components/fileServer/TorrentManagement.vue';
+import BotChat from '@/components/bot/BotChat.vue';
 
 const routes = [
     {
@@ -13,9 +16,13 @@ const routes = [
         component: Index,
         children: [
             { path: '', component: HelloWorld, name: 'home' },
-            { path: '/userManagement', component: UserTest, name: 'userTest' },
-            { path: '/fileServer/publicDirectory/:path*', component: PublicFileServer, name: 'PublicFileServer' },
-            { path: '/fileServer/privateDirectory/:path*', component: PrivateFileServer, name: 'PrivateFileServer' },
+            { path: 'userManagement', component: UserTest, name: 'userTest' },
+            { path: 'fileServer/publicDirectory/:path*', component: PublicFileServer, name: 'PublicFileServer' },
+            { path: 'fileServer/privateDirectory/:path*', component: PrivateFileServer, name: 'PrivateFileServer' },
+            { path: 'fileServer/videoRoom/:roomId', component: VideoRoom, name: 'VideoRoomFromId' },
+            { path: 'fileServer/videoRoom', component: VideoRoom, name: 'VideoRoomFromHistory' },
+            { path: 'fileServer/torrentManagement', component: TorrentManagement, name: 'TorrentManagement' },
+            { path: 'bot', component: BotChat, name: 'BotChat' },
         ],
     },
     {   path: '/login', component: Login },

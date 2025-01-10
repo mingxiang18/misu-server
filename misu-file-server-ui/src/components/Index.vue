@@ -4,36 +4,27 @@
         v-if="!isSmallScreen"
         class="el-menu-vertical"
         :collapse="isCollapse">
-      <el-sub-menu index="1">
-        <template #title>
-          <el-icon><message /></el-icon>
-          <span>Navigator One</span>
-        </template>
-        <el-menu-item-group>
-          <template #title>Group 1</template>
-          <el-menu-item index="1-1">Option 1</el-menu-item>
-          <el-menu-item index="1-2">Option 2</el-menu-item>
-        </el-menu-item-group>
-        <el-menu-item-group title="Group 2">
-          <el-menu-item index="1-3">Option 3</el-menu-item>
-        </el-menu-item-group>
-      </el-sub-menu>
-      <el-sub-menu index="2">
+      <el-sub-menu>
         <template #title>
           <el-icon><icon-menu /></el-icon>
           <span>文件服务器</span>
         </template>
-        <el-menu-item index="2-1" @click="navigateTo('/fileServer/publicDirectory')">公共目录</el-menu-item>
-        <el-menu-item index="2-2" @click="navigateTo('/fileServer/privateDirectory')">私人目录</el-menu-item>
+        <el-menu-item v-for="fileServerMenu in fileServerMenuInfoList" @click="navigateTo(fileServerMenu.toUrl)">
+          {{ fileServerMenu.menuName }}
+        </el-menu-item>
       </el-sub-menu>
-      <el-menu-item index="3" @click="navigateTo('/userManagement')">
+      <el-menu-item @click="navigateTo('/bot')">
+        <el-icon><ChatDotRound /></el-icon>
+        <span>机器人</span>
+      </el-menu-item>
+      <el-menu-item @click="navigateTo('/userManagement')">
         <el-icon><setting /></el-icon>
         <span>用户管理</span>
       </el-menu-item>
     </el-menu>
 
     <el-container>
-      <el-header style="text-align: right; font-size: 12px" v-if="!isSmallScreen">
+      <el-header class="index-header" v-if="!isSmallScreen">
         <UserToolBar></UserToolBar>
       </el-header>
 
@@ -43,19 +34,23 @@
 
       <el-footer v-if="isSmallScreen" class="index-footer">
         <div class="index-footer-item">
-          <el-dropdown style="height: 50%;">
-            <div><Folder class="index-footer-icon"/></div>
+          <el-dropdown>
+            <el-icon :size="menuIconSize" :color="menuIconColor"><Folder /></el-icon>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item @click="navigateTo('/fileServer/publicDirectory')">公共目录</el-dropdown-item>
-                <el-dropdown-item @click="navigateTo('/fileServer/privateDirectory')">私人目录</el-dropdown-item>
+                <el-dropdown-item v-for="fileServerMenu in fileServerMenuInfoList" @click="navigateTo(fileServerMenu.toUrl)">
+                  {{ fileServerMenu.menuName }}
+                </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
         </div>
         <div class="index-footer-item">
-          <el-dropdown style="height: 50%;">
-            <div><User class="index-footer-icon"/></div>
+          <el-icon :size="menuIconSize" :color="menuIconColor" @click="navigateTo('/bot')"><ChatDotRound /></el-icon>
+        </div>
+        <div class="index-footer-item">
+          <el-dropdown>
+            <el-icon :size="menuIconSize" :color="menuIconColor"><User /></el-icon>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item>个人信息</el-dropdown-item>
@@ -71,16 +66,42 @@
 
 <script setup>
 import {onMounted, ref} from 'vue'
-import {User, Folder, Document, Menu as IconMenu, Message, Setting} from '@element-plus/icons-vue'
+import {User, Folder, Document, Menu as IconMenu, Message, Setting, ChatDotRound} from '@element-plus/icons-vue'
 import UserToolBar from "@/components/user/UserToolBar.vue";
 import {logOut} from "@/api/auth/auth";
-import { useRouter } from 'vue-router'
+import {getHistoryVideoRoomFromCookie} from "@/api/fileServer/videoRoom";
+import { useRouter } from 'vue-router';
+import { getUserInfo } from '@/api/user/user';
 
 const router = useRouter()
 
-const isCollapse = ref(false)
+const userInfo = getUserInfo();
 
-const isSmallScreen = ref(false)
+const isCollapse = ref(false);
+
+const isSmallScreen = ref(false);
+
+const menuIconColor = ref('#53565a');
+const menuIconSize = ref(30);
+
+const fileServerMenuInfoList = [
+  {
+    "menuName": "公共目录",
+    "toUrl": "/fileServer/publicDirectory"
+  },
+  {
+    "menuName": "私人目录",
+    "toUrl": "/fileServer/privateDirectory"
+  },
+  {
+    "menuName": "磁力下载",
+    "toUrl": "/fileServer/torrentManagement"
+  },
+  {
+    "menuName": "放映室",
+    "toUrl": "/fileServer/videoRoom"
+  }
+]
 
 onMounted(() => {
   isSmallScreen.value = window.innerWidth <= 482;
@@ -118,7 +139,8 @@ const navigateTo = (route) => {
 
 .layout-container-demo .el-header {
   position: relative;
-  background-color: var(--el-color-primary-light-7);
+  background-color: #daddf1;
+  box-shadow: var(--el-box-shadow-light);
   color: var(--el-text-color-primary);
   height: 10%;     /* 占屏幕高度10% */
 }
@@ -126,6 +148,11 @@ const navigateTo = (route) => {
 .layout-container-demo .el-main {
   padding: 0;
   height: 90%;     /* 占屏幕高度90% */
+}
+
+.index-header {
+  text-align: right;
+  font-size: 12px;
 }
 
 .index-footer {
@@ -149,7 +176,8 @@ const navigateTo = (route) => {
 }
 
 .index-footer-icon {
-  height: 100%;
+  height: 30px;
+  width: 30px;
 }
 
 :deep(:focus-visible) {
