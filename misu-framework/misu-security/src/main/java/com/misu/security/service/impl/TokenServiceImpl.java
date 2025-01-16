@@ -100,6 +100,18 @@ public class TokenServiceImpl implements TokenService {
      */
     @Override
     public String createToken(Map<String, Object> claims) {
+        return createToken(claims, expireTtl);
+    }
+
+    /**
+     * 生成jwt
+     * 使用Hs512算法, 私匙使用固定秘钥
+     *
+     * @param claims    设置的信息
+     * @return
+     */
+    @Override
+    public String createToken(Map<String, Object> claims, long expireTtl) {
         //生成 HMAC 密钥，根据提供的字节数组长度选择适当的 HMAC 算法，并返回相应的 SecretKey 对象。
         SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
 

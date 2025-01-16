@@ -30,11 +30,11 @@ import java.util.regex.Pattern;
 @Component
 public class QBitTorrentApi {
 
-    @Value("${qBitTorrent.apiBaseUrl:http://10.8.0.1:30103}")
+    @Value("${file-server.qBitTorrent.apiBaseUrl:http://10.8.0.1:30103}")
     private String apiBaseUrl;
-    @Value("${qBitTorrent.username:admin}")
+    @Value("${file-server.qBitTorrent.username:admin}")
     private String username;
-    @Value("${qBitTorrent.password:}")
+    @Value("${file-server.qBitTorrent.password:}")
     private String password;
 
     /**

@@ -14,6 +14,7 @@
         <module>misu-account</module>
         <module>misu-net</module>
         <module>misu-web</module>
+        <module>misu-bot</module>
     </modules>
 
     <properties>
@@ -46,6 +47,8 @@
         <commons-collections4.version>4.4</commons-collections4.version>
         <commons-lang3.version>3.17.0</commons-lang3.version>
         <thumbnailator.version>0.4.20</thumbnailator.version>
+        <bb-bot-sdk.version>1.0.2</bb-bot-sdk.version>
+        <rome.version>1.15.0</rome.version>
     </properties>
 
     <!-- 依赖声明 -->
@@ -242,10 +245,18 @@
                 <version>${thumbnailator.version}</version>
             </dependency>
 
+            <!-- bb机器人客户端sdk -->
+            <dependency>
+                <groupId>io.github.mingxiang18</groupId>
+                <artifactId>bb-bot-sdk</artifactId>
+                <version>${bb-bot-sdk.version}</version>
+            </dependency>
+
+            <!-- rss解析工具 -->
             <dependency>
                 <groupId>com.rometools</groupId>
                 <artifactId>rome</artifactId>
-                <version>1.15.0</version>
+                <version>${rome.version}</version>
             </dependency>
 
 

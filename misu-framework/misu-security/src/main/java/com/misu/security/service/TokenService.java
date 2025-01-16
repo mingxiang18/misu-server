@@ -40,5 +40,20 @@ public interface TokenService {
      */
     String createToken(Map<String, Object> claims);
 
+    /**
+     * 创建授权令牌
+     *
+     * @param claims 授权信息
+     * @param expireTtl 超时时间
+     * @return 令牌
+     */
+    String createToken(Map<String, Object> claims, long expireTtl);
+
+    /**
+     * 解析授权令牌
+     *
+     * @param token 令牌
+     * @return 解析信息
+     */
     Claims parseToken(String token);
 }

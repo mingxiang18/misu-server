@@ -40,6 +40,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpHeaders;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -59,16 +60,11 @@ import java.util.stream.Collectors;
 @Service
 public class TorrentServiceImpl implements TorrentService {
 
-    private final static String TORRENT_DIRECTORY = "torrent/";
-
     @Resource
     private TorrentDao torrentDao;
 
     @Resource
     private QBitTorrentApi qBitTorrentApi;
-
-    @Resource
-    private FilePathConfig filePathConfig;
 
     @Resource
     private FileClientApi fileClientApi;
@@ -79,8 +75,17 @@ public class TorrentServiceImpl implements TorrentService {
     @Resource
     private RestUtils restUtils;
 
-    @Value("${qBitTorrent.downloadPath}")
-    private String qBitTorrentDownloadPath;
+    @Resource
+    private ThreadPoolTaskExecutor fileExecutor;
+
+    @Value("${file-server.qBitTorrent.localPath}")
+    private String qBitTorrentLocalPath;
+
+    @Value("${file-server.qBitTorrent.remoteEnable}")
+    private Boolean remoteEnable;
+
+    @Value("${file-server.qBitTorrent.remoteDownloadPath}")
+    private String qBitTorrentRemoteDownloadPath;
 
     /**
      * 定时状态更新锁
@@ -136,6 +141,13 @@ public class TorrentServiceImpl implements TorrentService {
             }catch (Exception e) {
                 log.error("查询qBitTorrent获取torrent状态列表失败", e);
             }
+        }
+
+        //如果存在已下载完成但是未同步到用户文件的数据，异步执行同步
+        if (userTorrentDetailDtoList.stream().anyMatch(userTorrentDetailDto ->
+                userTorrentDetailDto.getServerFileState() == 30 && userTorrentDetailDto.getUserFileState() == 0)) {
+            //异步执行一次文件同步
+            fileExecutor.execute(this::moveCompletedTorrentToUserDirectory);
         }
 
         return userTorrentDetailDtoList;
@@ -273,6 +285,9 @@ public class TorrentServiceImpl implements TorrentService {
         }else {
             throw new ServiceException(HttpStatus.NOT_MODIFIED, "当前目录已存在该磁力链接的下载记录，请勿重复添加");
         }
+
+        //异步执行一次文件同步
+        fileExecutor.execute(this::moveCompletedTorrentToUserDirectory);
     }
 
     /**
@@ -502,12 +517,16 @@ public class TorrentServiceImpl implements TorrentService {
                                     //进度为30-已完成
                                     torrentInfo.setState(30);
                                     if (StringUtils.isBlank(torrentInfoDto.getTorrentName())) {
-                                        //设置名称和大小
+                                        //设置名称
                                         torrentInfo.setTorrentName(torrentInfoResponse.getName());
                                     }
                                     if (torrentInfoDto.getTotalSize() == null) {
-                                        //设置名称和大小
+                                        //设置大小
                                         torrentInfo.setTotalSize(torrentInfoResponse.getTotalSize());
+                                    }
+                                    if (StringUtils.isBlank(torrentInfoDto.getDownloadPath())) {
+                                        //设置路径
+                                        torrentInfo.setDownloadPath(torrentInfoResponse.getSavePath());
                                     }
                                     //执行更新
                                     torrentDao.updateTorrentInfo(torrentInfo);
@@ -546,65 +565,56 @@ public class TorrentServiceImpl implements TorrentService {
                 List<UserTorrentDetailDto> userTorrentDetailDtoList = torrentDao.selectUserTorrent(userTorrentQueryRequestDto);
 
                 //查询qBitTorrent内该部分torrent的下载状态
-                String torrentHashes = userTorrentDetailDtoList.stream()
-                        .map(UserTorrentDetailDto::getTorrentHash)
-                        .collect(Collectors.joining("|"));
-                TorrentInfoRequest torrentInfoRequest = new TorrentInfoRequest();
-                torrentInfoRequest.setHashes(torrentHashes);
-                List<TorrentInfoResponse> torrentList = qBitTorrentApi.getTorrentList(torrentInfoRequest);
-                if (CollectionUtils.isNotEmpty(torrentList)) {
+                if (CollectionUtils.isNotEmpty(userTorrentDetailDtoList)) {
                     for (UserTorrentDetailDto userTorrentDetailDto : userTorrentDetailDtoList) {
-                        for (TorrentInfoResponse torrentInfoResponse : torrentList) {
-                            if (torrentInfoResponse.getHash().equals(userTorrentDetailDto.getTorrentHash())) {
-                                //获取路径，要去掉路径开头的/号
-                                String remotePath = torrentInfoResponse.getContentPath().substring(1);
-                                String localPath = filePathConfig.getFilePath() + TORRENT_DIRECTORY + remotePath;
-                                File torrentFile = new File(localPath);
-                                //判断是否已经从qBitTorrent同步到本地，如果没有则下载
-                                boolean downloadSuccessFlag = judgeOrDownloadTorrentFile(userTorrentDetailDto, remotePath, localPath);
-                                //如果没下载成功则跳出循环
-                                if (!downloadSuccessFlag) {
-                                    break;
-                                }
-
-                                try {
-                                    //调用文件系统添加映射
-                                    AddFileInkRequest addFileInkRequest = new AddFileInkRequest();
-                                    if ("public".equals(userTorrentDetailDto.getUserId())) {
-                                        addFileInkRequest.setOpenType(1);
-                                    }else {
-                                        addFileInkRequest.setOpenType(0);
-                                    }
-                                    addFileInkRequest.setFilePath(userTorrentDetailDto.getUserFilePath());
-                                    addFileInkRequest.setFileName(torrentInfoResponse.getName());
-                                    addFileInkRequest.setUserId(userTorrentDetailDto.getUserId());
-                                    addFileInkRequest.setInkFilePath(torrentFile.getAbsolutePath());
-                                    fileService.addFileInk(addFileInkRequest);
-
-                                    //更新用户文件同步状态为已同步
-                                    TorrentUserRelation torrentUserRelation = new TorrentUserRelation();
-                                    torrentUserRelation.setId(userTorrentDetailDto.getUserTorrentId());
-                                    torrentUserRelation.setState(1);
-                                    torrentDao.updateTorrentUserRelation(torrentUserRelation);
-                                }catch (Exception e) {
-                                    String failedReason = null;
-                                    if (e instanceof ServiceException) {
-                                        failedReason = e.getMessage();
-                                    }else {
-                                        log.error("torrent下载的文件映射到用户失败，id：" + userTorrentDetailDto.getUserTorrentId(), e);
-                                        failedReason = "未知原因";
-                                    }
-
-                                    //更新用户文件同步状态为失败
-                                    TorrentUserRelation torrentUserRelation = new TorrentUserRelation();
-                                    torrentUserRelation.setId(userTorrentDetailDto.getUserTorrentId());
-                                    torrentUserRelation.setState(2);
-                                    torrentUserRelation.setFailedReason(failedReason);
-                                    torrentDao.updateTorrentUserRelation(torrentUserRelation);
-                                }
-
-                                break;
+                        //获取路径，要去掉路径开头的/号
+                        String fileSubPath = userTorrentDetailDto.getServerDownloadPath().substring(1) + "/" + userTorrentDetailDto.getTorrentName();
+                        String localPath = qBitTorrentLocalPath + fileSubPath;
+                        File torrentFile = new File(localPath);
+                        //如果qBitTorrent服务端开启了远程
+                        if (remoteEnable) {
+                            //判断是否已经从qBitTorrent同步到本地，如果没有则下载
+                            boolean downloadSuccessFlag = judgeOrDownloadTorrentFile(userTorrentDetailDto, fileSubPath, localPath);
+                            //如果没下载成功则跳过
+                            if (!downloadSuccessFlag) {
+                                continue;
                             }
+                        }
+
+                        try {
+                            //调用文件系统添加映射
+                            AddFileInkRequest addFileInkRequest = new AddFileInkRequest();
+                            if ("public".equals(userTorrentDetailDto.getUserId())) {
+                                addFileInkRequest.setOpenType(1);
+                            }else {
+                                addFileInkRequest.setOpenType(0);
+                            }
+                            addFileInkRequest.setFilePath(userTorrentDetailDto.getUserFilePath());
+                            addFileInkRequest.setFileName(userTorrentDetailDto.getTorrentName());
+                            addFileInkRequest.setUserId(userTorrentDetailDto.getUserId());
+                            addFileInkRequest.setInkFilePath(torrentFile.getAbsolutePath());
+                            fileService.addFileInk(addFileInkRequest);
+
+                            //更新用户文件同步状态为已同步
+                            TorrentUserRelation torrentUserRelation = new TorrentUserRelation();
+                            torrentUserRelation.setId(userTorrentDetailDto.getUserTorrentId());
+                            torrentUserRelation.setState(1);
+                            torrentDao.updateTorrentUserRelation(torrentUserRelation);
+                        }catch (Exception e) {
+                            String failedReason = null;
+                            if (e instanceof ServiceException) {
+                                failedReason = e.getMessage();
+                            }else {
+                                log.error("torrent下载的文件映射到用户失败，id：" + userTorrentDetailDto.getUserTorrentId(), e);
+                                failedReason = "未知原因";
+                            }
+
+                            //更新用户文件同步状态为失败
+                            TorrentUserRelation torrentUserRelation = new TorrentUserRelation();
+                            torrentUserRelation.setId(userTorrentDetailDto.getUserTorrentId());
+                            torrentUserRelation.setState(2);
+                            torrentUserRelation.setFailedReason(failedReason);
+                            torrentDao.updateTorrentUserRelation(torrentUserRelation);
                         }
                     }
 
@@ -650,10 +660,14 @@ public class TorrentServiceImpl implements TorrentService {
     }
 
     private boolean judgeOrDownloadTorrentFile(UserTorrentDetailDto userTorrentDetailDto, String remotePath, String localPath) {
+        if (!remoteEnable) {
+            return true;
+        }
+
         File torrentFile = new File(localPath);
         //如果本地文件不存在，从qBitTorrent服务器下载
         if (!torrentFile.exists() || torrentFile.isDirectory()) {
-            String remoteFullPath = qBitTorrentDownloadPath + remotePath;
+            String remoteFullPath = qBitTorrentRemoteDownloadPath + remotePath;
             try {
                 if (fileClientApi.isDirectory(remoteFullPath)) {
                     List<FileInfo> fileInfoList = fileClientApi.downloadDirectory(remoteFullPath);

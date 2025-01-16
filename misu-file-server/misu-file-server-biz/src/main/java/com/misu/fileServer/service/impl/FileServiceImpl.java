@@ -55,12 +55,6 @@ public class FileServiceImpl implements FileService {
     private String fileServerPath;
 
     @Resource
-    private FilePathConfig filePathConfig;
-
-    @Resource
-    private FileClientApi fileClientApi;
-
-    @Resource
     private TokenService tokenService;
     
     @Resource
@@ -398,7 +392,7 @@ public class FileServiceImpl implements FileService {
     private void writeFileToResponse(HttpServletResponse response, HttpServletRequest request, File file) {
         if (file.exists()) {
             if (file.isDirectory()) {
-                File tmpFile = new File(filePathConfig.getFilePath() + "tmp/" + System.currentTimeMillis() + ".zip");
+                File tmpFile = new File(fileServerPath + "tmp/" + System.currentTimeMillis() + ".zip");
                 try (FileOutputStream tmpFileOutputStream = new FileOutputStream(tmpFile)){
                     ZipUtils.toZip(file, tmpFileOutputStream);
                     //将下载文件指向压缩后的临时文件

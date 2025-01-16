@@ -46,6 +46,10 @@ public class UserTorrentDetailDto {
     @ApiModelProperty("服务器文件状态：状态：0-未下载，10-已暂停，20-下载中，30-已完成，99-失败")
     private Integer serverFileState;
 
+    @JsonIgnore
+    @ApiModelProperty("服务器文件下载路径")
+    private String serverDownloadPath;
+
     @ApiModelProperty("qBitTorrent服务器文件状态")
     private String torrentState;
 

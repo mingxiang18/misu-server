@@ -22,6 +22,9 @@ public class TorrentInfoDto {
     @ApiModelProperty("磁力文件名称")
     private String torrentName;
 
+    @ApiModelProperty("下载路径")
+    private String downloadPath;
+
     @ApiModelProperty("文件大小")
     private Long totalSize;
 

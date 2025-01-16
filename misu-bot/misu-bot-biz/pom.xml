@@ -5,11 +5,11 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>com.misu</groupId>
-        <artifactId>misu-server</artifactId>
+        <artifactId>misu-bot</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>misu-web</artifactId>
+    <artifactId>misu-bot-biz</artifactId>
 
     <!-- 打包方式   -->
     <packaging>jar</packaging>
@@ -73,25 +73,13 @@
 
         <dependency>
             <groupId>com.misu</groupId>
-            <artifactId>misu-net-client</artifactId>
+            <artifactId>misu-common</artifactId>
             <version>1.0-SNAPSHOT</version>
         </dependency>
 
         <dependency>
             <groupId>com.misu</groupId>
-            <artifactId>misu-account-biz</artifactId>
-            <version>1.0-SNAPSHOT</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.misu</groupId>
-            <artifactId>misu-file-server-biz</artifactId>
-            <version>1.0-SNAPSHOT</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.misu</groupId>
-            <artifactId>misu-bot-biz</artifactId>
+            <artifactId>misu-security</artifactId>
             <version>1.0-SNAPSHOT</version>
         </dependency>
 
@@ -101,46 +89,19 @@
             <scope>test</scope>
         </dependency>
 
-    </dependencies>
+        <!-- QueryDSL APT  -->
+        <dependency>
+            <groupId>com.querydsl</groupId>
+            <artifactId>querydsl-apt</artifactId>
+            <classifier>jakarta</classifier>
+            <scope>provided</scope>
+        </dependency>
 
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>com.mysema.maven</groupId>
-                <artifactId>apt-maven-plugin</artifactId>
-                <version>1.1.3</version>
-                <executions>
-                    <execution>
-<!--                        <goals>-->
-<!--                            <goal>process</goal>-->
-<!--                        </goals>-->
-                        <configuration>
-                            <outputDirectory>target/generated-sources/java</outputDirectory>
-                            <processor>com.querydsl.apt.jpa.JPAAnnotationProcessor</processor>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <version>3.2.5</version>
-                <configuration>
-                    <excludes>
-                        <exclude>
-                            <groupId>org.springframework.boot</groupId>
-                            <artifactId>spring-boot-configuration-processor</artifactId>
-                        </exclude>
-                    </excludes>
-                </configuration>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>repackage</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
+        <!-- bb机器人客户端sdk -->
+        <dependency>
+            <groupId>io.github.mingxiang18</groupId>
+            <artifactId>bb-bot-sdk</artifactId>
+        </dependency>
+
+    </dependencies>
 </project>

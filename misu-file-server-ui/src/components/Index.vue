@@ -104,11 +104,11 @@ const fileServerMenuInfoList = [
 ]
 
 onMounted(() => {
-  isSmallScreen.value = window.innerWidth <= 482;
+  isSmallScreen.value = window.innerWidth <= 650;
 
   // 监听窗口尺寸变化
   window.addEventListener('resize', () => {
-    isSmallScreen.value = window.innerWidth <= 482;
+    isSmallScreen.value = window.innerWidth <= 650;
   });
 });
 

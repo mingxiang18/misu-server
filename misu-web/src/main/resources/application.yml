@@ -49,7 +49,7 @@ misu:
 natx:
   natxConfigMap:
     natx-client1:
-      enable: true
+      enable: false
       serverAddress: localhost
       serverPort: 30100
       serverSecret: secret

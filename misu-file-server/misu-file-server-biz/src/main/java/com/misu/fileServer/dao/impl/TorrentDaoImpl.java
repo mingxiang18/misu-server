@@ -88,6 +88,7 @@ public class TorrentDaoImpl implements TorrentDao {
                     torrentInfoModel.torrentHash,
                     torrentInfoModel.torrentName,
                     torrentInfoModel.torrentUrl,
+                    torrentInfoModel.downloadPath,
                     torrentInfoModel.totalSize,
                     torrentInfoModel.state,
                     torrentInfoModel.remark
@@ -169,6 +170,7 @@ public class TorrentDaoImpl implements TorrentDao {
                         torrentInfoModel.torrentName,
                         torrentInfoModel.totalSize,
                         torrentInfoModel.state.as("serverFileState"),
+                        torrentInfoModel.downloadPath.as("serverDownloadPath"),
                         torrentInfoModel.remark
                 ))
                 .from(torrentUserRelationModel)
