@@ -211,32 +211,70 @@ public class FileServiceImpl implements FileService {
                 fileServerPath + PRIVATE_DIRECTORY + LoginMessageUtil.getLoginUser().get().getUserId() + "/";
 
         File file = new File(directory + fileUploadRequest.getFilePath() + "/" + fileUploadRequest.getFileName());
+
         //如果不允许覆盖且文件已存在，返回提示
         if (!fileUploadRequest.getCoverFlag() && file.exists()) {
             return new FileUploadResponse(2, "文件已存在");
         }
+
         //如果目录不存在，新建目录
         if (!file.getParentFile().exists()) {
             file.getParentFile().mkdirs();
         }
-        //上传文件
-        try (FileOutputStream fileOutputStream = new FileOutputStream(file);
-             InputStream inputStream = fileUploadRequest.getFile().getInputStream();) {
-            byte[] b = new byte[8192];
-            int length;
-            while ((length = inputStream.read(b)) > 0) {
-                fileOutputStream.write(b, 0, length);
-            }
 
-            //上传完成后执行后置操作
-            fileAddAfter(file);
+        String fileMD5 = DigestUtils.md5Hex(file.getAbsolutePath());
+        //上传文件
+        try {
+            // 保存分片文件
+            File chunkFile = new File(fileServerPath + "tmp/" + fileMD5 + ".part" + fileUploadRequest.getChunkIndex());
+            fileUploadRequest.getFile().transferTo(chunkFile);
+
+            // 如果所有分片都上传完成，则合并文件
+            if (fileUploadRequest.getChunkIndex() == fileUploadRequest.getTotalChunks() - 1) {
+                mergeChunks(file, fileUploadRequest.getTotalChunks());
+                //上传完成后执行后置操作
+                fileAddAfter(file);
+            }
         }catch (Exception e) {
             log.error("上传文件异常", e);
-            file.delete();
+            //遍历删除分片
+            for (int i = 0; i < fileUploadRequest.getTotalChunks(); i++) {
+                File chunkFile = new File(fileServerPath + "tmp/" + fileMD5 + ".part" + fileUploadRequest.getChunkIndex());
+                if (chunkFile.exists()) {
+                    chunkFile.delete();
+                }
+            }
+            //删除上传目录的文件
+            if (file.exists()) {
+                file.delete();
+            }
             throw new ServiceException(HttpStatus.ERROR, "上传文件异常");
         }
 
         return new FileUploadResponse(1, "上传成功");
+    }
+
+    // 合并所有分片
+    private void mergeChunks(File file, int totalChunks) throws IOException {
+        //从绝对路径计算MD5
+        String fileMD5 = DigestUtils.md5Hex(file.getAbsolutePath());
+
+        try (FileOutputStream fileOutputStream = new FileOutputStream(file);) {
+            for (int i = 0; i < totalChunks; i++) {
+                // 分片文件
+                File chunkFile = new File(fileServerPath + "tmp/" + fileMD5 + ".part" + i);
+                FileInputStream chunkInputStream = new FileInputStream(chunkFile);
+
+                byte[] buffer = new byte[4096];
+                int bytesRead;
+                while ((bytesRead = chunkInputStream.read(buffer)) != -1) {
+                    fileOutputStream.write(buffer, 0, bytesRead);
+                }
+
+                chunkInputStream.close();
+                chunkFile.delete();  // 删除分片文件
+            }
+        }
     }
 
     @Override

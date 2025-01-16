@@ -102,7 +102,7 @@
                      v-model:current-page="torrentQueryParam.pageNum"
                      v-model:page-size="torrentQueryParam.pageSize"
                      :total="torrentList.total"
-                     pager-count="5"
+                     :pager-count=5
                      @change="getTorrentList()"/>
     </div>
   </div>
@@ -181,7 +181,7 @@ const getTorrentListLoading = ref(false);
 const torrentQueryParam = ref({
   completeState: null,
   pageNum: 1,
-  pageSize: 5
+  pageSize: 10
 })
 const torrentList = ref({
   "total": 0,
@@ -335,7 +335,7 @@ const formatProgressPercentage = (torrentInfo) => {
   if (torrentInfo.serverFileState === 30 || torrentInfo.userFileState === 1) {
     return 100;
   }else {
-    return (torrentInfo.serverFileProgress * 100).toFixed(1);
+    return parseFloat((torrentInfo.serverFileProgress * 100).toFixed(1));
   }
 }
 

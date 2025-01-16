@@ -505,7 +505,7 @@ const queryFileList = () => {
   fileListLoading.value = true;
   getFileList(filePath.value, props.openType).then((response) => {
     fileListLoading.value = false;
-    fileList.value = response.data;
+    fileList.value = response.data.sort((a, b) => a.fileName.localeCompare(b.fileName));
     //封装图片列表
     imageFullSrcList.value = fileList.value.filter((file) => file.fileType === "image")
         .map((file) => downloadBaseUrl + file.downloadLink);

@@ -19,7 +19,7 @@
 <!--            <span v-if="content.type === 'at'" class="at-message">@{{ content.data }}</span>-->
 
             <!-- 处理普通文本消息 -->
-            <span v-if="content.type === 'text'" class="text-message">{{ content.data }}</span>
+            <span v-if="content.type === 'text'" class="text-message" v-html="formatText(content.data)"></span>
 
             <!-- 处理图片（Base64编码）消息 -->
             <img v-if="content.type === 'localImage'" :src="'data:image/png;base64,' + content.data" alt="Image" class="image-message" />
@@ -38,12 +38,13 @@
 
     <!-- 输入框 -->
     <div class="input-container">
-      <input
+      <el-input
           v-model="newMessage"
-          type="text"
+          :autosize="{ minRows: 1 }"
+          type="textarea"
           placeholder="请输入消息"
           @keyup.enter="sendSocketMessage"
-      />
+      ></el-input>
     </div>
   </div>
 </template>
@@ -71,6 +72,10 @@ const scrollToBottom = () => {
 
 //发送socket消息
 const sendSocketMessage = () => {
+  //如果输入框没有消息则不发送
+  if (!newMessage.value || !newMessage.value.trim()) {
+    return
+  }
   // 添加到聊天列表
   const sendMessage = {
     content: [{
@@ -89,6 +94,16 @@ const sendSocketMessage = () => {
       content: newMessage.value,
     };
     socket.send(JSON.stringify(message));
+  }else {
+    closeSocket();
+    initSocket();
+    const message = {
+      content: [{data: "冥想bb已离线，正在重连中", type: "text"}],
+      isSelf: false
+    };
+    messages.value.push(message);
+
+    setTimeout(() => scrollToBottom(), 100);
   }
 
   //清空消息内容
@@ -140,6 +155,11 @@ const handleIncomingMessage = (event) => {
   messages.value.push(message);
 
   setTimeout(() => scrollToBottom(), 100);
+}
+
+// 将消息中的换行符 \n 替换为 <br>
+const formatText = (text) => {
+  return text.replace(/\n/g, '<br>');
 }
 
 //关闭socket连接
@@ -231,6 +251,5 @@ input {
   padding: 10px;
   border-radius: 5px;
   border: 1px solid #ddd;
-  font-size: 14px;
 }
 </style>

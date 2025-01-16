@@ -30,6 +30,18 @@ public class FileUploadRequest {
     @NotNull(message = "文件不能为空")
     private MultipartFile file;
 
+    @ApiModelProperty("文件大小")
+    @NotNull(message = "文件大小不能为空")
+    private long fileSize;
+
+    @ApiModelProperty("文件总块数")
+    @NotNull(message = "文件总块数不能为空")
+    private int totalChunks;
+
+    @ApiModelProperty("文件块索引")
+    @NotNull(message = "文件块索引不能为空")
+    private int chunkIndex;
+
     @ApiModelProperty("是否覆盖同名文件")
     @NotNull(message = "是否覆盖同名文件标识不能为空")
     private Boolean coverFlag = false;

@@ -82,7 +82,7 @@
                      v-model:current-page="rssQueryParam.pageNum"
                      v-model:page-size="rssQueryParam.pageSize"
                      :total="rssInfoList.total"
-                     pager-count="5"
+                     :pager-count=5
                      @change="getRssInfoList()"/>
     </div>
   </div>
@@ -196,7 +196,7 @@ const getRssInfoListLoading = ref(false);
 const rssQueryParam = ref({
   state: null,
   pageNum: 1,
-  pageSize: 5
+  pageSize: 10
 })
 const rssInfoList = ref({
   "total": 0,

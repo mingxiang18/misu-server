@@ -5,9 +5,8 @@
         <div class="upload-content">
           <div>{{ fileUploadState.name }}</div>
           <el-progress style="padding-top: 5px"
-                       :percentage="getPercentageFromUploadState(fileUploadState.uploadState)"
-                       :status="getProgressStatusFromUploadState(fileUploadState.uploadState)"
-                       :indeterminate="fileUploadState.uploadState === 1">
+                       :percentage="fileUploadState.progress"
+                       :status="getProgressStatusFromUploadState(fileUploadState.uploadState)">
             {{ getUploadStateShowFromUploadState(fileUploadState) }}
           </el-progress>
           <div style="padding-top: 10px;" v-if="fileUploadState.uploadState === 4">
@@ -44,6 +43,8 @@ const props = defineProps({
 
 const fileUploadStateList = ref([])
 
+const chunkSize = 1024 * 1024; // 上传分片大小为1MB
+
 //将文件form封装为文件上传状态列表
 const formatFileStateList = () => {
   props.uploadFileList.forEach((uploadFile) => {
@@ -51,8 +52,9 @@ const formatFileStateList = () => {
     const fileState = {
       name: uploadFile.get("fileName"),
       uploadState: 0,  //0-等待上传，1-正在上传，2-上传成功，3-上传失败，4-存在同名文件
+      progress: 0, // 上传进度
       failMessage: "",
-      form: uploadFile
+      form: uploadFile,
     };
 
     // 将文件状态添加到文件上传状态列表
@@ -103,23 +105,57 @@ const coverUpload = (fileUploadState) => {
 const uploadFileAndUpdateState = async (fileUploadState, form) => {
   //将文件设置为正在上传状态
   fileUploadState.uploadState = 1;
-  //上传文件
-  await uploadFile(form).then((response) => {
-    if (response.data.uploadState === 1) {
-      fileUploadState.uploadState = 2;
-      // 每上传成功，触发上传成功事件
-      emit('uploadSuccess');
-    } else if (response.data.uploadState === 2) {
-      fileUploadState.uploadState = 4;
-      fileUploadState.failMessage = '文件已存在';
-    }else {
-      fileUploadState.uploadState = 3;
-      fileUploadState.failMessage = response.data.uploadStateMessage;
+
+  // 获取文件和分片大小
+  const file = form.get("file");
+  const totalChunks = Math.ceil(file.size / chunkSize);
+
+  // 上传每个分片
+  for (let i = 0; i < totalChunks; i++) {
+    //计算分片的开始和结束位置，切割出分片
+    const start = i * chunkSize;
+    const end = Math.min(start + chunkSize, file.size);
+    const chunk = file.slice(start, end);
+
+    const chunkFormData = new FormData();
+    chunkFormData.append('file', chunk);
+    chunkFormData.append('fileName', form.get("fileName"));
+    chunkFormData.append('chunkIndex', i); // 当前分片索引
+    chunkFormData.append('totalChunks', totalChunks); // 总分片数
+    chunkFormData.append('fileSize', file.size);
+    chunkFormData.append('filePath', form.get("filePath"));
+    chunkFormData.append('coverFlag', form.get("coverFlag"));
+    chunkFormData.append('openType', form.get("openType"));
+
+    try {
+      // 上传当前分片
+      const response = await uploadFile(chunkFormData);
+
+      // 如果当前分片上传成功，更新状态
+      if (response.data.uploadState === 1) {
+        // 更新进度
+        fileUploadState.progress = Math.round(((i + 1) / totalChunks) * 100);
+        //如果当前已经是该文件最后一个分片，更新状态为上传完成
+        if (i === totalChunks - 1) {
+          fileUploadState.uploadState = 2;
+          // 每上传成功，触发上传成功事件
+          emit('uploadSuccess');
+        }
+      } else if (response.data.uploadState === 2) {
+        fileUploadState.uploadState = 4; // 文件已存在
+        fileUploadState.failMessage = '文件已存在';
+        break; // 终止上传
+      } else {
+        fileUploadState.uploadState = 3; // 上传失败
+        fileUploadState.failMessage = response.data.uploadStateMessage;
+        break; // 终止上传
+      }
+    } catch (error) {
+      fileUploadState.uploadState = 3; // 上传失败
+      fileUploadState.failMessage = '服务器异常';
+      break; // 终止上传
     }
-  }).catch((response) => {
-    fileUploadState.uploadState = 3;
-    fileUploadState.failMessage = '服务器异常';
-  });
+  }
 
   let uploadAllComplete = true;
   //判断是否存在未完成上传的文件
@@ -143,17 +179,6 @@ const getUploadStateShowFromUploadState = (fileUploadState) => {
     return '上传成功';
   }else {
     return '上传失败，' + fileUploadState.failMessage;
-  }
-}
-
-//从文件上传状态获取进度条信息
-const getPercentageFromUploadState = (uploadState) => {
-  if (uploadState === 0) {
-    return 0;
-  }else if (uploadState === 1) {
-    return 50;
-  }else {
-    return 100;
   }
 }
 
