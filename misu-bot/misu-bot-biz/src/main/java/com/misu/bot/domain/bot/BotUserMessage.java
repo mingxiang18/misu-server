@@ -1,6 +1,10 @@
 package com.misu.bot.domain.bot;
 
+import com.bb.bot.entity.bb.BbMessageContent;
 import lombok.Data;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 机器人用户消息实体
@@ -16,5 +20,5 @@ public class BotUserMessage {
     /**
      * 消息内容
      */
-    private String content;
+    private List<BbMessageContent> messageContentList = new ArrayList<>();
 }

@@ -1,6 +1,7 @@
 package com.misu.bot.connection;
 
 import com.alibaba.fastjson2.JSON;
+import com.bb.bot.constant.BbSendMessageType;
 import com.bb.bot.constant.MessageType;
 import com.bb.bot.entity.bb.BbMessageContent;
 import com.bb.bot.entity.bb.BbSocketClientMessage;
@@ -20,8 +21,7 @@ import org.java_websocket.server.WebSocketServer;
 import java.net.InetSocketAddress;
 import java.time.LocalDateTime;
 import java.util.Collections;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * 提供用户连接bot的socket服务端
@@ -130,7 +130,11 @@ public class BotWebSocketServer extends WebSocketServer {
         bbSocketClientMessage.setUserId(botTokenMessage.getUserId().toString());
         bbSocketClientMessage.setSender(new MessageUser(botTokenMessage.getUserId().toString(), botTokenMessage.getUserName()));
         bbSocketClientMessage.setMessageId(botUserMessage.getMessageId());
-        bbSocketClientMessage.setMessage(botUserMessage.getContent());
+        bbSocketClientMessage.setMessage(botUserMessage.getMessageContentList().stream()
+                .filter(bbMessageContent -> BbSendMessageType.TEXT.equals(bbMessageContent.getType()))
+                .map(bbMessageContent -> bbMessageContent.getData().toString())
+                .collect(Collectors.joining(" ")));
+        bbSocketClientMessage.setMessageContentList(botUserMessage.getMessageContentList());
         bbSocketClientMessage.setSendTime(LocalDateTime.now());
 
         //向bb机器人发送消息

@@ -38,6 +38,32 @@
 
     <!-- 输入框 -->
     <div class="input-container">
+      <div class="input-action">
+        <!-- 图片上传按钮 -->
+        <el-upload action="#"
+                   v-model:file-list="imageList"
+                   ref="imageUpload"
+                   list-type="picture-card"
+                   :auto-upload="false"
+                   :on-exceed="handleImageExceed"
+                   :limit="1">
+          <el-icon size="25px"><Picture /></el-icon>
+
+          <template #file="{ file }">
+            <div>
+              <img class="el-upload-list__item-thumbnail" :src="file.url" alt="" />
+              <span class="el-upload-list__item-actions">
+          <span class="el-upload-list__item-delete"
+              @click="handleImageRemove(file)"
+          >
+            <el-icon><Delete /></el-icon>
+          </span>
+        </span>
+            </div>
+          </template>
+        </el-upload>
+      </div>
+
       <el-input
           v-model="newMessage"
           :autosize="{ minRows: 1 }"
@@ -51,9 +77,12 @@
 
 <script setup>
 import {onMounted, onUnmounted, ref} from "vue";
-import {Service, User} from "@element-plus/icons-vue";
+import {Service, User, Delete, Picture} from "@element-plus/icons-vue";
 import {getBotAccessToken, getServerWebSocketUrl} from "@/api/bot/bot";
 import {ElMessage} from "element-plus";
+
+const imageUpload = ref([])
+const imageList = ref([])
 
 const messages = ref([
   { content: [{data: "这里是冥想bb哟，有什么可以帮你的吗？", type: "text"}], isSelf: false },
@@ -66,6 +95,27 @@ const newMessage = ref("");
 // WebSocket 实例
 let socket = null;
 
+// 执行图片移除
+const handleImageRemove = (file) => {
+  imageUpload.value.clearFiles();
+}
+
+// 执行图片选择
+const handleImageExceed = (files) => {
+  imageUpload.value.clearFiles();
+  const file = files[0];
+
+  if (file.type !== 'image/jpeg' || file.type !== 'image/png') {
+    ElMessage.error('图片格式不正确! 支持格式: JPEG, PNG')
+    return;
+  } else if (file.size / 1024 / 1024 > 20) {
+    ElMessage.error('图片大小不能超过20MB!')
+    return;
+  }
+
+  imageUpload.value.handleStart(file)
+}
+
 const scrollToBottom = () => {
   messagesContainer.value.scrollTo({ top: messagesContainer.value.scrollHeight, behavior: 'smooth' });
 }
@@ -76,25 +126,55 @@ const sendSocketMessage = () => {
   if (!newMessage.value || !newMessage.value.trim()) {
     return
   }
+
+  const message = {
+    messageId: crypto.randomUUID(),
+    messageContentList: [],
+  };
+  //添加文字消息
+  message.messageContentList.push(
+      {
+        type: "text",
+        data: newMessage.value,
+      },
+  )
+  //如果图片消息不为空，添加图片消息
+  if (imageList.value.length > 0) {
+    // 创建 FileReader 实例
+    const reader = new FileReader();
+
+    // 当文件读取完成后，转换成 Base64 编码
+    reader.onloadend = () => {
+      // 将读取到的 Base64 数据存储到 message.messageContentList 中
+      message.messageContentList.push({
+        type: 'localImage',
+        data: reader.result.split(',')[1], // 去掉 "data:image/png;base64," 前缀，只保留 Base64 字符串
+      });
+      sendMessage(message);
+    };
+
+    // 读取文件并转换为 Base64
+    reader.readAsDataURL(imageList.value[0].raw);
+  }else {
+    sendMessage(message);
+  }
+}
+
+//发送消息
+const sendMessage = (message) => {
   // 添加到聊天列表
   const sendMessage = {
-    content: [{
-      data: newMessage.value,
-      type: "text"
-    }],
+    content: message.messageContentList,
     isSelf: true
   };
   messages.value.push(sendMessage);
   setTimeout(() => scrollToBottom(), 100);
 
   if (!!socket) {
+    console.log("发送消息", message)
     // 向socket发送消息
-    const message = {
-      messageId: crypto.randomUUID(),
-      content: newMessage.value,
-    };
     socket.send(JSON.stringify(message));
-  }else {
+  } else {
     closeSocket();
     initSocket();
     const message = {
@@ -108,6 +188,7 @@ const sendSocketMessage = () => {
 
   //清空消息内容
   newMessage.value = null;
+  imageList.value = [];
 }
 
 //初始化socket连接
@@ -243,7 +324,17 @@ onUnmounted(() => {
 
 .input-container {
   display: flex;
-  padding: 10px;
+  padding-top: 10px;
+  padding-left: 10px;
+  padding-right: 10px;
+  flex-wrap: wrap; /* 自动换行 */
+}
+
+.input-action {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  padding-top: 5px
 }
 
 input {
@@ -251,5 +342,13 @@ input {
   padding: 10px;
   border-radius: 5px;
   border: 1px solid #ddd;
+}
+
+:deep(.el-upload) {
+  width: 30px;
+  height: 30px;
+}
+:deep(.el-upload-list--picture-card) {
+  --el-upload-list-picture-card-size: 40px;
 }
 </style>
