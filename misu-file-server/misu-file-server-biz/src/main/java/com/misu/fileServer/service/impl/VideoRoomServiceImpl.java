@@ -44,6 +44,8 @@ public class VideoRoomServiceImpl implements VideoRoomService {
             VideoRoomDto videoRoomDto = new VideoRoomDto();
             videoRoomDto.setRoomId(videoRoom.getRoomId());
             videoRoomDto.setRoomName(videoRoom.getRoomName());
+            videoRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
+            videoRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
             videoRoomDto.setVideoPath(videoRoom.getVideoPath());
             videoRoomDto.setCreatorId(videoRoom.getCreatorId());
             videoRoomDto.setCreateTime(videoRoom.getCreateTime());
@@ -72,6 +74,9 @@ public class VideoRoomServiceImpl implements VideoRoomService {
 
                 videoStateInRoomDto = new VideoStateInRoomDto();
                 videoStateInRoomDto.setRoomId(videoRoom.getRoomId());
+                videoStateInRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
+                videoStateInRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
+                videoStateInRoomDto.setVideoPath(videoRoom.getVideoPath());
                 videoStateInRoomDto.setState(videoRoom.getState());
                 videoStateInRoomDto.setSyncTime(videoRoom.getSyncTime());
                 videoStateInRoomDto.setVideoTime(videoRoom.getVideoTime());
@@ -115,23 +120,49 @@ public class VideoRoomServiceImpl implements VideoRoomService {
 
         LoginUser loginUser = loginUserOptional.get();
 
-        VideoRoom videoRoom = new VideoRoom();
-        videoRoom.setRoomId(UUID.randomUUID().toString());
-        videoRoom.setRoomName(createVideoRoomRequestDto.getRoomName());
-        videoRoom.setVideoPath(createVideoRoomRequestDto.getVideoPath());
-        videoRoom.setCreatorId(String.valueOf(loginUser.getUserId()));
-        videoRoom.setCreateTime(LocalDateTime.now());
-        videoRoom.setState("pause");
-        videoRoom.setVideoTime(LocalTime.of(0, 0, 0));
-        videoRoom.setSyncTime(LocalDateTime.now());
-        //1天后过期
-        videoRoom.setExpireTime(LocalDateTime.now().plusDays(1));
-        videoRoomDao.save(videoRoom);
+        Optional<VideoRoom> videoRoomOptional = videoRoomDao.selectOneByCreatorId(loginUser.getUserId().toString());
+        if (videoRoomOptional.isEmpty()) {
+            //如果原来的放映室已过期则重新创建
+            VideoRoom videoRoom = new VideoRoom();
+            videoRoom.setRoomId(UUID.randomUUID().toString());
+            videoRoom.setRoomName(createVideoRoomRequestDto.getRoomName());
+            videoRoom.setDirectoryOpenFlag(createVideoRoomRequestDto.getDirectoryOpenFlag());
+            videoRoom.setDirectoryPath(createVideoRoomRequestDto.getDirectoryPath());
+            videoRoom.setVideoPath(createVideoRoomRequestDto.getVideoPath());
+            videoRoom.setCreatorId(String.valueOf(loginUser.getUserId()));
+            videoRoom.setCreateTime(LocalDateTime.now());
+            videoRoom.setState("pause");
+            videoRoom.setVideoTime(LocalTime.of(0, 0, 0));
+            videoRoom.setSyncTime(LocalDateTime.now());
+            //12小时后过期
+            videoRoom.setExpireTime(LocalDateTime.now().plusHours(12));
+            videoRoomDao.save(videoRoom);
 
-        //返回id
-        VideoRoomDto videoRoomDto = new VideoRoomDto();
-        videoRoomDto.setRoomId(videoRoom.getRoomId());
-        return videoRoomDto;
+            //返回id
+            VideoRoomDto videoRoomDto = new VideoRoomDto();
+            videoRoomDto.setRoomId(videoRoom.getRoomId());
+            return videoRoomDto;
+        }else {
+            //如果原来的放映室仍然存在则更新
+            VideoRoom videoRoom = videoRoomOptional.get();
+            videoRoom.setRoomName(createVideoRoomRequestDto.getRoomName());
+            videoRoom.setDirectoryOpenFlag(createVideoRoomRequestDto.getDirectoryOpenFlag());
+            videoRoom.setDirectoryPath(createVideoRoomRequestDto.getDirectoryPath());
+            videoRoom.setVideoPath(createVideoRoomRequestDto.getVideoPath());
+            videoRoom.setState("pause");
+            videoRoom.setVideoTime(LocalTime.of(0, 0, 0));
+            videoRoom.setSyncTime(LocalDateTime.now());
+            //12小时后过期
+            videoRoom.setExpireTime(LocalDateTime.now().plusHours(12));
+            videoRoomDao.updateById(videoRoom);
+
+            //返回id
+            VideoRoomDto videoRoomDto = new VideoRoomDto();
+            videoRoomDto.setRoomId(videoRoom.getRoomId());
+            return videoRoomDto;
+        }
+
+
     }
 
     @Override
@@ -158,12 +189,15 @@ public class VideoRoomServiceImpl implements VideoRoomService {
         videoRoom.setState(updateVideoStateRequestDto.getState());
         videoRoom.setVideoTime(updateVideoStateRequestDto.getVideoTime());
         videoRoom.setSyncTime(LocalDateTime.now());
-        videoRoomDao.updateNotNullById(videoRoom);
+        videoRoomDao.updateById(videoRoom);
 
         //更新缓存
         String cacheKey = VIDEO_STATE_KEY + updateVideoStateRequestDto.getRoomId();
         VideoStateInRoomDto videoStateInRoomDto = new VideoStateInRoomDto();
         videoStateInRoomDto.setRoomId(videoRoom.getRoomId());
+        videoStateInRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
+        videoStateInRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
+        videoStateInRoomDto.setVideoPath(videoRoom.getVideoPath());
         videoStateInRoomDto.setState(videoRoom.getState());
         videoStateInRoomDto.setSyncTime(videoRoom.getSyncTime());
         videoStateInRoomDto.setVideoTime(videoRoom.getVideoTime());
@@ -201,7 +235,7 @@ public class VideoRoomServiceImpl implements VideoRoomService {
 
         //更新房间过期时间为已过期
         videoRoom.setExpireTime(LocalDateTime.now().minusMinutes(1));
-        videoRoomDao.updateNotNullById(videoRoom);
+        videoRoomDao.updateById(videoRoom);
 
         //删除缓存
         String roomUserKey = VIDEO_ROOM_USER_KEY + videoRoomRequestDto.getRoomId();

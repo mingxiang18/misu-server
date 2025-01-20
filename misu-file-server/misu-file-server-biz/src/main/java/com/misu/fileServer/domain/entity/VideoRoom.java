@@ -30,6 +30,13 @@ public class VideoRoom {
     @Column(name = "room_name", length = 30)
     private String roomName;
 
+    @Column(name = "directory_open_flag")
+    private Integer directoryOpenFlag;
+
+    @Size(max = 1000)
+    @Column(name = "directory_path", nullable = false, length = 1000)
+    private String directoryPath;
+
     @Size(max = 1000)
     @NotNull
     @Column(name = "video_path", nullable = false, length = 1000)

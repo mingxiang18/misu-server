@@ -355,6 +355,8 @@ const onMenuItemClick = (option) => {
     const createVideoRoomRequest = {
       roomName: '',
       videoPath: downloadBaseUrl + menuChooseFile.value.downloadLink,
+      directoryPath: menuChooseFile.value.filePath,
+      directoryOpenFlag: props.openType
     }
     createVideoRoom(createVideoRoomRequest).then((response) => {
       ElMessage.success('创建放映室成功');

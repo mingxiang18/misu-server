@@ -27,5 +27,5 @@ public interface VideoRoomDao {
     /**
      * 根据id更新
      */
-    long updateNotNullById(VideoRoom entity);
+    long updateById(VideoRoom entity);
 }

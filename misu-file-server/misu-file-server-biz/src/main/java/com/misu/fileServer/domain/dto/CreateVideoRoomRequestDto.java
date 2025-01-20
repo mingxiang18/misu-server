@@ -16,4 +16,10 @@ public class CreateVideoRoomRequestDto {
 
     @ApiModelProperty("视频路径")
     private String videoPath;
+
+    @ApiModelProperty("目录开放标识，0-私人目录，1-公共目录")
+    private Integer directoryOpenFlag;
+
+    @ApiModelProperty("目录路径")
+    private String directoryPath;
 }

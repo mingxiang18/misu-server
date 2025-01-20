@@ -28,8 +28,8 @@ public class TokenServiceImpl implements TokenService {
     @Value("${token.secret:vDW2/YL5VGg3wAub8ohhz2l+OUjtYa1k4twm4nNNzAY=}")
     private String secret;
 
-    // 令牌有效期（毫秒，默认60分钟）
-    @Value("${token.expireTtl:3600000}")
+    // 令牌有效期（毫秒，默认24小时）
+    @Value("${token.expireTtl:86400000}")
     private long expireTtl;
 
     /**

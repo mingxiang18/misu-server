@@ -22,16 +22,20 @@
     </div>
     <div class="video-room-action">
       <div class="video-room-left">
-        <el-button @click="viewerVisible = !viewerVisible"
+        <el-button @click="viewerVisible = !viewerVisible" style="width: 80px"
             type="info"
             text>
           浏览人数：{{ roomViewerList.length }}
+        </el-button>
+        <el-button @click="openVideoListVisible()" style="width: 65px" type="info" text>
+          播放列表
         </el-button>
       </div>
       <div class="video-room-right">
         <el-button
             v-if="videoRoom.creatorFlag === false"
             @click="quitVideoRoom"
+            style="width: 65px"
             type="info"
             text>
           退出放映室
@@ -39,6 +43,7 @@
         <el-button
             v-if="videoRoom.creatorFlag === true"
             @click="closeVideoRoom"
+            style="width: 65px"
             type="info"
             text>
           结束放映
@@ -46,6 +51,7 @@
 
         <el-button @click="getRoomShareUrl"
            type="info"
+           style="width: 65px"
            :icon="Share"
            text>
           分享
@@ -65,6 +71,28 @@
         <el-table-column prop="userName" label="用户名" />
       </el-table>
     </el-dialog>
+
+    <el-dialog
+        v-model="videoListVisible"
+        style="width: 80%;"
+        title="视频播放列表">
+      <el-table :data="videoList" v-loading="videoListLoading" height="70svh">
+        <el-table-column prop="fileName" label="视频名称">
+          <template #default="scope">
+            <div class="table-text">
+              <span style="word-break: break-all;">{{ scope.row.fileName }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="60" fixed="right">
+          <template #default="scope">
+            <div class="table-option">
+              <div><el-button link type="primary" @click="playVideo(scope.row)">播放</el-button></div>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -80,10 +108,14 @@ import {
   closeVideoRoom as closeVideoRoomApi,
   setVideoRoomToCookie, createVideoRoom, getHistoryVideoRoomFromCookie
 } from '@/api/fileServer/videoRoom';
+import { getFileList as getFileListApi} from '@/api/fileServer/fileServer';
 import { getUserInfo } from '@/api/user/user';
 import { Share } from "@element-plus/icons-vue";
-import {ElMessage, ElMessageBox} from "element-plus";
+import { ElMessage, ElMessageBox} from "element-plus";
 import router from "@/router";
+
+// 下载文件基本url
+const downloadBaseUrl = import.meta.env.VITE_RESOURCE_API;
 
 // 基本url
 const baseUrl = import.meta.env.VITE_BASE_API
@@ -93,6 +125,8 @@ const videoRef = ref(null);
 const videoRoom = ref({
   roomId: '',
   roomName: '',
+  directoryPath: '',
+  directoryOpenFlag: null,
   videoPath: '',
   playTime: '',
   creatorId: '',
@@ -109,9 +143,14 @@ const videoCanPlay = ref(false);
 const noticeList = ref(['通知']);
 const commentsInput = ref('');
 
+//观看人员界面
+const viewerVisible = ref(false);
 const roomViewerList = ref([]);
 
-const viewerVisible = ref(false);
+//视频列表界面
+const videoListVisible = ref(false);
+const videoList = ref([]);
+const videoListLoading = ref(false);
 
 let viewerTimer = null;
 let creatorTimer = null;
@@ -167,10 +206,17 @@ const handleError = () => {
   })
 };
 
+// 在播放列表点击播放视频
+const playVideo = (file) => {
+  createNewVideoRoom(downloadBaseUrl + file.downloadLink, videoRoom.value.directoryOpenFlag, videoRoom.value.directoryPath)
+}
+
 // 创建新的视频放映室
-const createNewVideoRoom = (videoPath) => {
+const createNewVideoRoom = (videoPath, directoryOpenFlag = null, directoryPath = null ) => {
   const createVideoRoomRequest = {
     roomName: '',
+    directoryPath: directoryPath,
+    directoryOpenFlag: directoryOpenFlag,
     videoPath: videoPath,
   }
   createVideoRoom(createVideoRoomRequest).then((response) => {
@@ -183,6 +229,24 @@ const createNewVideoRoom = (videoPath) => {
   });
 }
 
+//获取视频播放列表
+const openVideoListVisible = () => {
+  //显示列表弹窗
+  videoList.value = [];
+  videoListVisible.value = true;
+  //如果目录不为空，查询用户目录
+  if (!!videoRoom.value.directoryPath) {
+    getFileListApi(videoRoom.value.directoryPath, videoRoom.value.directoryOpenFlag).then((response) => {
+      videoListLoading.value = false;
+      videoList.value = response.data
+          .sort((a, b) => a.fileName.localeCompare(b.fileName))
+          .filter((file) => file.fileType === "video");
+    }).catch(() => {
+      videoListLoading.value = false;
+    });
+  }
+}
+
 // 获取放映室视频状态信息
 const getVideoStateMessage = () => {
   getVideoState(roomId).then((response) => {
@@ -192,6 +256,13 @@ const getVideoStateMessage = () => {
     if (videoRoom.value.creatorFlag === false && videoCanPlay.value === true) {
       videoRoom.value.state = response.data.state;
       videoRoom.value.videoTime = response.data.playTime;
+      videoRoom.value.directoryPath = response.data.directoryPath;
+      videoRoom.value.directoryOpenFlag = response.data.directoryOpenFlag;
+
+      if (videoRoom.value.videoPath !== response.data.videoPath) {
+        ElMessage({message: '房主切换了视频', type: 'info'})
+        videoRoom.value.videoPath = response.data.videoPath;
+      }
 
       //将进度条状态从'HH:mm:ss'转为播放组件的进度，如果进度条相差大于10秒，更新video组件的进度条
       const videoTime = videoRoom.value.videoTime.split(':');
@@ -351,7 +422,7 @@ const beforeUnmountHandler = () => {
 
 // 组件卸载时
 const handleBeforeUnload = (event) => {
-  event.preventDefault();
+  // event.preventDefault();
 
   //调用退出放映室接口
   const quitVideoRoomRequest = {

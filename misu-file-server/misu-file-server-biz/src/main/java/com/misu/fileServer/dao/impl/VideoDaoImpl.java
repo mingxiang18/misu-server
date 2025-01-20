@@ -60,7 +60,7 @@ public class VideoDaoImpl implements VideoRoomDao {
 
     @Override
     @Transactional(transactionManager = "fileServerTransactionManager")
-    public long updateNotNullById(VideoRoom entity) {
+    public long updateById(VideoRoom entity) {
         JPAUpdateClause updateClause = fileServerJpaQueryFactory
                 .update(videoRoomModel);
         if (entity.getRoomName() != null) {
@@ -81,6 +81,12 @@ public class VideoDaoImpl implements VideoRoomDao {
         if (entity.getSyncTime() != null) {
             updateClause.set(videoRoomModel.syncTime, entity.getSyncTime());
         }
+        if (entity.getExpireTime() != null) {
+            updateClause.set(videoRoomModel.expireTime, entity.getExpireTime());
+        }
+        //目录路径固定每次都更新，空值可覆盖
+        updateClause.set(videoRoomModel.directoryOpenFlag, entity.getDirectoryOpenFlag());
+        updateClause.set(videoRoomModel.directoryPath, entity.getDirectoryPath());
 
         return updateClause
                 .where(videoRoomModel.id.eq(entity.getId()))
