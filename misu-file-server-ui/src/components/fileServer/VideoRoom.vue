@@ -204,6 +204,7 @@ const handleError = () => {
 
 // 在播放列表点击播放视频
 const playVideo = (file) => {
+  videoListLoading.value = true;
   createNewVideoRoom(import.meta.env.VITE_RESOURCE_API + file.downloadLink, file.fileName, videoRoom.value.directoryOpenFlag, videoRoom.value.directoryPath)
 }
 
@@ -230,6 +231,7 @@ const openVideoListVisible = () => {
   //显示列表弹窗
   videoList.value = [];
   videoListVisible.value = true;
+  videoListLoading.value = true;
   //如果目录不为空，查询用户目录
   if (!!videoRoom.value.directoryPath) {
     getFileListApi(videoRoom.value.directoryPath, videoRoom.value.directoryOpenFlag).then((response) => {
