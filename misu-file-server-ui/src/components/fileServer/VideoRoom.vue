@@ -76,7 +76,7 @@
         v-model="videoListVisible"
         style="width: 80%;"
         title="视频播放列表">
-      <el-table :data="videoList" v-loading="videoListLoading" height="70svh">
+      <el-table :data="videoList" v-loading="videoListLoading" max-height="70svh">
         <el-table-column prop="fileName" label="视频名称">
           <template #default="scope">
             <div class="table-text">
