@@ -114,12 +114,6 @@ import { Share } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox} from "element-plus";
 import router from "@/router";
 
-// 下载文件基本url
-const downloadBaseUrl = import.meta.env.VITE_RESOURCE_API;
-
-// 基本url
-const baseUrl = import.meta.env.VITE_BASE_API
-
 // 引用 video 元素
 const videoRef = ref(null);
 const videoRoom = ref({
@@ -208,7 +202,7 @@ const handleError = () => {
 
 // 在播放列表点击播放视频
 const playVideo = (file) => {
-  createNewVideoRoom(downloadBaseUrl + file.downloadLink, videoRoom.value.directoryOpenFlag, videoRoom.value.directoryPath)
+  createNewVideoRoom(import.meta.env.VITE_RESOURCE_API + file.downloadLink, videoRoom.value.directoryOpenFlag, videoRoom.value.directoryPath)
 }
 
 // 创建新的视频放映室
@@ -363,7 +357,7 @@ const closeVideoRoom = () => {
 
 const getRoomShareUrl = () => {
   getVideoRoomShareUrl(videoRoom.value.roomId).then((response) => {
-    let shareLink = baseUrl + response.data;
+    let shareLink = import.meta.env.VITE_BASE_URL + response.data;
 
     ElMessageBox.alert(
         '分享链接为：<a style="word-break: break-all;">' + shareLink + '</a>',
