@@ -353,7 +353,7 @@ const onMenuItemClick = (option) => {
     shareFile(menuChooseFile.value);
   }else if (option === 'createVideoRoom') {
     const createVideoRoomRequest = {
-      roomName: '',
+      roomName: menuChooseFile.value.fileName,
       videoPath: downloadBaseUrl + menuChooseFile.value.downloadLink,
       directoryPath: menuChooseFile.value.filePath,
       directoryOpenFlag: props.openType

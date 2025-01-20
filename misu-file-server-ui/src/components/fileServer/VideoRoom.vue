@@ -84,10 +84,11 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="60" fixed="right">
+        <el-table-column label="操作" width="80" fixed="right">
           <template #default="scope">
             <div class="table-option">
-              <div><el-button link type="primary" @click="playVideo(scope.row)">播放</el-button></div>
+              <div v-if="scope.row.fileName !== videoRoom.roomName"><el-button link type="primary" @click="playVideo(scope.row)">播放</el-button></div>
+              <div v-if="scope.row.fileName === videoRoom.roomName"><el-text type="info">当前播放</el-text></div>
             </div>
           </template>
         </el-table-column>
@@ -168,6 +169,7 @@ const getVideoRoomMessage = () => {
     setVideoRoomToCookie(videoRoom.value.roomId)
     videoRoom.value.state = 'pause';
     videoRoom.value.videoTime = '00:00:00';
+    noticeList.value = [videoRoom.value.roomName]
   }).catch((error) => {
     if (!!error && !!error.code && error.code === 404) {
       videoRoomNotFoundHandle();
@@ -202,13 +204,13 @@ const handleError = () => {
 
 // 在播放列表点击播放视频
 const playVideo = (file) => {
-  createNewVideoRoom(import.meta.env.VITE_RESOURCE_API + file.downloadLink, videoRoom.value.directoryOpenFlag, videoRoom.value.directoryPath)
+  createNewVideoRoom(import.meta.env.VITE_RESOURCE_API + file.downloadLink, file.fileName, videoRoom.value.directoryOpenFlag, videoRoom.value.directoryPath)
 }
 
 // 创建新的视频放映室
-const createNewVideoRoom = (videoPath, directoryOpenFlag = null, directoryPath = null ) => {
+const createNewVideoRoom = (videoPath, videoName = '', directoryOpenFlag = null, directoryPath = null ) => {
   const createVideoRoomRequest = {
-    roomName: '',
+    roomName: videoName,
     directoryPath: directoryPath,
     directoryOpenFlag: directoryOpenFlag,
     videoPath: videoPath,
@@ -249,9 +251,11 @@ const getVideoStateMessage = () => {
     //如果不是房主，更新视频进度
     if (videoRoom.value.creatorFlag === false && videoCanPlay.value === true) {
       videoRoom.value.state = response.data.state;
+      videoRoom.value.roomName = response.data.roomName;
       videoRoom.value.videoTime = response.data.playTime;
       videoRoom.value.directoryPath = response.data.directoryPath;
       videoRoom.value.directoryOpenFlag = response.data.directoryOpenFlag;
+      noticeList.value = [videoRoom.value.roomName];
 
       if (videoRoom.value.videoPath !== response.data.videoPath) {
         ElMessage({message: '房主切换了视频', type: 'info'})
@@ -492,6 +496,7 @@ const quitVideoRoom = () => {
 .notice-span {
   color: gray;
   padding-left: 10px;
+  word-break: break-all;
 }
 
 /** el-input disabled时的背景和边框*/

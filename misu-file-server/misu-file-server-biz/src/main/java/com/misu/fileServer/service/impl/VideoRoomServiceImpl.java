@@ -74,6 +74,7 @@ public class VideoRoomServiceImpl implements VideoRoomService {
 
                 videoStateInRoomDto = new VideoStateInRoomDto();
                 videoStateInRoomDto.setRoomId(videoRoom.getRoomId());
+                videoStateInRoomDto.setRoomName(videoRoom.getRoomName());
                 videoStateInRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
                 videoStateInRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
                 videoStateInRoomDto.setVideoPath(videoRoom.getVideoPath());
@@ -195,6 +196,7 @@ public class VideoRoomServiceImpl implements VideoRoomService {
         String cacheKey = VIDEO_STATE_KEY + updateVideoStateRequestDto.getRoomId();
         VideoStateInRoomDto videoStateInRoomDto = new VideoStateInRoomDto();
         videoStateInRoomDto.setRoomId(videoRoom.getRoomId());
+        videoStateInRoomDto.setRoomName(videoRoom.getRoomName());
         videoStateInRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
         videoStateInRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
         videoStateInRoomDto.setVideoPath(videoRoom.getVideoPath());

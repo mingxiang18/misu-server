@@ -22,6 +22,9 @@ public class VideoStateInRoomDto {
     @JsonSerialize(using = ToStringSerializer.class)
     private String roomId;
 
+    @ApiModelProperty("放映室名称")
+    private String roomName;
+
     @ApiModelProperty("目录开放标识，0-私人目录，1-公共目录")
     private Integer directoryOpenFlag;
 

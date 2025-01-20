@@ -26,8 +26,8 @@ public class VideoRoom {
     @Column(name = "room_id", nullable = false, length = 64)
     private String roomId;
 
-    @Size(max = 30)
-    @Column(name = "room_name", length = 30)
+    @Size(max = 500)
+    @Column(name = "room_name", length = 500)
     private String roomName;
 
     @Column(name = "directory_open_flag")
