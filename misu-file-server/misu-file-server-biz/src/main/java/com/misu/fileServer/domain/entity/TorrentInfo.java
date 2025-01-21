@@ -25,16 +25,14 @@ public class TorrentInfo {
     @Column(name = "torrent_hash", nullable = false, length = 64)
     private String torrentHash;
 
-    @Size(max = 2000)
     @NotNull
-    @Column(name = "torrent_url", nullable = false, length = 2000)
+    @Column(name = "torrent_url", nullable = false)
     private String torrentUrl;
 
     @Size(max = 200)
     @Column(name = "torrent_name", nullable = false, length = 200)
     private String torrentName;
 
-    @Size(max = 1000)
     @Column(name = "download_path", nullable = false, length = 1000)
     private String downloadPath;
 
@@ -46,7 +44,6 @@ public class TorrentInfo {
     @Column(name = "state", nullable = false)
     private Integer state;
 
-    @Size(max = 100)
     @Column(name = "remark", length = 100)
     private String remark;
 

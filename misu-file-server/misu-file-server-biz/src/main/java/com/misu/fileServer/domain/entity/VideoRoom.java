@@ -33,11 +33,9 @@ public class VideoRoom {
     @Column(name = "directory_open_flag")
     private Integer directoryOpenFlag;
 
-    @Size(max = 1000)
     @Column(name = "directory_path", nullable = false, length = 1000)
     private String directoryPath;
 
-    @Size(max = 1000)
     @NotNull
     @Column(name = "video_path", nullable = false, length = 1000)
     private String videoPath;
@@ -51,7 +49,6 @@ public class VideoRoom {
     @Column(name = "create_time")
     private LocalDateTime createTime;
 
-    @Size(max = 500)
     @Column(name = "remark", length = 500)
     private String remark;
 

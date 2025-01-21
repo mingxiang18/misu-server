@@ -26,7 +26,6 @@ public class TorrentUserRelation {
     @Column(name = "user_id", nullable = false, length = 64)
     private String userId;
 
-    @Size(max = 1000)
     @NotNull
     @ColumnDefault("''")
     @Column(name = "user_file_path", nullable = false, length = 1000)
@@ -47,7 +46,6 @@ public class TorrentUserRelation {
     @Column(name = "create_time", nullable = false)
     private LocalDateTime createTime;
 
-    @Size(max = 200)
     @Column(name = "failed_reason", length = 200)
     private String failedReason;
 
