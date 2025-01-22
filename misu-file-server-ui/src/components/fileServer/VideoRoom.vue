@@ -7,18 +7,17 @@
         </el-carousel-item>
       </el-carousel>
     </div>
-    <div class="video-player">
+    <div class="video-player-container">
       <video :src="videoRoom.videoPath"
+             class="video-player"
              ref="videoRef"
              controls
              @play="updateVideoProgress"
              @pause="updateVideoProgress"
              @seeked="updateVideoProgress"
              preload="auto"
-             width="100%"
              webkit-playsinline='true'
-             playsinline='true'
-             height="auto"/>
+             playsinline='true'/>
     </div>
     <div class="video-room-action">
       <div class="video-room-left">
@@ -250,30 +249,33 @@ const getVideoStateMessage = () => {
   getVideoState(roomId).then((response) => {
     roomViewerList.value = response.data.videoRoomUserList;
 
-    videoRoom.value.state = response.data.state;
-    videoRoom.value.roomName = response.data.roomName;
-    videoRoom.value.videoTime = response.data.playTime;
-    videoRoom.value.directoryPath = response.data.directoryPath;
-    videoRoom.value.directoryOpenFlag = response.data.directoryOpenFlag;
-    noticeList.value = [videoRoom.value.roomName];
+    //如果不是房主，更新视频进度
+    if (videoRoom.value.creatorFlag === false && videoCanPlay.value === true) {
+      videoRoom.value.state = response.data.state;
+      videoRoom.value.roomName = response.data.roomName;
+      videoRoom.value.videoTime = response.data.playTime;
+      videoRoom.value.directoryPath = response.data.directoryPath;
+      videoRoom.value.directoryOpenFlag = response.data.directoryOpenFlag;
+      noticeList.value = [videoRoom.value.roomName];
 
-    if (videoRoom.value.videoPath !== response.data.videoPath) {
-      ElMessage({message: '房主切换了视频', type: 'info'})
-      videoRoom.value.videoPath = response.data.videoPath;
-    }
+      if (videoRoom.value.videoPath !== response.data.videoPath) {
+        ElMessage({message: '房主切换了视频', type: 'info'})
+        videoRoom.value.videoPath = response.data.videoPath;
+      }
 
-    //将进度条状态从'HH:mm:ss'转为播放组件的进度，如果进度条相差大于10秒，更新video组件的进度条
-    const videoTime = videoRoom.value.videoTime.split(':');
-    const videoTimeSecond = parseInt(videoTime[0]) * 3600 + parseInt(videoTime[1]) * 60 + parseInt(videoTime[2]);
-    if (Math.abs(videoTimeSecond - videoRef.value.currentTime) > 10) {
-      ElMessage({message: '同步时间' + response.data.playTime, type: 'info'})
-      videoRef.value.currentTime = videoTimeSecond;
-    }
+      //将进度条状态从'HH:mm:ss'转为播放组件的进度，如果进度条相差大于10秒，更新video组件的进度条
+      const videoTime = videoRoom.value.videoTime.split(':');
+      const videoTimeSecond = parseInt(videoTime[0]) * 3600 + parseInt(videoTime[1]) * 60 + parseInt(videoTime[2]);
+      if (Math.abs(videoTimeSecond - videoRef.value.currentTime) > 10) {
+        ElMessage({message: '同步时间' + response.data.playTime, type: 'info'})
+        videoRef.value.currentTime = videoTimeSecond;
+      }
 
-    if (videoRoom.value.state === 'play') {
-      videoRef.value.play();
-    } else if (videoRoom.value.state === 'pause') {
-      videoRef.value.pause();
+      if (videoRoom.value.state === 'play') {
+        videoRef.value.play();
+      } else if (videoRoom.value.state === 'pause') {
+        videoRef.value.pause();
+      }
     }
   }).catch((error) => {
     if (!!error && !!error.code && error.code === 404) {
@@ -469,8 +471,18 @@ const quitVideoRoom = () => {
   padding-top: 10px;
 }
 
-.video-player {
+.video-player-container {
+  display: flex;
+  justify-content: center; /* 水平居中 */
+  align-items: center; /* 垂直居中 */
   width: 90%;
+  max-height: 65svh;
+  background-color: #000000;
+}
+
+.video-player {
+  max-width: 100%;
+  max-height: 100%
 }
 
 .video-room-action {
