@@ -64,11 +64,6 @@
                      @switch="switchImageViewer"
                      @close="closeImageViewer"/>
 
-    <VideoViewer v-if="videoVisible"
-        :video-url="videoUrl"
-        video-type="file"
-        @close="videoVisible = false"/>
-
     <!-- 拖拽区域 -->
     <div class="fullscreen-overlay"
          v-if="pageDragging || dropAreaDragging"
@@ -129,7 +124,6 @@
       <ul ref="rightMenuUl">
         <li @click="onMenuItemClick('download')">下载</li>
         <li @click="onMenuItemClick('move')">移动/重命名</li>
-        <li v-if="!!menuChooseFile && menuChooseFile.fileType === 'video'" @click="onMenuItemClick('createVideoRoom')">创建放映室</li>
         <li @click="onMenuItemClick('share')">分享</li>
         <li @click="onMenuItemClick('delete')">删除</li>
       </ul>
@@ -179,10 +173,6 @@ const imageSrcList = ref([]);
 // 与上图列表对应，是图片实际地址，加载到指定图片时，将对应位置链接赋值到上面列表对应位置
 const imageFullSrcList = ref([]);
 const imageViewVisible = ref(false);
-
-//视频组件相关参数
-const videoVisible = ref(false);
-const videoUrl = ref('');
 
 // 是否存在文件拖拽
 const pageDragging = ref(false);
@@ -351,18 +341,6 @@ const onMenuItemClick = (option) => {
     deleteFile(menuChooseFile.value);
   }else if (option === 'share') {
     shareFile(menuChooseFile.value);
-  }else if (option === 'createVideoRoom') {
-    const createVideoRoomRequest = {
-      roomName: menuChooseFile.value.fileName,
-      videoPath: downloadBaseUrl + menuChooseFile.value.downloadLink,
-      directoryPath: menuChooseFile.value.filePath,
-      directoryOpenFlag: props.openType
-    }
-    createVideoRoom(createVideoRoomRequest).then((response) => {
-      ElMessage.success('创建放映室成功');
-      //跳转到/fileServer/videoRoom/:roomId
-      router.push(`/fileServer/videoRoom/${response.data.roomId}`);
-    });
   }
   // 点击后隐藏菜单
   menuVisible.value = false;
@@ -475,21 +453,40 @@ const changeDirectory = (subFilePath, index = -1) => {
 };
 
 const openFile = (file) => {
+  //获取扩展名
+  const dotIndex = file.fileName.lastIndexOf('.');
+  let extName = null;
+  if (dotIndex !== -1) {
+    extName = file.fileName.substring(dotIndex + 1);  // 从最后一个点后返回扩展名
+  }
+
   if (file.fileType === 'directory') {
     // 如果是目录，打开目录界面
     filePath.value = file.filePath + file.fileName + '/';
-  } else {
+  } else if (file.fileType === 'image') {
     // 打开文件预览
-    if (file.fileType === 'image') {
-      imageIndex.value = getImageIndex(file);
-      imageViewVisible.value = true;
+    imageIndex.value = getImageIndex(file);
+    imageViewVisible.value = true;
 
-      //加载对应的图片链接到显示链接
-      switchImageViewer(imageIndex.value);
-    }else if (file.fileType === 'video') {
-      videoVisible.value = true;
-      videoUrl.value = downloadBaseUrl + file.downloadLink
+    //加载对应的图片链接到显示链接
+    switchImageViewer(imageIndex.value);
+  }else if (file.fileType === 'video') {
+    //如果是视频，创建放映室观看
+    const createVideoRoomRequest = {
+      roomName: file.fileName,
+      videoPath: downloadBaseUrl + file.downloadLink,
+      directoryPath: file.filePath,
+      directoryOpenFlag: props.openType
     }
+    createVideoRoom(createVideoRoomRequest).then((response) => {
+      //跳转到/fileServer/videoRoom/:roomId
+      router.push(`/fileServer/videoRoom/${response.data.roomId}`);
+    });
+  }else if (!!extName && extName === 'epub'){
+    //跳转到epub浏览目录
+    router.push({path: '/fileServer/epubViewer', query: { url: downloadBaseUrl + file.downloadLink}});
+  }else {
+    ElMessage.info('当前文件暂不支持预览，可下载后查看');
   }
 };
 

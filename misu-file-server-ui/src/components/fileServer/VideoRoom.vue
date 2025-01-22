@@ -22,7 +22,7 @@
     </div>
     <div class="video-room-action">
       <div class="video-room-left">
-        <el-button @click="viewerVisible = !viewerVisible" style="width: 80px"
+        <el-button v-if="userInfo.userName === 'misuaa'" @click="viewerVisible = !viewerVisible" style="width: 80px"
             type="info"
             text>
           浏览人数：{{ roomViewerList.length }}
@@ -250,33 +250,30 @@ const getVideoStateMessage = () => {
   getVideoState(roomId).then((response) => {
     roomViewerList.value = response.data.videoRoomUserList;
 
-    //如果不是房主，更新视频进度
-    if (videoRoom.value.creatorFlag === false && videoCanPlay.value === true) {
-      videoRoom.value.state = response.data.state;
-      videoRoom.value.roomName = response.data.roomName;
-      videoRoom.value.videoTime = response.data.playTime;
-      videoRoom.value.directoryPath = response.data.directoryPath;
-      videoRoom.value.directoryOpenFlag = response.data.directoryOpenFlag;
-      noticeList.value = [videoRoom.value.roomName];
+    videoRoom.value.state = response.data.state;
+    videoRoom.value.roomName = response.data.roomName;
+    videoRoom.value.videoTime = response.data.playTime;
+    videoRoom.value.directoryPath = response.data.directoryPath;
+    videoRoom.value.directoryOpenFlag = response.data.directoryOpenFlag;
+    noticeList.value = [videoRoom.value.roomName];
 
-      if (videoRoom.value.videoPath !== response.data.videoPath) {
-        ElMessage({message: '房主切换了视频', type: 'info'})
-        videoRoom.value.videoPath = response.data.videoPath;
-      }
+    if (videoRoom.value.videoPath !== response.data.videoPath) {
+      ElMessage({message: '房主切换了视频', type: 'info'})
+      videoRoom.value.videoPath = response.data.videoPath;
+    }
 
-      //将进度条状态从'HH:mm:ss'转为播放组件的进度，如果进度条相差大于10秒，更新video组件的进度条
-      const videoTime = videoRoom.value.videoTime.split(':');
-      const videoTimeSecond = parseInt(videoTime[0]) * 3600 + parseInt(videoTime[1]) * 60 + parseInt(videoTime[2]);
-      if (Math.abs(videoTimeSecond - videoRef.value.currentTime) > 10) {
-        ElMessage({message: '同步时间' + response.data.playTime, type: 'info'})
-        videoRef.value.currentTime = videoTimeSecond;
-      }
+    //将进度条状态从'HH:mm:ss'转为播放组件的进度，如果进度条相差大于10秒，更新video组件的进度条
+    const videoTime = videoRoom.value.videoTime.split(':');
+    const videoTimeSecond = parseInt(videoTime[0]) * 3600 + parseInt(videoTime[1]) * 60 + parseInt(videoTime[2]);
+    if (Math.abs(videoTimeSecond - videoRef.value.currentTime) > 10) {
+      ElMessage({message: '同步时间' + response.data.playTime, type: 'info'})
+      videoRef.value.currentTime = videoTimeSecond;
+    }
 
-      if (videoRoom.value.state === 'play') {
-        videoRef.value.play();
-      } else if (videoRoom.value.state === 'pause') {
-        videoRef.value.pause();
-      }
+    if (videoRoom.value.state === 'play') {
+      videoRef.value.play();
+    } else if (videoRoom.value.state === 'pause') {
+      videoRef.value.pause();
     }
   }).catch((error) => {
     if (!!error && !!error.code && error.code === 404) {
@@ -388,7 +385,9 @@ onMounted(() => {
 
   //定时器，每5秒执行一次，获取放映室视频进度和状态信息
   viewerTimer = setInterval(() => {
-    getVideoStateMessage();
+    if (videoRoom.value.creatorFlag === false && videoCanPlay.value === true) {
+      getVideoStateMessage();
+    }
   }, 5000);
 
   //房主定时器，每60秒执行一次，如果是房主且视频可播放，则更新放映室视频进度和状态信息

@@ -18,6 +18,7 @@
     "axios": "^1.7.7",
     "concurrently": "^9.0.1",
     "element-plus": "^2.8.6",
+    "epubjs": "^0.3.93",
     "flv.js": "^1.6.2",
     "js-cookie": "^3.0.5",
     "vue": "^3.5.12",

@@ -9,6 +9,7 @@ import PrivateFileServer from '@/components/fileServer/PrivateFileServer.vue';
 import VideoRoom from '@/components/fileServer/VideoRoom.vue';
 import TorrentManagement from '@/components/fileServer/TorrentManagement.vue';
 import BotChat from '@/components/bot/BotChat.vue';
+import EpubViewer from '@/components/utils/EpubViewer.vue';
 
 const routes = [
     {
@@ -22,6 +23,7 @@ const routes = [
             { path: 'fileServer/videoRoom/:roomId', component: VideoRoom, name: 'VideoRoomFromId' },
             { path: 'fileServer/videoRoom', component: VideoRoom, name: 'VideoRoomFromHistory' },
             { path: 'fileServer/torrentManagement', component: TorrentManagement, name: 'TorrentManagement' },
+            { path: 'fileServer/epubViewer', component: EpubViewer, name: 'EpubViewer' },
             { path: 'bot', component: BotChat, name: 'BotChat' },
         ],
     },
