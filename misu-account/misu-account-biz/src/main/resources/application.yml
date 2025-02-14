@@ -1,0 +1,14 @@
+# Tomcat
+server:
+  port: 30261
+  servlet:
+    context-path: /account
+
+# Spring
+spring:
+  application:
+    # 应用名称
+    name: misu-account
+  profiles:
+    # 环境配置
+    active: local

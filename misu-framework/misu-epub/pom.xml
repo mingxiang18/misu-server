@@ -5,11 +5,11 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>com.misu</groupId>
-        <artifactId>misu-account</artifactId>
+        <artifactId>misu-framework</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>misu-account-api</artifactId>
+    <artifactId>misu-epub</artifactId>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
@@ -18,21 +18,23 @@
     </properties>
 
     <dependencies>
-
         <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-starter-openfeign</artifactId>
+            <groupId>com.misu</groupId>
+            <artifactId>misu-common</artifactId>
+            <version>1.0-SNAPSHOT</version>
         </dependency>
 
         <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
+            <groupId>com.positiondev.epublib</groupId>
+            <artifactId>epublib-core</artifactId>
+            <version>3.1</version>
         </dependency>
 
-        <!-- Swagger3依赖 -->
+        <!--html解析 -->
         <dependency>
-            <groupId>io.springfox</groupId>
-            <artifactId>springfox-boot-starter</artifactId>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.12.1</version>
         </dependency>
     </dependencies>
 </project>

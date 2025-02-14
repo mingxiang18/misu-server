@@ -79,6 +79,12 @@
 
         <dependency>
             <groupId>com.misu</groupId>
+            <artifactId>misu-account-api</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.misu</groupId>
             <artifactId>misu-security</artifactId>
             <version>1.0-SNAPSHOT</version>
         </dependency>
@@ -96,46 +102,57 @@
             <classifier>jakarta</classifier>
             <scope>provided</scope>
         </dependency>
+
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+        </dependency>
+
+        <!-- https://mvnrepository.com/artifact/com.alibaba.cloud/spring-cloud-starter-alibaba-nacos-discovery -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
-<!--        <plugins>-->
-<!--            <plugin>-->
-<!--                <groupId>com.mysema.maven</groupId>-->
-<!--                <artifactId>apt-maven-plugin</artifactId>-->
-<!--                <version>1.1.3</version>-->
-<!--                <executions>-->
-<!--                    <execution>-->
-<!--&lt;!&ndash;                        <goals>&ndash;&gt;-->
-<!--&lt;!&ndash;                            <goal>process</goal>&ndash;&gt;-->
-<!--&lt;!&ndash;                        </goals>&ndash;&gt;-->
-<!--                        <configuration>-->
-<!--                            <outputDirectory>target/generated-sources/java</outputDirectory>-->
-<!--                            <processor>com.querydsl.apt.jpa.JPAAnnotationProcessor</processor>-->
-<!--                        </configuration>-->
-<!--                    </execution>-->
-<!--                </executions>-->
-<!--            </plugin>-->
-<!--            <plugin>-->
-<!--                <groupId>org.springframework.boot</groupId>-->
-<!--                <artifactId>spring-boot-maven-plugin</artifactId>-->
-<!--                <version>3.2.5</version>-->
-<!--                <configuration>-->
-<!--                    <excludes>-->
-<!--                        <exclude>-->
-<!--                            <groupId>org.springframework.boot</groupId>-->
-<!--                            <artifactId>spring-boot-configuration-processor</artifactId>-->
-<!--                        </exclude>-->
-<!--                    </excludes>-->
-<!--                </configuration>-->
-<!--                <executions>-->
-<!--                    <execution>-->
+        <plugins>
+            <plugin>
+                <groupId>com.mysema.maven</groupId>
+                <artifactId>apt-maven-plugin</artifactId>
+                <version>1.1.3</version>
+                <executions>
+                    <execution>
 <!--                        <goals>-->
-<!--                            <goal>repackage</goal>-->
+<!--                            <goal>process</goal>-->
 <!--                        </goals>-->
-<!--                    </execution>-->
-<!--                </executions>-->
-<!--            </plugin>-->
-<!--        </plugins>-->
+                        <configuration>
+                            <outputDirectory>target/generated-sources/java</outputDirectory>
+                            <processor>com.querydsl.apt.jpa.JPAAnnotationProcessor</processor>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-configuration-processor</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 </project>

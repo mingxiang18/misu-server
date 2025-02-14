@@ -1,0 +1,14 @@
+# Tomcat
+server:
+  port: 30262
+  servlet:
+    context-path: /fileServer
+
+# Spring
+spring:
+  application:
+    # 应用名称
+    name: misu-file-server
+  profiles:
+    # 环境配置
+    active: local

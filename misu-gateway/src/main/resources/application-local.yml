@@ -1,0 +1,68 @@
+# Spring
+spring:
+  config:
+    import: optional:nacos:misu-gateway-local.yml
+  cloud:
+    nacos:
+      discovery:
+        # 服务注册地址
+        server-addr: 10.8.0.22:8848
+        # 命名空间
+        namespace: local
+        # 组名
+        group: DEFAULT_GROUP
+        # 指定网卡
+#        network-interface: tun0
+      config:
+        import-check:
+          enabled: false
+        # 配置中心地址
+        server-addr: 10.8.0.22:8848
+        # 命名空间
+        namespace: local
+        # 组名
+        group: DEFAULT_GROUP
+        # 配置文件格式
+        file-extension: yml
+
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+      routes:
+        - id: misu-account
+          uri: lb://misu-account
+          predicates:
+            - Path=/account/**
+
+        - id: misu-file-server
+          uri: lb://misu-file-server
+          predicates:
+            - Path=/fileServer/**
+
+    sentinel:
+      enabled: true
+      # 取消控制台懒加载
+      eager: true
+      transport:
+        # 控制台地址
+        dashboard: 10.8.0.22:8858
+        # 跟sentinel控制台交流的端口，随意指定一个未使用的端口即可，默认是8719
+        port: 30270
+        # Get heartbeat client local ip
+        clientIp: 10.8.0.18
+      # nacos配置持久化
+      datasource:
+        ds1:
+          nacos:
+            server-addr: 10.8.0.22:8848
+            dataId: sentinel-misu-gateway-local.json
+            namespace: local
+            groupId: DEFAULT_GROUP
+            data-type: json
+            rule-type: flow
+      scg:
+        fallback:
+          response-status: 429
+          mode: response
+          response-body: '{"code": 429,"message": "当前系统拥堵，请稍后再试！"}'
