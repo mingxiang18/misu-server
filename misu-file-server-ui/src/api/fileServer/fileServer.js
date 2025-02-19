@@ -7,7 +7,7 @@ export function getFileList(filePath, openType) {
         openType
     }
     return request({
-        url: '/file/getFileList',
+        url: '/fileServer/file/getFileList',
         method: 'get',
         params: params
     })
@@ -20,7 +20,7 @@ export function getFileDownloadLink(filePath, openType) {
         openType
     }
     return request({
-        url: '/file/getFileDownloadLink',
+        url: '/fileServer/file/getFileDownloadLink',
         method: 'get',
         params: params
     })
@@ -29,7 +29,7 @@ export function getFileDownloadLink(filePath, openType) {
 // 上传文件
 export function uploadFile(file) {
     return request({
-        url: '/file/uploadFile',
+        url: '/fileServer/file/uploadFile',
         method: 'post',
         data: file
     })
@@ -43,7 +43,7 @@ export function moveFile(originFilePath, newFilePath, openType) {
         openType
     }
     return request({
-        url: '/file/moveFile',
+        url: '/fileServer/file/moveFile',
         method: 'post',
         data: data
     })
@@ -56,7 +56,7 @@ export function deleteFile(filePath, openType) {
         openType
     }
     return request({
-        url: '/file/deleteFile',
+        url: '/fileServer/file/deleteFile',
         method: 'post',
         data: data
     })
@@ -69,7 +69,7 @@ export function createDirectory(filePath, openType) {
         openType
     }
     return request({
-        url: '/file/createDirectory',
+        url: '/fileServer/file/createDirectory',
         method: 'post',
         data: data
     })

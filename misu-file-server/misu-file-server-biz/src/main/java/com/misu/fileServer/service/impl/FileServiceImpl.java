@@ -174,7 +174,7 @@ public class FileServiceImpl implements FileService {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", LoginMessageUtil.getLoginUser().get().getUserId());
         claims.put("filePath", filePath);
-        return "file/downloadFile?fileToken=" + tokenService.createToken(claims);
+        return "fileServer/file/downloadFile?fileToken=" + tokenService.createToken(claims);
     }
 
     @Override

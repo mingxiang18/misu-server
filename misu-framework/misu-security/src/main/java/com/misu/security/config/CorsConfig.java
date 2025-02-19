@@ -10,15 +10,14 @@ import org.springframework.web.filter.CorsFilter;
 /**
  * 跨域配置
  */
-@Configuration
+//@Configuration
 public class CorsConfig {
 
     /**
      * 跨域配置
      */
     @Bean
-    public CorsFilter corsFilter()
-    {
+    public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowCredentials(true);
         // 设置访问源地址

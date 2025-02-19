@@ -9,7 +9,7 @@ export function getVideoRoomFromId(roomId) {
         roomId
     }
     return request({
-        url: '/videoRoom/getVideoRoomFromId',
+        url: '/fileServer/videoRoom/getVideoRoomFromId',
         method: 'get',
         params: params
     })
@@ -21,7 +21,7 @@ export function getVideoState(roomId) {
         roomId
     }
     return request({
-        url: '/videoRoom/getVideoState',
+        url: '/fileServer/videoRoom/getVideoState',
         method: 'get',
         params: params
     })
@@ -33,7 +33,7 @@ export function getVideoRoomShareUrl(roomId) {
         roomId
     }
     return request({
-        url: '/videoRoom/getVideoRoomShareUrl',
+        url: '/fileServer/videoRoom/getVideoRoomShareUrl',
         method: 'get',
         params: params
     })
@@ -42,7 +42,7 @@ export function getVideoRoomShareUrl(roomId) {
 // 创建放映室
 export function createVideoRoom(createVideoRoomRequest) {
     return request({
-        url: '/videoRoom/createVideoRoom',
+        url: '/fileServer/videoRoom/createVideoRoom',
         method: 'post',
         data: createVideoRoomRequest
     })
@@ -51,7 +51,7 @@ export function createVideoRoom(createVideoRoomRequest) {
 // 更新放映室视频状态
 export function updateVideoState(updateVideoStateRequest) {
     return request({
-        url: '/videoRoom/updateVideoState',
+        url: '/fileServer/videoRoom/updateVideoState',
         method: 'post',
         data: updateVideoStateRequest
     })
@@ -60,7 +60,7 @@ export function updateVideoState(updateVideoStateRequest) {
 // 退出放映室
 export function quitVideoRoom(quitVideoRoomRequest) {
     return request({
-        url: '/videoRoom/quitVideoRoom',
+        url: '/fileServer/videoRoom/quitVideoRoom',
         method: 'post',
         data: quitVideoRoomRequest
     })
@@ -69,7 +69,7 @@ export function quitVideoRoom(quitVideoRoomRequest) {
 // 关闭放映室
 export function closeVideoRoom(closeVideoRoomRequest) {
     return request({
-        url: '/videoRoom/closeVideoRoom',
+        url: '/fileServer/videoRoom/closeVideoRoom',
         method: 'post',
         data: closeVideoRoomRequest
     })

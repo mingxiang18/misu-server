@@ -11,7 +11,7 @@ export function login(userName, password, captchaCode) {
         captchaCode
     }
     return request({
-        url: '/auth/login',
+        url: '/account/auth/login',
         headers: {
             isToken: false
         },

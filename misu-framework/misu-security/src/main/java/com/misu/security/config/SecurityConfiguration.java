@@ -42,8 +42,8 @@ public class SecurityConfiguration {
     @Resource
     private PermitAllUrlProperties permitAllUrl;
 
-    @Resource
-    private CorsFilter corsFilter;
+//    @Resource
+//    private CorsFilter corsFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -60,10 +60,10 @@ public class SecurityConfiguration {
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                     .disable()
                     // 添加JWT校验
-                    .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-                    // 添加允许跨域
-                    .addFilterBefore(corsFilter, JwtAuthenticationFilter.class)
-                    .addFilterBefore(corsFilter, LogoutFilter.class))
+                    .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class))
+                    // 添加允许跨域，若微服务使用gateway网关，则只在网关配置跨域即可，其他服务不需要配置
+//                    .addFilterBefore(corsFilter, JwtAuthenticationFilter.class)
+//                    .addFilterBefore(corsFilter, LogoutFilter.class))
             // 登出操作
 //            .logout(logoutConfigurer -> logoutConfigurer.logoutUrl("/auth/logout"))
 //            .logoutSuccessHandler((request, response, authentication) -> SecurityContextHolder.clearContext())

@@ -13,7 +13,7 @@
         <module>misu-file-server</module>
         <module>misu-account</module>
         <module>misu-net</module>
-        <module>misu-web</module>
+<!--        <module>misu-web</module>-->
         <module>misu-bot</module>
         <module>misu-gateway</module>
     </modules>

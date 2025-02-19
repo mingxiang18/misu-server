@@ -6,7 +6,7 @@ const UserKey = 'User-Info';
 // 获取用户信息
 export function getUserInfoFromToken() {
     return request({
-        url: '/user/getUserFromToken',
+        url: '/account/user/getUserFromToken',
         method: 'get'
     })
 }

@@ -1,7 +1,7 @@
 # Spring
 spring:
   config:
-    import: optional:nacos:misu-gateway-local.yml
+    import: optional:nacos:misu-gateway-prod.yml
   cloud:
     nacos:
       discovery:
@@ -39,15 +39,6 @@ spring:
           uri: lb://misu-file-server
           predicates:
             - Path=/fileServer/**
-      # 允许跨域
-      globalcors:
-        cors-configurations:
-            '[/**]':
-                allowedOriginPatterns: "*"
-                allowedMethods: "*"
-                allowedHeaders: "*"
-                allowCredentials: true
-                maxAge: 3600
 
     sentinel:
       enabled: true

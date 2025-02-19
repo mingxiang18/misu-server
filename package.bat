@@ -9,3 +9,5 @@ call D:\develop\apache-maven-3.9.2\bin\mvn package -f pom.xml -s D:\develop\apac
 
 % cd misu-web/ %
 % docker buildx build --platform linux/amd64,linux/arm64 -t misuaa/misu-server:0.0.1-beta . -f Dockerfile --push %
+
+pause
