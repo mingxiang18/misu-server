@@ -25,12 +25,36 @@ public interface TokenService {
     String createUserToken(LoginUser loginUser);
 
     /**
+     * 创建用户刷新令牌
+     *
+     * @param loginUser 用户信息
+     * @return 刷新令牌
+     */
+    String createRefreshToken(LoginUser loginUser);
+
+    /**
      * 验证令牌是否有效
      *
      * @param token token令牌
      * @return 令牌
      */
     boolean verifyToken(String token);
+
+    /**
+     * 验证访问令牌是否有效
+     *
+     * @param token token令牌
+     * @return 是否有效
+     */
+    boolean verifyAccessToken(String token);
+
+    /**
+     * 验证刷新令牌是否有效
+     *
+     * @param token token令牌
+     * @return 是否有效
+     */
+    boolean verifyRefreshToken(String token);
 
     /**
      * 创建授权令牌

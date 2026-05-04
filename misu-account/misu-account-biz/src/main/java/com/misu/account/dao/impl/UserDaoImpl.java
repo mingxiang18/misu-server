@@ -33,7 +33,9 @@ public class UserDaoImpl implements UserDao {
                         LoginUserDto.class,
                         userModel.userId,
                         userModel.userName,
-                        userModel.password
+                        userModel.password,
+                        userModel.status,
+                        userModel.delFlag
                 ))
                 .from(userModel)
                 .where(userModel.userName.eq(userName))

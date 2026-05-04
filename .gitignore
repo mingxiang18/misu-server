@@ -1,1 +1,38 @@
+# IDE
 /.idea/
+*.iml
+
+# OS files
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Maven / Java build output
+target/
+**/target/
+targer/
+**/targer/
+*.class
+
+# Logs
+logs/
+**/logs/
+*.log
+*.log.*
+
+# Runtime / temp files
+tmp/
+**/tmp/
+*.tmp
+*.temp
+
+# Node / frontend output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+electron-dist/
+**/electron-dist/
+
+# Environment-local overrides
+*.local

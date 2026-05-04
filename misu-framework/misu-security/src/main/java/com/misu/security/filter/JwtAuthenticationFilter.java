@@ -61,7 +61,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             token = authHeader.substring(TOKEN_PREFIX.length());
 
             // 如果当前上下文中没有认证信息，则进行 token 验证
-            if (SecurityContextHolder.getContext().getAuthentication() == null && tokenService.verifyToken(token)) {
+            if (SecurityContextHolder.getContext().getAuthentication() == null && tokenService.verifyAccessToken(token)) {
                 // 如果令牌有效，获取用户信息并创建认证对象
                 LoginUser loginUser = tokenService.getLoginUser(token);
 

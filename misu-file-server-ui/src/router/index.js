@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { getToken } from '@/api/auth/token'
+import { getRefreshToken, getToken } from '@/api/auth/token'
 import Index from '@/components/Index.vue';
 import HelloWorld from '@/components/HelloWorld.vue';
 import Login from '@/components/login/Login.vue';
@@ -39,7 +39,7 @@ const router = createRouter({
 
 // 路由守卫
 router.beforeEach((to, from, next) => {
-    const isAuthenticated = getToken()
+    const isAuthenticated = getToken() || getRefreshToken()
     // const isAuthenticated = true
 
     if (to.path !== '/login' && !isAuthenticated) {

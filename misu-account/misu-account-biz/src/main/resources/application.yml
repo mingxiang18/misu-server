@@ -12,3 +12,10 @@ spring:
   profiles:
     # 环境配置
     active: local
+
+# Token配置，Nacos中可按环境覆盖
+token:
+  # 短期token有效期：1天
+  expireTtl: 86400000
+  # 长期刷新token有效期：30天
+  refreshExpireTtl: 2592000000

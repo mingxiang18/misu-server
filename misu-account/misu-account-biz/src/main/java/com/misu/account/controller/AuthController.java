@@ -3,6 +3,7 @@ package com.misu.account.controller;
 import com.misu.common.domain.AjaxResult;
 import com.misu.security.annotation.Anonymous;
 import com.misu.account.domain.dto.auth.LoginRequestDto;
+import com.misu.account.domain.dto.auth.RefreshTokenRequestDto;
 import com.misu.account.domain.dto.auth.RegisterRequestDto;
 import com.misu.account.service.AuthService;
 import com.misu.account.dao.impl.UserDaoImpl;
@@ -36,6 +37,16 @@ public class AuthController {
     @ApiOperation(value="登录")
     public AjaxResult login(@Validated @RequestBody LoginRequestDto loginRequestDto) {
         return AjaxResult.success(authService.login(loginRequestDto));
+    }
+
+    /**
+     * 刷新短期token
+     */
+    @Anonymous
+    @PostMapping({"/refresh-token"})
+    @ApiOperation(value="刷新短期token")
+    public AjaxResult refreshToken(@Validated @RequestBody RefreshTokenRequestDto refreshTokenRequestDto) {
+        return AjaxResult.success(authService.refreshToken(refreshTokenRequestDto));
     }
 
     /**

@@ -1,10 +1,59 @@
 import axios from 'axios'
-import { getToken, removeToken } from '@/api/auth/token'
+import { getToken, getRefreshToken, removeLoginTokens, setLoginTokens } from '@/api/auth/token'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import errorCode from '@/api/errorCode'
 
 // 是否显示重新登录
 export let isRelogin = { show: false };
+
+function showLoginExpired() {
+    if (!isRelogin.show) {
+        isRelogin.show = true;
+        ElMessageBox.confirm('登录状态已过期，您可以继续留在该页面，或者重新登录', '系统提示', { confirmButtonText: '重新登录', cancelButtonText: '取消', type: 'warning' }).then(() => {
+            isRelogin.show = false;
+            removeLoginTokens();
+            window.location.href = '/login';
+        }).catch(() => {
+            isRelogin.show = false;
+        });
+    }
+}
+
+function refreshLoginToken() {
+    const refreshToken = getRefreshToken()
+    if (!refreshToken) {
+        return Promise.reject(new Error('refreshToken不存在'))
+    }
+
+    return instance({
+        url: '/account/auth/refresh-token',
+        headers: {
+            isToken: false,
+            skipAuthRefresh: true
+        },
+        method: 'post',
+        data: {
+            refreshToken
+        }
+    }).then(response => {
+        setLoginTokens(response.data.token, response.data.refreshToken)
+        return response.data.token
+    })
+}
+
+function handleAuthExpired(config) {
+    if (!config || config._retry || config.skipAuthRefresh) {
+        showLoginExpired()
+        return Promise.reject('无效的会话，或者会话已过期，请重新登录。')
+    }
+
+    config._retry = true
+    return refreshLoginToken().then(() => instance(config)).catch(error => {
+        removeLoginTokens()
+        showLoginExpired()
+        return Promise.reject(error)
+    })
+}
 
 axios.defaults.headers['Content-Type'] = 'application/json;charset=utf-8'
 // 创建axios实例
@@ -19,8 +68,11 @@ const instance = axios.create({
 // 请求拦截器
 instance.interceptors.request.use(
     config => {
+      config.headers = config.headers || {}
       // 是否需要设置 token
-      const isToken = (config.headers || {}).isToken === false
+      const isToken = config.headers.isToken === false
+      config.skipAuthRefresh = config.headers.skipAuthRefresh === true
+      delete config.headers.skipAuthRefresh
       if (getToken() && !isToken) {
         config.headers['Authorization'] = 'Bearer ' + getToken() // 让每个请求携带自定义token 请根据实际情况自行修改
       }
@@ -59,17 +111,7 @@ instance.interceptors.response.use(
         }
 
         if (code === 401 || code === 403) {
-            if (!isRelogin.show) {
-                isRelogin.show = true;
-                ElMessageBox.confirm('登录状态已过期，您可以继续留在该页面，或者重新登录', '系统提示', { confirmButtonText: '重新登录', cancelButtonText: '取消', type: 'warning' }).then(() => {
-                    isRelogin.show = false;
-                    removeToken();
-                    this.$router.push('/login');
-                }).catch(() => {
-                    isRelogin.show = false;
-                });
-            }
-            return Promise.reject('无效的会话，或者会话已过期，请重新登录。')
+            return handleAuthExpired(response.config)
         } else if (code === 500) {
             ElMessage({ message: msg, type: 'error' })
             return Promise.reject(new Error(msg))
@@ -88,9 +130,8 @@ instance.interceptors.response.use(
         let { message } = error;
         if (message === "Network Error") {
             message = "后端接口连接异常";
-        } else if (message.includes("403")) {
-            message = "登录状态已过期，您可以继续留在该页面，或者重新登录";
-            removeToken();
+        } else if (message.includes("401") || message.includes("403")) {
+            return handleAuthExpired(error.config)
         } else if (message.includes("timeout")) {
             message = "系统接口请求超时";
         } else if (message.includes("Request failed with status code")) {

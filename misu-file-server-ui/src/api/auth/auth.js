@@ -1,5 +1,5 @@
 import request from '@/api/request'
-import {removeToken} from '@/api/auth/token'
+import {getRefreshToken, removeLoginTokens} from '@/api/auth/token'
 import {removeUserInfo} from '@/api/user/user'
 import {removeVideoRoomFromCookie} from '@/api/fileServer/videoRoom'
 
@@ -20,9 +20,24 @@ export function login(userName, password, captchaCode) {
     })
 }
 
+// 刷新短期token
+export function refreshToken() {
+    return request({
+        url: '/account/auth/refresh-token',
+        headers: {
+            isToken: false,
+            skipAuthRefresh: true
+        },
+        method: 'post',
+        data: {
+            refreshToken: getRefreshToken()
+        }
+    })
+}
+
 // 退出登录
 export function logOut() {
-    removeToken();
+    removeLoginTokens();
     removeUserInfo();
     removeVideoRoomFromCookie();
 }

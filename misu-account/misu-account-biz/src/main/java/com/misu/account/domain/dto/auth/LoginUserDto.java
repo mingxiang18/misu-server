@@ -20,6 +20,12 @@ public class LoginUserDto {
     @ApiModelProperty(value = "密码")
     private String password;
 
+    @ApiModelProperty(value = "帐号状态（0正常 1停用）")
+    private String status;
+
+    @ApiModelProperty(value = "删除标志（0代表存在 2代表删除）")
+    private String delFlag;
+
     @ApiModelProperty(value = "权限列表")
     private List<String> authorities;
 }

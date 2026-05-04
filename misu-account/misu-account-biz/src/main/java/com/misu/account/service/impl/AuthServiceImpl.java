@@ -6,6 +6,7 @@ import com.misu.common.exception.ServiceException;
 import com.misu.security.dto.LoginUser;
 import com.misu.security.service.TokenService;
 import com.misu.account.domain.dto.auth.*;
+import io.jsonwebtoken.Claims;
 import com.misu.account.service.AuthService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +20,8 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 public class AuthServiceImpl implements AuthService {
+    private static final String USER_STATUS_DISABLED = "1";
+    private static final String USER_DELETED = "2";
 
     @Resource
     private UserService userService;
@@ -40,18 +43,33 @@ public class AuthServiceImpl implements AuthService {
         if (loginUserDto == null) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "用户不存在或密码错误");
         }
+        checkUserAvailable(loginUserDto);
 
         //判断密码是否匹配
         if (passwordEncoder.matches(loginRequestDto.getPassword(), loginUserDto.getPassword())) {
             //登录成功后获取用户名并设置token返回
-            LoginResponseDto loginResponseDto = new LoginResponseDto();
-            loginResponseDto.setUserName(loginUserDto.getUserName());
-            loginResponseDto.setToken(
-                    tokenService.createUserToken(new LoginUser(loginUserDto.getUserId(), loginUserDto.getUserName(), loginUserDto.getAuthorities())));
-            return loginResponseDto;
+            return buildLoginResponse(loginUserDto);
         }else {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "用户不存在或密码错误");
         }
+    }
+
+    @Override
+    public LoginResponseDto refreshToken(RefreshTokenRequestDto refreshTokenRequestDto) {
+        String refreshToken = refreshTokenRequestDto.getRefreshToken();
+        if (!tokenService.verifyRefreshToken(refreshToken)) {
+            throw new ServiceException(HttpStatus.UNAUTHORIZED, "刷新token无效或已过期");
+        }
+
+        Claims claims = tokenService.parseToken(refreshToken);
+        String userName = claims.get("userName", String.class);
+        LoginUserDto loginUserDto = userService.selectUserLoginInfo(userName);
+        if (loginUserDto == null) {
+            throw new ServiceException(HttpStatus.UNAUTHORIZED, "刷新token无效或已过期");
+        }
+        checkUserAvailable(loginUserDto);
+
+        return buildLoginResponse(loginUserDto);
     }
 
     @Override
@@ -71,5 +89,23 @@ public class AuthServiceImpl implements AuthService {
         RegisterResponseDto registerResponseDto = new RegisterResponseDto();
         registerResponseDto.setUserName(registerRequestDto.getUserName());
         return registerResponseDto;
+    }
+
+    private LoginResponseDto buildLoginResponse(LoginUserDto loginUserDto) {
+        LoginUser loginUser = new LoginUser(loginUserDto.getUserId(), loginUserDto.getUserName(), loginUserDto.getAuthorities());
+        LoginResponseDto loginResponseDto = new LoginResponseDto();
+        loginResponseDto.setUserName(loginUserDto.getUserName());
+        loginResponseDto.setToken(tokenService.createUserToken(loginUser));
+        loginResponseDto.setRefreshToken(tokenService.createRefreshToken(loginUser));
+        return loginResponseDto;
+    }
+
+    private void checkUserAvailable(LoginUserDto loginUserDto) {
+        if (USER_DELETED.equals(loginUserDto.getDelFlag())) {
+            throw new ServiceException(HttpStatus.UNAUTHORIZED, "用户不存在或已删除");
+        }
+        if (USER_STATUS_DISABLED.equals(loginUserDto.getStatus())) {
+            throw new ServiceException(HttpStatus.UNAUTHORIZED, "用户已停用");
+        }
     }
 }

@@ -21,7 +21,7 @@
         <el-icon><Memo /></el-icon>
         <span>语言学习</span>
       </el-menu-item>
-      <el-menu-item @click="navigateTo('/userManagement')">
+      <el-menu-item v-if="isAdmin" @click="navigateTo('/userManagement')">
         <el-icon><setting /></el-icon>
         <span>用户管理</span>
       </el-menu-item>
@@ -72,17 +72,18 @@
 </template>
 
 <script setup>
-import {onMounted, ref} from 'vue'
+import {computed, onMounted, ref} from 'vue'
 import {User, Folder, Document, Menu as IconMenu, Message, Setting, ChatDotRound, Memo} from '@element-plus/icons-vue'
 import UserToolBar from "@/components/user/UserToolBar.vue";
 import {logOut} from "@/api/auth/auth";
 import {getHistoryVideoRoomFromCookie} from "@/api/fileServer/videoRoom";
 import { useRouter } from 'vue-router';
-import { getUserInfo } from '@/api/user/user';
+import { getUserInfo, getUserInfoFromToken } from '@/api/user/user';
 
 const router = useRouter()
 
-const userInfo = getUserInfo();
+const userInfo = ref(getUserInfo());
+const isAdmin = computed(() => (userInfo.value.authorities || []).includes('ADMIN'));
 
 const isCollapse = ref(false);
 
@@ -111,6 +112,10 @@ const fileServerMenuInfoList = [
 ]
 
 onMounted(() => {
+  getUserInfoFromToken().then(response => {
+    userInfo.value = response.data;
+  });
+
   isSmallScreen.value = window.innerWidth <= 650;
 
   // 监听窗口尺寸变化

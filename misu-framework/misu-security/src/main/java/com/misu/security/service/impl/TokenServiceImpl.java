@@ -20,6 +20,10 @@ import java.util.*;
 @Slf4j
 @Service
 public class TokenServiceImpl implements TokenService {
+    private static final String TOKEN_TYPE = "tokenType";
+    private static final String ACCESS_TOKEN = "access";
+    private static final String REFRESH_TOKEN = "refresh";
+
     // 令牌自定义标识
     @Value("${token.header:Authorization}")
     private String header;
@@ -31,6 +35,10 @@ public class TokenServiceImpl implements TokenService {
     // 令牌有效期（毫秒，默认24小时）
     @Value("${token.expireTtl:86400000}")
     private long expireTtl;
+
+    // 刷新令牌有效期（毫秒，默认30天）
+    @Value("${token.refreshExpireTtl:2592000000}")
+    private long refreshExpireTtl;
 
     /**
      * 自用的生成secret的方法
@@ -71,7 +79,23 @@ public class TokenServiceImpl implements TokenService {
         claims.put("userId", loginUser.getUserId());
         claims.put("userName", loginUser.getUserName());
         claims.put("authorities", loginUser.getAuthorities());
+        claims.put(TOKEN_TYPE, ACCESS_TOKEN);
         return createToken(claims);
+    }
+
+    /**
+     * 创建刷新令牌
+     *
+     * @param loginUser 用户信息
+     * @return 刷新令牌
+     */
+    @Override
+    public String createRefreshToken(LoginUser loginUser) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", loginUser.getUserId());
+        claims.put("userName", loginUser.getUserName());
+        claims.put(TOKEN_TYPE, REFRESH_TOKEN);
+        return createToken(claims, refreshExpireTtl);
     }
 
     /**
@@ -86,6 +110,39 @@ public class TokenServiceImpl implements TokenService {
             Claims claims = parseToken(token);
             return claims.getExpiration().after(new Date());
         }catch (Exception e) {
+            log.debug("token【" + token + "】解析失败");
+            return false;
+        }
+    }
+
+    /**
+     * 验证访问令牌是否有效
+     *
+     * @param token token令牌
+     * @return 是否有效
+     */
+    @Override
+    public boolean verifyAccessToken(String token) {
+        return verifyTokenType(token, ACCESS_TOKEN);
+    }
+
+    /**
+     * 验证刷新令牌是否有效
+     *
+     * @param token token令牌
+     * @return 是否有效
+     */
+    @Override
+    public boolean verifyRefreshToken(String token) {
+        return verifyTokenType(token, REFRESH_TOKEN);
+    }
+
+    private boolean verifyTokenType(String token, String tokenType) {
+        try {
+            Claims claims = parseToken(token);
+            return claims.getExpiration().after(new Date())
+                    && tokenType.equals(claims.get(TOKEN_TYPE, String.class));
+        } catch (Exception e) {
             log.debug("token【" + token + "】解析失败");
             return false;
         }
