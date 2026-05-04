@@ -10,6 +10,7 @@ import VideoRoom from '@/components/fileServer/VideoRoom.vue';
 import TorrentManagement from '@/components/fileServer/TorrentManagement.vue';
 import BotChat from '@/components/bot/BotChat.vue';
 import EpubViewer from '@/components/utils/EpubViewer.vue';
+import LanguageLearn from "@/components/languageLearn/LanguageLearn.vue";
 
 const routes = [
     {
@@ -18,6 +19,7 @@ const routes = [
         children: [
             { path: '', component: HelloWorld, name: 'home' },
             { path: 'userManagement', component: UserTest, name: 'userTest' },
+            { path: 'languageLearn', component: LanguageLearn, name: 'LanguageLearn' },
             { path: 'fileServer/publicDirectory/:path*', component: PublicFileServer, name: 'PublicFileServer' },
             { path: 'fileServer/privateDirectory/:path*', component: PrivateFileServer, name: 'PrivateFileServer' },
             { path: 'fileServer/videoRoom/:roomId', component: VideoRoom, name: 'VideoRoomFromId' },
@@ -38,6 +40,7 @@ const router = createRouter({
 // 路由守卫
 router.beforeEach((to, from, next) => {
     const isAuthenticated = getToken()
+    // const isAuthenticated = true
 
     if (to.path !== '/login' && !isAuthenticated) {
         // 未登录时跳转到登录页

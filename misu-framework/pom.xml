@@ -18,6 +18,7 @@
         <module>misu-security</module>
         <module>misu-web-starter</module>
         <module>misu-net-util</module>
+        <module>misu-epub</module>
     </modules>
 
     <properties>

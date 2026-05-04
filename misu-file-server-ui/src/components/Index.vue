@@ -17,6 +17,10 @@
         <el-icon><ChatDotRound /></el-icon>
         <span>机器人</span>
       </el-menu-item>
+      <el-menu-item @click="navigateTo('/languageLearn')">
+        <el-icon><Memo /></el-icon>
+        <span>语言学习</span>
+      </el-menu-item>
       <el-menu-item @click="navigateTo('/userManagement')">
         <el-icon><setting /></el-icon>
         <span>用户管理</span>
@@ -49,6 +53,9 @@
           <el-icon :size="menuIconSize" :color="menuIconColor" @click="navigateTo('/bot')"><ChatDotRound /></el-icon>
         </div>
         <div class="index-footer-item">
+          <el-icon :size="menuIconSize" :color="menuIconColor" @click="navigateTo('/languageLearn')"><Memo /></el-icon>
+        </div>
+        <div class="index-footer-item">
           <el-dropdown>
             <el-icon :size="menuIconSize" :color="menuIconColor"><User /></el-icon>
             <template #dropdown>
@@ -66,7 +73,7 @@
 
 <script setup>
 import {onMounted, ref} from 'vue'
-import {User, Folder, Document, Menu as IconMenu, Message, Setting, ChatDotRound} from '@element-plus/icons-vue'
+import {User, Folder, Document, Menu as IconMenu, Message, Setting, ChatDotRound, Memo} from '@element-plus/icons-vue'
 import UserToolBar from "@/components/user/UserToolBar.vue";
 import {logOut} from "@/api/auth/auth";
 import {getHistoryVideoRoomFromCookie} from "@/api/fileServer/videoRoom";
