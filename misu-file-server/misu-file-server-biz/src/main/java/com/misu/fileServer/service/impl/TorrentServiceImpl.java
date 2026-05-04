@@ -215,28 +215,7 @@ public class TorrentServiceImpl implements TorrentService {
         userTorrentDetailDto.setTotalSize(torrentInfoResponse.getTotalSize());
         userTorrentDetailDto.setServerFileProgress(torrentInfoResponse.getProgress());
         userTorrentDetailDto.setServerFileDownloadSpeed(torrentInfoResponse.getDlSpeed());
-        userTorrentDetailDto.setServerFileUploadSpeed(torrentInfoResponse.getUpSpeed());
         userTorrentDetailDto.setTorrentState(torrentInfoResponse.getState());
-        userTorrentDetailDto.setEta(torrentInfoResponse.getEta());
-        userTorrentDetailDto.setDownloaded(torrentInfoResponse.getDownloaded());
-        userTorrentDetailDto.setUploaded(torrentInfoResponse.getUploaded());
-        userTorrentDetailDto.setCompleted(torrentInfoResponse.getCompleted());
-        userTorrentDetailDto.setAmountLeft(torrentInfoResponse.getAmountLeft());
-        userTorrentDetailDto.setNumSeeds(torrentInfoResponse.getNumSeeds());
-        userTorrentDetailDto.setNumLeechs(torrentInfoResponse.getNumLeechs());
-        userTorrentDetailDto.setNumComplete(torrentInfoResponse.getNumComplete());
-        userTorrentDetailDto.setNumIncomplete(torrentInfoResponse.getNumIncomplete());
-        userTorrentDetailDto.setTracker(torrentInfoResponse.getTracker());
-        userTorrentDetailDto.setSavePath(torrentInfoResponse.getSavePath());
-        userTorrentDetailDto.setContentPath(torrentInfoResponse.getContentPath());
-        userTorrentDetailDto.setCategory(torrentInfoResponse.getCategory());
-        userTorrentDetailDto.setTags(torrentInfoResponse.getTags());
-        userTorrentDetailDto.setAddedOn(torrentInfoResponse.getAddedOn());
-        userTorrentDetailDto.setCompletionOn(torrentInfoResponse.getCompletionOn());
-        userTorrentDetailDto.setLastActivity(torrentInfoResponse.getLastActivity());
-        userTorrentDetailDto.setRatio(torrentInfoResponse.getRatio());
-        userTorrentDetailDto.setDlLimit(torrentInfoResponse.getDlLimit());
-        userTorrentDetailDto.setUpLimit(torrentInfoResponse.getUpLimit());
         if (torrentInfoResponse.getProgress() != null && torrentInfoResponse.getProgress() >= 1) {
             userTorrentDetailDto.setServerFileState(30);
         }
@@ -394,6 +373,7 @@ public class TorrentServiceImpl implements TorrentService {
         //数据库获取该磁力链接数据
         Optional<TorrentInfo> torrentInfoOptional = torrentDao.selectTorrentInfoByHash(torrentHash);
         TorrentInfo torrentInfo = null;
+        boolean reAddDeletedTorrent = false;
 
         //如果不存在，则保存到数据库
         if (torrentInfoOptional.isEmpty()) {
@@ -412,6 +392,14 @@ public class TorrentServiceImpl implements TorrentService {
             qBitTorrentApi.addNewTorrent(addTorrentRequest);
         }else {
             torrentInfo = torrentInfoOptional.get();
+            if (Integer.valueOf(99).equals(torrentInfo.getState())) {
+                AddTorrentRequest addTorrentRequest = new AddTorrentRequest();
+                addTorrentRequest.setUrls(addTorrentRequestDto.getTorrentUrl());
+                addTorrentRequest.setAutoTMM(true);
+                qBitTorrentApi.addNewTorrent(addTorrentRequest);
+                torrentDao.updateTorrentState(torrentHash, 20, null);
+                reAddDeletedTorrent = true;
+            }
         }
 
         //查询用户和磁力链接是否有关联
@@ -430,6 +418,10 @@ public class TorrentServiceImpl implements TorrentService {
             torrentUserRelation.setCreateTime(LocalDateTime.now());
             torrentDao.saveTorrentUserRelation(torrentUserRelation);
         }else {
+            if (reAddDeletedTorrent) {
+                fileExecutor.execute(this::moveCompletedTorrentToUserDirectory);
+                return;
+            }
             throw new ServiceException(HttpStatus.NOT_MODIFIED, "当前目录已存在该磁力链接的下载记录，请勿重复添加");
         }
 
@@ -615,7 +607,14 @@ public class TorrentServiceImpl implements TorrentService {
             if (updateTorrentRequestDto.getServerFileState() == 10) {
                 qBitTorrentApi.stopTorrent(new TorrentHashRequest(userTorrentDetailDto.getTorrentHash()));
             }else if (updateTorrentRequestDto.getServerFileState() == 20) {
-                qBitTorrentApi.startTorrent(new TorrentHashRequest(userTorrentDetailDto.getTorrentHash()));
+                if (userTorrentDetailDto.getServerFileState() == 99) {
+                    AddTorrentRequest addTorrentRequest = new AddTorrentRequest();
+                    addTorrentRequest.setUrls(userTorrentDetailDto.getTorrentUrl());
+                    addTorrentRequest.setAutoTMM(true);
+                    qBitTorrentApi.addNewTorrent(addTorrentRequest);
+                }else {
+                    qBitTorrentApi.startTorrent(new TorrentHashRequest(userTorrentDetailDto.getTorrentHash()));
+                }
             }
 
             torrentDao.updateTorrentState(userTorrentDetailDto.getTorrentHash(),

@@ -27,6 +27,39 @@ export function getVideoState(roomId) {
     })
 }
 
+// 获取房间成员列表
+export function getRoomMembers(roomId) {
+    const params = {
+        roomId
+    }
+    return request({
+        url: '/fileServer/videoRoom/getRoomMembers',
+        method: 'get',
+        params: params
+    })
+}
+
+// 发送放映室评论
+export function sendComment(sendCommentRequest) {
+    return request({
+        url: '/fileServer/videoRoom/sendComment',
+        method: 'post',
+        data: sendCommentRequest
+    })
+}
+
+// 获取放映室评论
+export function getComments(roomId) {
+    const params = {
+        roomId
+    }
+    return request({
+        url: '/fileServer/videoRoom/getComments',
+        method: 'get',
+        params: params
+    })
+}
+
 // 根据id获取对应的分享链接
 export function getVideoRoomShareUrl(roomId) {
     const params = {

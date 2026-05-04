@@ -59,69 +59,6 @@ public class UserTorrentDetailDto {
     @ApiModelProperty("服务器文件下载速度 (bytes/s)")
     private Integer serverFileDownloadSpeed;
 
-    @ApiModelProperty("服务器文件上传速度 (bytes/s)")
-    private Integer serverFileUploadSpeed;
-
-    @ApiModelProperty("剩余时间（秒）")
-    private Long eta;
-
-    @ApiModelProperty("已下载大小（字节）")
-    private Long downloaded;
-
-    @ApiModelProperty("已上传大小（字节）")
-    private Long uploaded;
-
-    @ApiModelProperty("已完成大小（字节）")
-    private Long completed;
-
-    @ApiModelProperty("剩余大小（字节）")
-    private Long amountLeft;
-
-    @ApiModelProperty("种子数")
-    private Integer numSeeds;
-
-    @ApiModelProperty("用户数")
-    private Integer numLeechs;
-
-    @ApiModelProperty("完成的种子数量")
-    private Integer numComplete;
-
-    @ApiModelProperty("未完成的用户数量")
-    private Integer numIncomplete;
-
-    @ApiModelProperty("Tracker")
-    private String tracker;
-
-    @ApiModelProperty("保存路径")
-    private String savePath;
-
-    @ApiModelProperty("内容路径")
-    private String contentPath;
-
-    @ApiModelProperty("分类")
-    private String category;
-
-    @ApiModelProperty("标签")
-    private String tags;
-
-    @ApiModelProperty("添加时间（Unix Epoch）")
-    private Long addedOn;
-
-    @ApiModelProperty("完成时间（Unix Epoch）")
-    private Long completionOn;
-
-    @ApiModelProperty("最后活动时间（Unix Epoch）")
-    private Long lastActivity;
-
-    @ApiModelProperty("分享率")
-    private Double ratio;
-
-    @ApiModelProperty("下载限速（字节/秒）")
-    private Integer dlLimit;
-
-    @ApiModelProperty("上传限速（字节/秒）")
-    private Integer upLimit;
-
     @ApiModelProperty("备注，下载失败原因等")
     private String remark;
 }

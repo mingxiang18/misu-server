@@ -27,6 +27,7 @@
       </div>
 
       <el-table
+          class="rss-table-desktop"
           v-loading="itemLoading"
           :data="rssItemPage.list"
           max-height="58svh"
@@ -73,6 +74,33 @@
         </el-table-column>
       </el-table>
 
+      <div class="rss-mobile-list" v-loading="itemLoading">
+        <div class="rss-mobile-card" v-for="item in rssItemPage.list" :key="item.itemId">
+          <div class="mobile-card-title">{{ item.title }}</div>
+          <div class="mobile-card-meta">
+            <el-tag v-if="item.matchState === 1" type="success" size="small">已匹配</el-tag>
+            <el-tag v-else type="info" size="small">未匹配</el-tag>
+            <el-tooltip v-if="item.downloadState === 2" :content="item.errorMessage" placement="bottom">
+              <el-tag type="danger" size="small">失败</el-tag>
+            </el-tooltip>
+            <el-tag v-else-if="item.downloadState === 1" type="success" size="small">已下载</el-tag>
+            <el-tag v-else type="info" size="small">未下载</el-tag>
+          </div>
+          <div class="mobile-card-time">{{ item.publishTime || '无发布时间' }}</div>
+          <div class="mobile-card-url">{{ item.torrentUrl }}</div>
+          <div class="mobile-card-actions">
+            <el-checkbox
+                :model-value="isItemSelected(item.itemId)"
+                @change="toggleItemSelection(item, $event)">
+              选择
+            </el-checkbox>
+            <el-button link type="primary" @click="batchDownloadItems([item.itemId])">
+              {{ item.downloadState === 1 ? '重新下载' : '下载' }}
+            </el-button>
+          </div>
+        </div>
+      </div>
+
       <div class="rss-table-tail">
         <el-pagination
             background
@@ -89,7 +117,7 @@
         <div />
         <el-button type="primary" @click="openRuleDialog()">添加规则</el-button>
       </div>
-      <el-table v-loading="ruleLoading" :data="rssRuleList" max-height="58svh" style="width: 100%">
+      <el-table class="rss-table-desktop" v-loading="ruleLoading" :data="rssRuleList" max-height="58svh" style="width: 100%">
         <el-table-column prop="ruleName" label="规则名称" min-width="120" />
         <el-table-column prop="includeKeywords" label="包含关键词" min-width="150" />
         <el-table-column prop="excludeKeywords" label="排除关键词" min-width="150" />
@@ -116,10 +144,28 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="rss-mobile-list" v-loading="ruleLoading">
+        <div class="rss-mobile-card" v-for="rule in rssRuleList" :key="rule.ruleId">
+          <div class="mobile-card-title">{{ rule.ruleName || '未命名规则' }}</div>
+          <div class="mobile-card-meta">
+            <el-tag :type="rule.enabled ? 'success' : 'info'" size="small">{{ rule.enabled ? '启用' : '停用' }}</el-tag>
+            <el-tag :type="rule.autoDownload ? 'warning' : 'info'" size="small">{{ rule.autoDownload ? '自动下载' : '手动下载' }}</el-tag>
+          </div>
+          <div class="mobile-card-field" v-if="rule.includeKeywords">包含：{{ rule.includeKeywords }}</div>
+          <div class="mobile-card-field" v-if="rule.excludeKeywords">排除：{{ rule.excludeKeywords }}</div>
+          <div class="mobile-card-field" v-if="rule.regex">正则：{{ rule.regex }}</div>
+          <div class="mobile-card-url">{{ rule.downloadPath }}</div>
+          <div class="mobile-card-actions">
+            <el-button link type="primary" @click="openRuleDialog(rule)">修改</el-button>
+            <el-button link type="danger" @click="deleteRule(rule)">删除</el-button>
+          </div>
+        </div>
+      </div>
     </el-tab-pane>
   </el-tabs>
 
-  <el-dialog v-model="ruleDialogVisible" :title="ruleForm.ruleId ? '修改规则' : '添加规则'" width="560px">
+  <el-dialog v-model="ruleDialogVisible" :title="ruleForm.ruleId ? '修改规则' : '添加规则'" width="min(560px, 92vw)">
     <el-form :model="ruleForm" ref="ruleFormRef" label-width="92px" :rules="ruleRules">
       <el-form-item label="规则名称" prop="ruleName">
         <el-input v-model="ruleForm.ruleName" />
@@ -245,6 +291,20 @@ const batchDownloadSelectedItems = () => {
   batchDownloadItems(selectedItemList.value.map(item => item.itemId));
 };
 
+const isItemSelected = (itemId) => {
+  return selectedItemList.value.some((item) => item.itemId === itemId);
+};
+
+const toggleItemSelection = (item, selected) => {
+  if (selected) {
+    if (!isItemSelected(item.itemId)) {
+      selectedItemList.value = [...selectedItemList.value, item];
+    }
+    return;
+  }
+  selectedItemList.value = selectedItemList.value.filter((selectedItem) => selectedItem.itemId !== item.itemId);
+};
+
 const batchDownloadItems = (itemIdList) => {
   itemLoading.value = true;
   batchDownloadRssItemsApi({itemIdList}).then(() => {
@@ -328,6 +388,10 @@ onMounted(() => {
   gap: 8px;
 }
 
+.rss-mobile-list {
+  display: none;
+}
+
 .table-text {
   width: 100%;
   display: -webkit-box;
@@ -351,6 +415,71 @@ onMounted(() => {
 
   .rss-toolbar-filters {
     grid-template-columns: 1fr;
+  }
+
+  .rss-toolbar-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .rss-toolbar-actions .el-button {
+    margin-left: 0;
+  }
+
+  .rss-table-desktop {
+    display: none;
+  }
+
+  .rss-mobile-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .rss-mobile-card {
+    border: 1px solid var(--el-border-color-light);
+    border-radius: 8px;
+    padding: 12px;
+    background: var(--el-bg-color);
+  }
+
+  .mobile-card-title {
+    font-weight: 600;
+    line-height: 1.4;
+    word-break: break-all;
+  }
+
+  .mobile-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 8px;
+  }
+
+  .mobile-card-time,
+  .mobile-card-field {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+    padding-top: 8px;
+    word-break: break-all;
+  }
+
+  .mobile-card-url {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+    padding-top: 8px;
+    word-break: break-all;
+  }
+
+  .mobile-card-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 10px;
+  }
+
+  .mobile-card-actions .el-button {
+    margin-left: 0;
   }
 }
 </style>

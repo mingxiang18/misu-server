@@ -32,7 +32,7 @@
     </el-input>
   </div>
 
-  <div class="torrent-table">
+  <div class="torrent-table torrent-table-desktop">
     <el-table v-loading="getTorrentListLoading"
               :data="torrentList.list"
               @selection-change="handleTorrentSelectionChange"
@@ -69,7 +69,6 @@
                        :status="formatProgressStatus(scope.row)">
           </el-progress>
           <div>↓ {{ formatFileSize(scope.row.serverFileDownloadSpeed) }}/s</div>
-          <div>↑ {{ formatFileSize(scope.row.serverFileUploadSpeed) }}/s</div>
         </template>
       </el-table-column>
       <el-table-column prop="userFilePath" label="用户文件路径" min-width="80"/>
@@ -95,7 +94,9 @@
                             v-if="scope.row.serverFileState === 20 || scope.row.serverFileState === 0">暂停</el-button></div>
             <div><el-button link type="success"
                             @click="startTorrentDownload(scope.row)"
-                            v-if="scope.row.serverFileState === 10">开始</el-button></div>
+                            v-if="scope.row.serverFileState === 10 || scope.row.serverFileState === 99">
+              {{ scope.row.serverFileState === 99 ? '重新下载' : '开始' }}
+            </el-button></div>
             <div><el-button link type="warning"
                             @click="retryTorrentSync(scope.row)"
                             v-if="scope.row.userFileState === 2 && scope.row.serverFileState === 30">重试同步</el-button></div>
@@ -104,6 +105,44 @@
         </template>
       </el-table-column>
     </el-table>
+    <div class="torrent-table-tail">
+      <el-pagination background
+                     layout="prev, pager, next"
+                     v-model:current-page="torrentQueryParam.pageNum"
+                     v-model:page-size="torrentQueryParam.pageSize"
+                     :total="torrentList.total"
+                     :pager-count=5
+                     @change="getTorrentList()"/>
+    </div>
+  </div>
+
+  <div class="torrent-mobile-list" v-loading="getTorrentListLoading">
+    <div class="torrent-mobile-card" v-for="item in torrentList.list" :key="item.userTorrentId">
+      <div class="mobile-card-title">{{ item.torrentName || item.torrentHash }}</div>
+      <div class="mobile-card-meta">
+        <span>{{ formatFileSize(item.totalSize) }}</span>
+        <span>{{ formatTorrentState(item) }}</span>
+      </div>
+      <el-progress
+          :percentage="formatProgressPercentage(item)"
+          :status="formatProgressStatus(item)" />
+      <div class="mobile-card-path">{{ item.userFilePath }}</div>
+      <div class="mobile-card-actions">
+        <el-button link type="primary" @click="openTorrentDetail(item)">详情</el-button>
+        <el-button link type="warning"
+                   @click="stopTorrentDownload(item)"
+                   v-if="item.serverFileState === 20 || item.serverFileState === 0">暂停</el-button>
+        <el-button link type="success"
+                   @click="startTorrentDownload(item)"
+                   v-if="item.serverFileState === 10 || item.serverFileState === 99">
+          {{ item.serverFileState === 99 ? '重新下载' : '开始' }}
+        </el-button>
+        <el-button link type="warning"
+                   @click="retryTorrentSync(item)"
+                   v-if="item.userFileState === 2 && item.serverFileState === 30">重试同步</el-button>
+        <el-button link type="danger" @click="deleteUserTorrent(item)" v-if="item.userFileState === 0">删除</el-button>
+      </div>
+    </div>
     <div class="torrent-table-tail">
       <el-pagination background
                      layout="prev, pager, next"
@@ -139,34 +178,7 @@
       </el-descriptions-item>
       <el-descriptions-item label="文件大小">{{ formatFileSize(torrentDetail.totalSize) }}</el-descriptions-item>
       <el-descriptions-item label="下载进度">{{ formatProgressPercentage(torrentDetail) }}%</el-descriptions-item>
-      <el-descriptions-item label="已完成/剩余">
-        {{ formatFileSize(torrentDetail.completed) }} / {{ formatFileSize(torrentDetail.amountLeft) }}
-      </el-descriptions-item>
-      <el-descriptions-item label="下载/上传速度">
-        ↓ {{ formatFileSize(torrentDetail.serverFileDownloadSpeed) }}/s
-        ，↑ {{ formatFileSize(torrentDetail.serverFileUploadSpeed) }}/s
-      </el-descriptions-item>
-      <el-descriptions-item label="剩余时间">{{ formatEta(torrentDetail.eta) }}</el-descriptions-item>
-      <el-descriptions-item label="分享率">{{ formatRatio(torrentDetail.ratio) }}</el-descriptions-item>
-      <el-descriptions-item label="种子/用户">
-        {{ formatEmpty(torrentDetail.numSeeds) }} / {{ formatEmpty(torrentDetail.numLeechs) }}
-      </el-descriptions-item>
-      <el-descriptions-item label="Tracker">
-        <span style="word-break: break-all;">{{ formatEmpty(torrentDetail.tracker) }}</span>
-      </el-descriptions-item>
-      <el-descriptions-item label="保存路径">
-        <span style="word-break: break-all;">{{ formatEmpty(torrentDetail.savePath) }}</span>
-      </el-descriptions-item>
-      <el-descriptions-item label="内容路径">
-        <span style="word-break: break-all;">{{ formatEmpty(torrentDetail.contentPath) }}</span>
-      </el-descriptions-item>
-      <el-descriptions-item label="添加/完成时间">
-        {{ formatUnixTime(torrentDetail.addedOn) }} / {{ formatUnixTime(torrentDetail.completionOn) }}
-      </el-descriptions-item>
-      <el-descriptions-item label="最后活动时间">{{ formatUnixTime(torrentDetail.lastActivity) }}</el-descriptions-item>
-      <el-descriptions-item label="下载/上传限速">
-        ↓ {{ formatLimit(torrentDetail.dlLimit) }}，↑ {{ formatLimit(torrentDetail.upLimit) }}
-      </el-descriptions-item>
+      <el-descriptions-item label="下载速度">{{ formatFileSize(torrentDetail.serverFileDownloadSpeed) }}/s</el-descriptions-item>
       <el-descriptions-item label="磁力链接">
         <span style="word-break: break-all;">{{ torrentDetail.torrentUrl }}</span>
       </el-descriptions-item>
@@ -455,50 +467,6 @@ const formatFileSize = (bytes) => {
   return `${size.toFixed(1)} ${units[unitIndex]}`;
 }
 
-const formatEmpty = (value) => {
-  if (value === null || value === undefined || value === '') {
-    return '-';
-  }
-  return value;
-}
-
-const formatEta = (seconds) => {
-  if (seconds === null || seconds === undefined || seconds < 0 || seconds >= 8640000) {
-    return '-';
-  }
-  const hour = Math.floor(seconds / 3600);
-  const minute = Math.floor((seconds % 3600) / 60);
-  const second = Math.floor(seconds % 60);
-  if (hour > 0) {
-    return `${hour}小时${minute}分${second}秒`;
-  }
-  if (minute > 0) {
-    return `${minute}分${second}秒`;
-  }
-  return `${second}秒`;
-}
-
-const formatRatio = (ratio) => {
-  if (ratio === null || ratio === undefined) {
-    return '-';
-  }
-  return Number(ratio).toFixed(2);
-}
-
-const formatLimit = (limit) => {
-  if (limit === null || limit === undefined || limit < 0) {
-    return '无限制';
-  }
-  return `${formatFileSize(limit)}/s`;
-}
-
-const formatUnixTime = (seconds) => {
-  if (!seconds || seconds <= 0) {
-    return '-';
-  }
-  return new Date(seconds * 1000).toLocaleString();
-}
-
 const formatUserFileState = (userFileState) => {
   if (userFileState === 0) {
     return "等待同步";
@@ -651,6 +619,10 @@ onBeforeUnmount(() => {
   padding-top: 10px;
 }
 
+.torrent-mobile-list {
+  display: none;
+}
+
 .torrent-table-tail {
   padding-top: 10px;
   display: flex; /* 启用flex布局 */
@@ -663,5 +635,83 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 8px;
   padding-bottom: 10px;
+}
+
+@media (max-width: 760px) {
+  .torrent-management-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .torrent-management-header-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding-left: 0;
+  }
+
+  .torrent-management-header-actions .el-button {
+    margin-left: 0;
+    min-height: 36px;
+  }
+
+  .torrent-management-header-actions .el-button:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .torrent-table-desktop {
+    display: none;
+  }
+
+  .torrent-mobile-list {
+    display: grid;
+    gap: 10px;
+    padding-top: 10px;
+  }
+
+  .torrent-mobile-card {
+    border: 1px solid var(--el-border-color-light);
+    border-radius: 8px;
+    padding: 12px;
+    background: var(--el-bg-color);
+  }
+
+  .mobile-card-title {
+    font-weight: 600;
+    line-height: 1.4;
+    word-break: break-all;
+  }
+
+  .mobile-card-meta {
+    color: var(--el-text-color-secondary);
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    padding: 8px 0;
+  }
+
+  .mobile-card-path {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+    padding-top: 8px;
+    word-break: break-all;
+  }
+
+  .mobile-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 8px;
+  }
+
+  .mobile-card-actions .el-button {
+    margin-left: 0;
+  }
+
+  .torrent-detail-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
 }
 </style>

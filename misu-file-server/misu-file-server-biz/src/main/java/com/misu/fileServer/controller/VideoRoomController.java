@@ -43,6 +43,34 @@ public class VideoRoomController {
     }
 
     /**
+     * 获取房间成员列表
+     */
+    @GetMapping({"/getRoomMembers"})
+    @ApiOperation(value="获取房间成员列表")
+    public AjaxResult getRoomMembers(@Valid VideoRoomRequestDto videoRoomRequestDto) {
+        return AjaxResult.success(videoRoomService.getRoomMembers(videoRoomRequestDto.getRoomId()));
+    }
+
+    /**
+     * 发送放映室评论
+     */
+    @PostMapping({"/sendComment"})
+    @ApiOperation(value="发送放映室评论")
+    public AjaxResult sendComment(@Valid @RequestBody SendVideoRoomCommentRequestDto requestDto) {
+        videoRoomService.sendComment(requestDto);
+        return AjaxResult.success();
+    }
+
+    /**
+     * 获取放映室评论
+     */
+    @GetMapping({"/getComments"})
+    @ApiOperation(value="获取放映室评论")
+    public AjaxResult getComments(@Valid VideoRoomRequestDto videoRoomRequestDto) {
+        return AjaxResult.success(videoRoomService.getComments(videoRoomRequestDto.getRoomId()));
+    }
+
+    /**
      * 根据id获取对应的放映室分享链接
      */
     @GetMapping({"/getVideoRoomShareUrl"})

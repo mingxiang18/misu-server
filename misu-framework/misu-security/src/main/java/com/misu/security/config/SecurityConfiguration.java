@@ -53,6 +53,7 @@ public class SecurityConfiguration {
             .authorizeHttpRequests(auth -> {
                 // 设置auth的url为放行白名单
                 permitAllUrl.getUrls().forEach(url -> auth.requestMatchers(url).permitAll());
+                auth.requestMatchers("/videoRoom/ws/**").permitAll();
                 auth.anyRequest().authenticated();
             })
             // 使用无状态session，即不使用session缓存数据

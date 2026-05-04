@@ -35,6 +35,11 @@ spring:
           predicates:
             - Path=/account/**
 
+        - id: misu-file-server-video-room-ws
+          uri: lb:ws://misu-file-server
+          predicates:
+            - Path=/fileServer/videoRoom/ws/**
+
         - id: misu-file-server
           uri: lb://misu-file-server
           predicates:

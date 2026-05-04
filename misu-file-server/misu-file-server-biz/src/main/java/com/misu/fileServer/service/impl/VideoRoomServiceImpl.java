@@ -6,6 +6,8 @@ import com.misu.common.util.CacheUtils;
 import com.misu.fileServer.dao.VideoRoomDao;
 import com.misu.fileServer.domain.dto.*;
 import com.misu.fileServer.domain.entity.VideoRoom;
+import com.misu.fileServer.domain.entity.VideoRoomEvent;
+import com.misu.fileServer.repository.VideoRoomEventRepository;
 import com.misu.fileServer.service.VideoRoomService;
 import com.misu.fileServer.util.FilePathGuard;
 import com.misu.security.dto.LoginUser;
@@ -41,6 +43,9 @@ public class VideoRoomServiceImpl implements VideoRoomService {
 
     @Resource
     private TokenService tokenService;
+
+    @Resource
+    private VideoRoomEventRepository videoRoomEventRepository;
 
     @Value("${file-server.path}")
     private String fileServerPath;
@@ -129,6 +134,75 @@ public class VideoRoomServiceImpl implements VideoRoomService {
     public String getVideoRoomShareUrl(String roomId) {
         //前端相对路径
         return "fileServer/videoRoom/" + roomId;
+    }
+
+    @Override
+    public List<VideoRoomUserDto> getRoomMembers(String roomId) {
+        assertRoomExists(roomId);
+        addToRoomUser(roomId);
+        return getRoomUserList(roomId);
+    }
+
+    @Override
+    public void sendComment(SendVideoRoomCommentRequestDto requestDto) {
+        LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
+        recordCommentEvent(requestDto.getRoomId(), loginUser, requestDto.getContent(), System.currentTimeMillis());
+    }
+
+    @Override
+    public List<VideoRoomCommentDto> getComments(String roomId) {
+        assertRoomExists(roomId);
+        addToRoomUser(roomId);
+        List<VideoRoomEvent> eventList = videoRoomEventRepository.findTop100ByRoomIdAndEventTypeOrderByCreateTimeDescIdDesc(roomId, "COMMENT");
+        Collections.reverse(eventList);
+        return eventList.stream()
+                .map(this::convertToCommentDto)
+                .toList();
+    }
+
+    @Override
+    @Transactional(transactionManager = "fileServerTransactionManager")
+    public VideoRoomEventDto recordPlaybackEvent(String roomId, LoginUser loginUser, String state, Long videoTimeSeconds,
+                                                 Long clientSendTime, String payload) {
+        VideoRoom videoRoom = assertRoomExists(roomId);
+        if (!videoRoom.getCreatorId().equals(String.valueOf(loginUser.getUserId()))) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "您不是当前放映室房主，无权限修改进度");
+        }
+        if (!"play".equals(state) && !"pause".equals(state)) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "播放状态不合法");
+        }
+
+        long safeVideoTimeSeconds = Math.max(videoTimeSeconds == null ? 0L : videoTimeSeconds, 0L);
+        LocalTime videoTime = LocalTime.ofSecondOfDay(safeVideoTimeSeconds % (24 * 60 * 60));
+        videoRoom.setState(state);
+        videoRoom.setVideoTime(videoTime);
+        videoRoom.setSyncTime(LocalDateTime.now());
+        videoRoomDao.updateById(videoRoom);
+
+        String cacheKey = VIDEO_STATE_KEY + roomId;
+        VideoStateInRoomDto videoStateInRoomDto = new VideoStateInRoomDto();
+        videoStateInRoomDto.setRoomId(videoRoom.getRoomId());
+        videoStateInRoomDto.setRoomName(videoRoom.getRoomName());
+        videoStateInRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
+        videoStateInRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
+        videoStateInRoomDto.setVideoPath(videoRoom.getVideoPath());
+        videoStateInRoomDto.setState(videoRoom.getState());
+        videoStateInRoomDto.setSyncTime(videoRoom.getSyncTime());
+        videoStateInRoomDto.setVideoTime(videoRoom.getVideoTime());
+        CacheUtils.setCacheObject(cacheKey, videoStateInRoomDto, 10, ChronoUnit.MINUTES);
+
+        addToRoomUser(roomId, loginUser);
+        return saveRoomEvent(roomId, "PLAYBACK", loginUser, state, safeVideoTimeSeconds,
+                clientSendTime, null, payload);
+    }
+
+    @Override
+    @Transactional(transactionManager = "fileServerTransactionManager")
+    public VideoRoomEventDto recordCommentEvent(String roomId, LoginUser loginUser, String content, Long clientSendTime) {
+        assertRoomExists(roomId);
+        addToRoomUser(roomId, loginUser);
+        return saveRoomEvent(roomId, "COMMENT", loginUser, null, null, clientSendTime,
+                StringUtils.trim(content), null);
     }
 
     @Override
@@ -271,6 +345,14 @@ public class VideoRoomServiceImpl implements VideoRoomService {
      * 添加当前登陆账号到房间用户列表
      */
     private void addToRoomUser(String roomId) {
+        Optional<LoginUser> loginUserOptional = LoginMessageUtil.getLoginUser();
+        loginUserOptional.ifPresent(loginUser -> addToRoomUser(roomId, loginUser));
+    }
+
+    /**
+     * 添加指定账号到房间用户列表
+     */
+    private void addToRoomUser(String roomId, LoginUser loginUser) {
         String roomUserKey = VIDEO_ROOM_USER_KEY + roomId;
         Map<Long, VideoRoomUserDto> roomUserMap = CacheUtils.getCacheObject(roomUserKey);
         if (roomUserMap == null) {
@@ -278,12 +360,8 @@ public class VideoRoomServiceImpl implements VideoRoomService {
             //10分钟后过期
             CacheUtils.setCacheObject(roomUserKey, roomUserMap, 10, ChronoUnit.MINUTES);
         }
-        LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
 
-        //如果当前用户不存在，添加到房间用户列表
-        if (!roomUserMap.containsKey(loginUser.getUserId())) {
-            roomUserMap.put(loginUser.getUserId(), new VideoRoomUserDto(loginUser.getUserName(), LocalDateTime.now()));
-        }
+        roomUserMap.put(loginUser.getUserId(), new VideoRoomUserDto(loginUser.getUserName(), LocalDateTime.now()));
     }
 
     /**
@@ -313,6 +391,55 @@ public class VideoRoomServiceImpl implements VideoRoomService {
             LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
             roomUserMap.remove(loginUser.getUserId());
         }
+    }
+
+    private VideoRoom assertRoomExists(String roomId) {
+        return videoRoomDao.selectByRoomId(roomId)
+                .orElseThrow(() -> new ServiceException(HttpStatus.NOT_FOUND, "放映室不存在或已关闭"));
+    }
+
+    private VideoRoomEventDto saveRoomEvent(String roomId, String eventType, LoginUser loginUser, String state,
+                                            Long videoTimeSeconds, Long clientSendTime, String content, String payload) {
+        VideoRoomEvent event = new VideoRoomEvent();
+        event.setRoomId(roomId);
+        event.setEventType(eventType);
+        event.setUserId(loginUser.getUserId());
+        event.setUserName(loginUser.getUserName());
+        event.setState(state);
+        event.setVideoTimeSeconds(videoTimeSeconds);
+        event.setClientSendTime(clientSendTime);
+        event.setServerReceiveTime(System.currentTimeMillis());
+        event.setContent(content);
+        event.setPayload(payload);
+        event.setCreateTime(LocalDateTime.now());
+        return convertToEventDto(videoRoomEventRepository.save(event));
+    }
+
+    private VideoRoomCommentDto convertToCommentDto(VideoRoomEvent event) {
+        VideoRoomCommentDto dto = new VideoRoomCommentDto();
+        dto.setId(event.getId());
+        dto.setUserId(event.getUserId());
+        dto.setUserName(event.getUserName());
+        dto.setContent(event.getContent());
+        dto.setCreateTime(event.getCreateTime());
+        return dto;
+    }
+
+    private VideoRoomEventDto convertToEventDto(VideoRoomEvent event) {
+        VideoRoomEventDto dto = new VideoRoomEventDto();
+        dto.setId(event.getId());
+        dto.setRoomId(event.getRoomId());
+        dto.setEventType(event.getEventType());
+        dto.setUserId(event.getUserId());
+        dto.setUserName(event.getUserName());
+        dto.setState(event.getState());
+        dto.setVideoTimeSeconds(event.getVideoTimeSeconds());
+        dto.setClientSendTime(event.getClientSendTime());
+        dto.setServerReceiveTime(event.getServerReceiveTime());
+        dto.setContent(event.getContent());
+        dto.setPayload(event.getPayload());
+        dto.setCreateTime(event.getCreateTime());
+        return dto;
     }
 
     private void validateCreateVideoRoomRequest(CreateVideoRoomRequestDto requestDto, LoginUser loginUser) {
