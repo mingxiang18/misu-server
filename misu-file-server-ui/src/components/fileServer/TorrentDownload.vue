@@ -18,6 +18,8 @@
       </el-select>
     </div>
     <div class="torrent-management-header-actions">
+      <el-button :disabled="chooseTorrentList.length === 0" @click="batchStopTorrentDownload">批量暂停</el-button>
+      <el-button :disabled="chooseTorrentList.length === 0" @click="batchStartTorrentDownload">批量开始</el-button>
       <el-button type="primary" @click="addTorrentVisible = true">添加磁力链接</el-button>
     </div>
   </div>
@@ -33,7 +35,9 @@
   <div class="torrent-table">
     <el-table v-loading="getTorrentListLoading"
               :data="torrentList.list"
+              @selection-change="handleTorrentSelectionChange"
               style="width: 100%">
+      <el-table-column type="selection" width="40"/>
       <el-table-column prop="torrentName" label="文件名称" min-width="80">
         <template #default="scope">
           <el-tooltip
@@ -64,7 +68,8 @@
                        :percentage="formatProgressPercentage(scope.row)"
                        :status="formatProgressStatus(scope.row)">
           </el-progress>
-          <div>{{ formatFileSize(scope.row.serverFileDownloadSpeed) }} /s</div>
+          <div>↓ {{ formatFileSize(scope.row.serverFileDownloadSpeed) }}/s</div>
+          <div>↑ {{ formatFileSize(scope.row.serverFileUploadSpeed) }}/s</div>
         </template>
       </el-table-column>
       <el-table-column prop="userFilePath" label="用户文件路径" min-width="80"/>
@@ -91,6 +96,9 @@
             <div><el-button link type="success"
                             @click="startTorrentDownload(scope.row)"
                             v-if="scope.row.serverFileState === 10">开始</el-button></div>
+            <div><el-button link type="warning"
+                            @click="retryTorrentSync(scope.row)"
+                            v-if="scope.row.userFileState === 2 && scope.row.serverFileState === 30">重试同步</el-button></div>
             <div><el-button link type="danger" @click="deleteUserTorrent(scope.row)" v-if="scope.row.userFileState === 0">删除</el-button></div>
           </div>
         </template>
@@ -111,10 +119,18 @@
       v-model="torrentDetailVisible"
       title="磁力信息详情"
       style="width: 90%;">
+    <div v-loading="torrentDetailLoading">
+    <div class="torrent-detail-actions">
+      <el-button type="primary" @click="refreshTorrentDetail">刷新状态</el-button>
+      <el-button type="danger" @click="deleteServerTorrentTask(false)">删除服务器任务</el-button>
+      <el-button type="danger" @click="deleteServerTorrentTask(true)">删除服务器任务和源文件</el-button>
+    </div>
     <el-descriptions column="1" border>
       <el-descriptions-item label="用户文件目录">{{ torrentDetail.userFilePath }}</el-descriptions-item>
       <el-descriptions-item label="文件同步状态">{{ formatUserFileState(torrentDetail.userFileState) }}</el-descriptions-item>
+      <el-descriptions-item v-if="torrentDetail.failedReason" label="同步失败原因">{{ torrentDetail.failedReason }}</el-descriptions-item>
       <el-descriptions-item label="服务器文件状态">{{ formatTorrentState(torrentDetail) }}</el-descriptions-item>
+      <el-descriptions-item v-if="torrentDetail.remark" label="服务器备注">{{ torrentDetail.remark }}</el-descriptions-item>
       <el-descriptions-item label="文件hash">
         <span style="word-break: break-all;">{{ torrentDetail.torrentHash }}</span>
       </el-descriptions-item>
@@ -122,10 +138,40 @@
         <span style="word-break: break-all;">{{ torrentDetail.torrentName }}</span>
       </el-descriptions-item>
       <el-descriptions-item label="文件大小">{{ formatFileSize(torrentDetail.totalSize) }}</el-descriptions-item>
+      <el-descriptions-item label="下载进度">{{ formatProgressPercentage(torrentDetail) }}%</el-descriptions-item>
+      <el-descriptions-item label="已完成/剩余">
+        {{ formatFileSize(torrentDetail.completed) }} / {{ formatFileSize(torrentDetail.amountLeft) }}
+      </el-descriptions-item>
+      <el-descriptions-item label="下载/上传速度">
+        ↓ {{ formatFileSize(torrentDetail.serverFileDownloadSpeed) }}/s
+        ，↑ {{ formatFileSize(torrentDetail.serverFileUploadSpeed) }}/s
+      </el-descriptions-item>
+      <el-descriptions-item label="剩余时间">{{ formatEta(torrentDetail.eta) }}</el-descriptions-item>
+      <el-descriptions-item label="分享率">{{ formatRatio(torrentDetail.ratio) }}</el-descriptions-item>
+      <el-descriptions-item label="种子/用户">
+        {{ formatEmpty(torrentDetail.numSeeds) }} / {{ formatEmpty(torrentDetail.numLeechs) }}
+      </el-descriptions-item>
+      <el-descriptions-item label="Tracker">
+        <span style="word-break: break-all;">{{ formatEmpty(torrentDetail.tracker) }}</span>
+      </el-descriptions-item>
+      <el-descriptions-item label="保存路径">
+        <span style="word-break: break-all;">{{ formatEmpty(torrentDetail.savePath) }}</span>
+      </el-descriptions-item>
+      <el-descriptions-item label="内容路径">
+        <span style="word-break: break-all;">{{ formatEmpty(torrentDetail.contentPath) }}</span>
+      </el-descriptions-item>
+      <el-descriptions-item label="添加/完成时间">
+        {{ formatUnixTime(torrentDetail.addedOn) }} / {{ formatUnixTime(torrentDetail.completionOn) }}
+      </el-descriptions-item>
+      <el-descriptions-item label="最后活动时间">{{ formatUnixTime(torrentDetail.lastActivity) }}</el-descriptions-item>
+      <el-descriptions-item label="下载/上传限速">
+        ↓ {{ formatLimit(torrentDetail.dlLimit) }}，↑ {{ formatLimit(torrentDetail.upLimit) }}
+      </el-descriptions-item>
       <el-descriptions-item label="磁力链接">
         <span style="word-break: break-all;">{{ torrentDetail.torrentUrl }}</span>
       </el-descriptions-item>
     </el-descriptions>
+    </div>
   </el-dialog>
 
   <el-dialog
@@ -158,9 +204,14 @@
 import {onMounted, onBeforeUnmount, ref, onUnmounted} from "vue";
 import {
   getTorrentList as getTorrentListApi,
+  getTorrentDetail as getTorrentDetailApi,
   addUserTorrent as addUserTorrentApi,
   updateUserTorrent as updateUserTorrentApi,
-  removeUserTorrent as removeUserTorrentApi
+  batchUpdateUserTorrent as batchUpdateUserTorrentApi,
+  removeUserTorrent as removeUserTorrentApi,
+  retryUserTorrentSync as retryUserTorrentSyncApi,
+  refreshUserTorrentState as refreshUserTorrentStateApi,
+  deleteServerTorrent as deleteServerTorrentApi
 } from '@/api/fileServer/torrent';
 import { getUserInfo } from '@/api/user/user';
 import { Search } from "@element-plus/icons-vue";
@@ -190,6 +241,7 @@ const torrentList = ref({
   "pageNumber": 0,
   "list": []
 });
+const chooseTorrentList = ref([]);
 
 const addTorrentRules = {
   userFilePath: [
@@ -207,6 +259,7 @@ const addTorrentRules = {
 
 //是否展示torrent详情
 const torrentDetailVisible = ref(false);
+const torrentDetailLoading = ref(false);
 const torrentDetail = ref({});
 
 const addTorrentVisible = ref(false);
@@ -249,10 +302,38 @@ const getTorrentList = (needLoading = true) => {
   })
 }
 
+const handleTorrentSelectionChange = (selection) => {
+  chooseTorrentList.value = selection;
+}
+
 //打开torrent详情
 const openTorrentDetail = (torrentInfo) => {
   torrentDetail.value = torrentInfo;
   torrentDetailVisible.value = true;
+  getTorrentDetail(torrentInfo.userTorrentId);
+}
+
+const getTorrentDetail = (userTorrentId) => {
+  torrentDetailLoading.value = true;
+  getTorrentDetailApi({userTorrentId}).then((response) => {
+    torrentDetail.value = response.data;
+  }).finally(() => {
+    torrentDetailLoading.value = false;
+  })
+}
+
+const refreshTorrentDetail = () => {
+  if (!torrentDetail.value.userTorrentId) {
+    return;
+  }
+  torrentDetailLoading.value = true;
+  refreshUserTorrentStateApi({userTorrentId: torrentDetail.value.userTorrentId}).then((response) => {
+    torrentDetail.value = response.data;
+    ElMessage.success("刷新成功");
+    getTorrentList(false);
+  }).finally(() => {
+    torrentDetailLoading.value = false;
+  })
 }
 
 const stopTorrentDownload = (torrentInfo) => {
@@ -271,6 +352,25 @@ const startTorrentDownload = (torrentInfo) => {
     serverFileState: 20
   }
   updateUserTorrentApi(startTorrentDownloadRequest).then((response) => {
+    getTorrentList();
+  })
+}
+
+const batchStopTorrentDownload = () => {
+  batchUpdateTorrentState(10);
+}
+
+const batchStartTorrentDownload = () => {
+  batchUpdateTorrentState(20);
+}
+
+const batchUpdateTorrentState = (serverFileState) => {
+  const request = {
+    userTorrentIdList: chooseTorrentList.value.map((item) => item.userTorrentId),
+    serverFileState
+  }
+  batchUpdateUserTorrentApi(request).then(() => {
+    ElMessage.success("批量操作成功");
     getTorrentList();
   })
 }
@@ -298,6 +398,42 @@ const deleteUserTorrent = (torrentInfo) => {
   })
 }
 
+const retryTorrentSync = (torrentInfo) => {
+  const retryUserTorrentSyncRequest = {
+    userTorrentId: torrentInfo.userTorrentId
+  }
+  retryUserTorrentSyncApi(retryUserTorrentSyncRequest).then(() => {
+    ElMessage.success("已提交重试同步");
+    getTorrentList();
+  })
+}
+
+const deleteServerTorrentTask = (deleteFiles) => {
+  const message = deleteFiles
+      ? '该操作会删除qBittorrent任务并尝试删除服务器源文件，但不会删除用户文件目录中已同步的文件。是否继续？'
+      : '该操作只删除qBittorrent任务，不删除已下载源文件，也不会删除用户文件目录中的记录。是否继续？'
+  ElMessageBox.confirm(
+      message,
+      '删除服务器任务',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+  ).then(() => {
+    deleteServerTorrentApi({
+      userTorrentId: torrentDetail.value.userTorrentId,
+      deleteFiles
+    }).then(() => {
+      ElMessage.success("服务器任务已删除");
+      torrentDetailVisible.value = false;
+      getTorrentList();
+    })
+  }).catch(() => {
+    return false;
+  })
+}
+
 const formatFileSize = (bytes) => {
   if (!bytes) {
     return '0B';
@@ -319,6 +455,50 @@ const formatFileSize = (bytes) => {
   return `${size.toFixed(1)} ${units[unitIndex]}`;
 }
 
+const formatEmpty = (value) => {
+  if (value === null || value === undefined || value === '') {
+    return '-';
+  }
+  return value;
+}
+
+const formatEta = (seconds) => {
+  if (seconds === null || seconds === undefined || seconds < 0 || seconds >= 8640000) {
+    return '-';
+  }
+  const hour = Math.floor(seconds / 3600);
+  const minute = Math.floor((seconds % 3600) / 60);
+  const second = Math.floor(seconds % 60);
+  if (hour > 0) {
+    return `${hour}小时${minute}分${second}秒`;
+  }
+  if (minute > 0) {
+    return `${minute}分${second}秒`;
+  }
+  return `${second}秒`;
+}
+
+const formatRatio = (ratio) => {
+  if (ratio === null || ratio === undefined) {
+    return '-';
+  }
+  return Number(ratio).toFixed(2);
+}
+
+const formatLimit = (limit) => {
+  if (limit === null || limit === undefined || limit < 0) {
+    return '无限制';
+  }
+  return `${formatFileSize(limit)}/s`;
+}
+
+const formatUnixTime = (seconds) => {
+  if (!seconds || seconds <= 0) {
+    return '-';
+  }
+  return new Date(seconds * 1000).toLocaleString();
+}
+
 const formatUserFileState = (userFileState) => {
   if (userFileState === 0) {
     return "等待同步";
@@ -334,6 +514,8 @@ const formatUserFileState = (userFileState) => {
 const formatProgressPercentage = (torrentInfo) => {
   if (torrentInfo.serverFileState === 30 || torrentInfo.userFileState === 1) {
     return 100;
+  }else if (torrentInfo.serverFileProgress === null || torrentInfo.serverFileProgress === undefined) {
+    return 0;
   }else {
     return parseFloat((torrentInfo.serverFileProgress * 100).toFixed(1));
   }
@@ -474,5 +656,12 @@ onBeforeUnmount(() => {
   display: flex; /* 启用flex布局 */
   flex-wrap: wrap; /* 启用自动换行 */
   justify-content: flex-end; /* 子项水平对齐方式 */
+}
+
+.torrent-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 10px;
 }
 </style>

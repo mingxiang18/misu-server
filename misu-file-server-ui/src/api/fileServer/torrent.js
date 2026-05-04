@@ -9,6 +9,15 @@ export function getTorrentList(queryParams) {
     });
 }
 
+// 获取磁力链接详情
+export function getTorrentDetail(queryParams) {
+    return request({
+        url: '/fileServer/torrent/getTorrentDetail',
+        method: 'get',
+        params: queryParams
+    });
+}
+
 // 获取rss订阅列表
 export function getRssList(queryParams) {
     return request({
@@ -36,10 +45,46 @@ export function updateUserTorrent(updateTorrentRequestDto) {
     });
 }
 
+// 批量更新磁力链接
+export function batchUpdateUserTorrent(batchUpdateTorrentRequestDto) {
+    return request({
+        url: '/fileServer/torrent/batchUpdateUserTorrent',
+        method: 'post',
+        data: batchUpdateTorrentRequestDto
+    });
+}
+
+// 强制刷新磁力链接状态
+export function refreshUserTorrentState(deleteTorrentRequestDto) {
+    return request({
+        url: '/fileServer/torrent/refreshUserTorrentState',
+        method: 'post',
+        data: deleteTorrentRequestDto
+    });
+}
+
+// 删除服务器磁力任务
+export function deleteServerTorrent(deleteServerTorrentRequestDto) {
+    return request({
+        url: '/fileServer/torrent/deleteServerTorrent',
+        method: 'post',
+        data: deleteServerTorrentRequestDto
+    });
+}
+
 // 移除磁力链接
 export function removeUserTorrent(deleteTorrentRequestDto) {
     return request({
         url: '/fileServer/torrent/removeUserTorrent',
+        method: 'post',
+        data: deleteTorrentRequestDto
+    });
+}
+
+// 重试同步磁力文件
+export function retryUserTorrentSync(deleteTorrentRequestDto) {
+    return request({
+        url: '/fileServer/torrent/retryUserTorrentSync',
         method: 'post',
         data: deleteTorrentRequestDto
     });

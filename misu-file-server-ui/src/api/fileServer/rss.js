@@ -18,6 +18,69 @@ export function getRssDetail(queryParams) {
     });
 }
 
+// 获取rss条目历史
+export function getRssItems(queryParams) {
+    return request({
+        url: '/fileServer/torrent/getRssItems',
+        method: 'get',
+        params: queryParams
+    });
+}
+
+// 手动刷新rss订阅
+export function refreshRss(refreshRssRequestDto) {
+    return request({
+        url: '/fileServer/torrent/refreshRss',
+        method: 'post',
+        data: refreshRssRequestDto
+    });
+}
+
+// 获取rss规则列表
+export function getRssRuleList(queryParams) {
+    return request({
+        url: '/fileServer/torrent/getRssRuleList',
+        method: 'get',
+        params: queryParams
+    });
+}
+
+// 添加rss规则
+export function addRssRule(addRssRuleRequestDto) {
+    return request({
+        url: '/fileServer/torrent/addRssRule',
+        method: 'post',
+        data: addRssRuleRequestDto
+    });
+}
+
+// 更新rss规则
+export function updateRssRule(updateRssRuleRequestDto) {
+    return request({
+        url: '/fileServer/torrent/updateRssRule',
+        method: 'post',
+        data: updateRssRuleRequestDto
+    });
+}
+
+// 移除rss规则
+export function removeRssRule(deleteRssRuleRequestDto) {
+    return request({
+        url: '/fileServer/torrent/removeRssRule',
+        method: 'post',
+        data: deleteRssRuleRequestDto
+    });
+}
+
+// 批量下载rss条目
+export function batchDownloadRssItems(batchDownloadRssItemsRequestDto) {
+    return request({
+        url: '/fileServer/torrent/batchDownloadRssItems',
+        method: 'post',
+        data: batchDownloadRssItemsRequestDto
+    });
+}
+
 // 添加rss订阅
 export function addRss(addRssRequestDto) {
     return request({

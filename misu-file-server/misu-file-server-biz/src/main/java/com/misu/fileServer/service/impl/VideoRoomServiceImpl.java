@@ -7,16 +7,24 @@ import com.misu.fileServer.dao.VideoRoomDao;
 import com.misu.fileServer.domain.dto.*;
 import com.misu.fileServer.domain.entity.VideoRoom;
 import com.misu.fileServer.service.VideoRoomService;
+import com.misu.fileServer.util.FilePathGuard;
 import com.misu.security.dto.LoginUser;
+import com.misu.security.service.TokenService;
 import com.misu.security.utils.LoginMessageUtil;
+import io.jsonwebtoken.Claims;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 /**
@@ -31,9 +39,21 @@ public class VideoRoomServiceImpl implements VideoRoomService {
     @Resource
     private VideoRoomDao videoRoomDao;
 
+    @Resource
+    private TokenService tokenService;
+
+    @Value("${file-server.path}")
+    private String fileServerPath;
+
     private final static String VIDEO_STATE_KEY = "video-room-state:";
 
     private final static String VIDEO_ROOM_USER_KEY = "video-room-user:";
+
+    private final static String PUBLIC_DIRECTORY = "public/";
+
+    private final static String PRIVATE_DIRECTORY = "private/";
+
+    private final static String PREVIEW_DIRECTORY = "preview/";
 
     @Override
     public VideoRoomDto getVideoRoomFromId(String roomId) {
@@ -120,6 +140,7 @@ public class VideoRoomServiceImpl implements VideoRoomService {
         }
 
         LoginUser loginUser = loginUserOptional.get();
+        validateCreateVideoRoomRequest(createVideoRoomRequestDto, loginUser);
 
         Optional<VideoRoom> videoRoomOptional = videoRoomDao.selectOneByCreatorId(loginUser.getUserId().toString());
         if (videoRoomOptional.isEmpty()) {
@@ -292,5 +313,107 @@ public class VideoRoomServiceImpl implements VideoRoomService {
             LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
             roomUserMap.remove(loginUser.getUserId());
         }
+    }
+
+    private void validateCreateVideoRoomRequest(CreateVideoRoomRequestDto requestDto, LoginUser loginUser) {
+        if (StringUtils.isBlank(requestDto.getVideoPath())) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "视频路径不能为空");
+        }
+        validateVideoPath(requestDto.getVideoPath(), loginUser);
+
+        boolean hasDirectoryOpenFlag = requestDto.getDirectoryOpenFlag() != null;
+        boolean hasDirectoryPath = StringUtils.isNotBlank(requestDto.getDirectoryPath());
+        if (hasDirectoryOpenFlag || hasDirectoryPath) {
+            if (!hasDirectoryOpenFlag || !hasDirectoryPath) {
+                throw new ServiceException(HttpStatus.BAD_REQUEST, "放映室目录信息不完整");
+            }
+            Path directoryPath = resolveUserFile(requestDto.getDirectoryOpenFlag(),
+                    loginUser.getUserId().toString(),
+                    requestDto.getDirectoryPath(),
+                    true);
+            if (!Files.exists(directoryPath) || !Files.isDirectory(directoryPath)) {
+                throw new ServiceException(HttpStatus.BAD_REQUEST, "放映室目录不存在");
+            }
+        }
+    }
+
+    private void validateVideoPath(String videoPath, LoginUser loginUser) {
+        String fileToken = parseFileToken(videoPath);
+        if (StringUtils.isNotBlank(fileToken)) {
+            Claims claims = tokenService.parseToken(fileToken);
+            if (!claims.getExpiration().after(new Date())) {
+                throw new ServiceException(HttpStatus.FORBIDDEN, "视频链接已过期");
+            }
+            String tokenFilePath = claims.get("filePath", String.class);
+            Path tokenPath = resolveTokenFile(tokenFilePath, claims, loginUser);
+            if (!Files.exists(tokenPath) || Files.isDirectory(tokenPath)) {
+                throw new ServiceException(HttpStatus.BAD_REQUEST, "视频文件不存在或已被删除");
+            }
+            return;
+        }
+
+        try {
+            URI uri = URI.create(videoPath);
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                throw new ServiceException(HttpStatus.BAD_REQUEST, "视频路径不合法");
+            }
+        } catch (IllegalArgumentException e) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "视频路径不合法");
+        }
+    }
+
+    private String parseFileToken(String videoPath) {
+        int tokenIndex = videoPath.indexOf("fileToken=");
+        if (tokenIndex < 0) {
+            return null;
+        }
+        String token = videoPath.substring(tokenIndex + "fileToken=".length());
+        int nextParamIndex = token.indexOf('&');
+        if (nextParamIndex >= 0) {
+            token = token.substring(0, nextParamIndex);
+        }
+        return token;
+    }
+
+    private Path resolveTokenFile(String tokenFilePath, Claims claims, LoginUser loginUser) {
+        if (StringUtils.startsWith(tokenFilePath, PUBLIC_DIRECTORY)) {
+            String relativePath = tokenFilePath.substring(PUBLIC_DIRECTORY.length());
+            return FilePathGuard.resolveInsideRoot(fileServerPath + PUBLIC_DIRECTORY, relativePath);
+        }
+        if (StringUtils.startsWith(tokenFilePath, PRIVATE_DIRECTORY)) {
+            String privatePath = tokenFilePath.substring(PRIVATE_DIRECTORY.length());
+            int separatorIndex = privatePath.indexOf('/');
+            if (separatorIndex <= 0) {
+                throw new ServiceException(HttpStatus.FORBIDDEN, "视频链接不合法");
+            }
+            String userId = privatePath.substring(0, separatorIndex);
+            Object tokenUserId = claims.get("userId");
+            if (tokenUserId == null
+                    || !userId.equals(String.valueOf(tokenUserId))
+                    || !userId.equals(loginUser.getUserId().toString())) {
+                throw new ServiceException(HttpStatus.FORBIDDEN, "视频链接不合法");
+            }
+            String relativePath = privatePath.substring(separatorIndex + 1);
+            return FilePathGuard.resolveInsideRoot(fileServerPath + PRIVATE_DIRECTORY + userId + "/", relativePath);
+        }
+        if (StringUtils.startsWith(tokenFilePath, PREVIEW_DIRECTORY)) {
+            String relativePath = tokenFilePath.substring(PREVIEW_DIRECTORY.length());
+            return FilePathGuard.resolveInsideRoot(fileServerPath + PREVIEW_DIRECTORY, relativePath);
+        }
+        throw new ServiceException(HttpStatus.FORBIDDEN, "视频链接不合法");
+    }
+
+    private Path resolveUserFile(Integer openType, String userId, String requestPath, boolean allowRoot) {
+        if (openType == null) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不能为空");
+        }
+        if (openType == 1) {
+            return FilePathGuard.resolveInsideRoot(fileServerPath + PUBLIC_DIRECTORY, requestPath, allowRoot);
+        }
+        if (openType == 0) {
+            return FilePathGuard.resolveInsideRoot(fileServerPath + PRIVATE_DIRECTORY + userId + "/", requestPath, allowRoot);
+        }
+        throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不合法");
     }
 }

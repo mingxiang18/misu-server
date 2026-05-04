@@ -122,6 +122,9 @@ public class TorrentInfoResponse {
     @ApiModelProperty("Torrent 进度（百分比）")
     private Double progress;
 
+    @ApiModelProperty("Torrent 分享率")
+    private Double ratio;
+
     @JsonProperty("ratio_limit")
     @ApiModelProperty("比率限制")
     private Double ratioLimit;

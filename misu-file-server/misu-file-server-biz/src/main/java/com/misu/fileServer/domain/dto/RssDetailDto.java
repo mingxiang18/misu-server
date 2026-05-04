@@ -36,4 +36,7 @@ public class RssDetailDto {
 
     @ApiModelProperty("订阅下的torrent列表")
     private List<RssTorrentRelationDto> rssTorrentRelationList;
+
+    @ApiModelProperty("订阅规则列表")
+    private List<RssRuleDto> rssRuleList;
 }

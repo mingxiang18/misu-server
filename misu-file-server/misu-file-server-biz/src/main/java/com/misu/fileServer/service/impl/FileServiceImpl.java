@@ -7,9 +7,8 @@ import com.misu.fileServer.constant.FileType;
 import com.misu.fileServer.domain.dto.*;
 import com.misu.fileServer.service.FileService;
 import com.misu.fileServer.service.PreviewService;
+import com.misu.fileServer.util.FilePathGuard;
 import com.misu.fileServer.util.FileTypeUtils;
-import com.misu.framework.config.file.FilePathConfig;
-import com.misu.framework.fileClient.FileClientApi;
 import com.misu.security.constant.UserRole;
 import com.misu.security.utils.AuthorityUtil;
 import com.misu.security.dto.LoginUser;
@@ -27,6 +26,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpRange;
 import org.springframework.http.MediaType;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
@@ -35,6 +35,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -50,6 +51,9 @@ public class FileServiceImpl implements FileService {
 
     private final static String PUBLIC_DIRECTORY = "public/";
     private final static String PRIVATE_DIRECTORY = "private/";
+    private final static String PREVIEW_DIRECTORY = "preview/";
+    private final static String TMP_DIRECTORY = "tmp/";
+    private final static long TMP_FILE_EXPIRE_MILLIS = 24 * 60 * 60 * 1000L;
 
     @Value("${file-server.path}")
     private String fileServerPath;
@@ -80,9 +84,7 @@ public class FileServiceImpl implements FileService {
     public List<FileResponseDto> getFileList(FileRequestDto fileRequestDto) {
         Optional<LoginUser> loginUser = LoginMessageUtil.getLoginUser();
         if (loginUser.isPresent()) {
-            String directory = fileRequestDto.getOpenType() == 1 ?
-                    fileServerPath + PUBLIC_DIRECTORY :
-                    fileServerPath + PRIVATE_DIRECTORY + loginUser.get().getUserId() + "/";
+            String directory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.get().getUserId().toString());
             List<FileResponseDto> fileList = getFileListFromDirectory(fileRequestDto.getFilePath(), directory);
             for (FileResponseDto responseDto : fileList) {
                 //封装文件预览路径
@@ -120,7 +122,7 @@ public class FileServiceImpl implements FileService {
      */
     private static List<FileResponseDto> getFileListFromDirectory(String filePath, String directory) {
         File directoryFile = new File(directory);
-        File file = new File(directory + filePath);
+        File file = FilePathGuard.resolveInsideRoot(directory, filePath, true).toFile();
         if (!file.exists()) {
             return new ArrayList<>();
         }
@@ -160,9 +162,17 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public String getFileDownloadLink(FileRequestDto fileRequestDto) {
+        LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
+        String directory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
+        Path targetPath = FilePathGuard.resolveInsideRoot(directory, fileRequestDto.getFilePath());
+        if (!targetPath.toFile().exists()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或已被删除");
+        }
+
+        String relativePath = FilePathGuard.normalizeRelativePath(fileRequestDto.getFilePath());
         String filePath = fileRequestDto.getOpenType() == 1 ?
-                PUBLIC_DIRECTORY + fileRequestDto.getFilePath() :
-                PRIVATE_DIRECTORY + LoginMessageUtil.getLoginUser().get().getUserId() + "/" + fileRequestDto.getFilePath();
+                PUBLIC_DIRECTORY + relativePath :
+                PRIVATE_DIRECTORY + loginUser.getUserId() + "/" + relativePath;
 
         return createFileDownloadLink(filePath);
     }
@@ -183,7 +193,7 @@ public class FileServiceImpl implements FileService {
             Claims claims = tokenService.parseToken(fileRequestDto.getFileToken());
             String tokenFilePath = claims.get("filePath", String.class);
             if (claims.getExpiration().after(new Date()) ) {
-                File file = new File(fileServerPath + tokenFilePath);
+                File file = resolveTokenFile(tokenFilePath, claims).toFile();
                 if (file.exists()) {
                     writeFileToResponse(response, request, file);
                     return;
@@ -191,6 +201,7 @@ public class FileServiceImpl implements FileService {
                     throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或已被删除");
                 }
             }
+            throw new ServiceException(HttpStatus.FORBIDDEN, "下载链接已过期");
         }catch (ServiceException se) {
             throw se;
         }catch (Exception e) {
@@ -201,16 +212,17 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public FileUploadResponse uploadFile(FileUploadRequest fileUploadRequest) {
-        if (fileUploadRequest.getOpenType() == 1
-                && !AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
-            throw new ServiceException(HttpStatus.UNAUTHORIZED, "当前用户无法上传公共文件");
+        checkPublicWriteAuthority(fileUploadRequest.getOpenType());
+        checkUploadChunk(fileUploadRequest);
+        LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
+        String directory = getUserRootDirectory(fileUploadRequest.getOpenType(), loginUser.getUserId().toString());
+
+        String fileName = FilePathGuard.normalizeFileName(fileUploadRequest.getFileName());
+        Path parentPath = FilePathGuard.resolveInsideRoot(directory, fileUploadRequest.getFilePath(), true);
+        File file = parentPath.resolve(fileName).normalize().toFile();
+        if (!file.toPath().startsWith(Paths.get(directory).toAbsolutePath().normalize())) {
+            throw new ServiceException(HttpStatus.FORBIDDEN, "文件路径不合法");
         }
-
-        String directory = fileUploadRequest.getOpenType() == 1 ?
-                fileServerPath + PUBLIC_DIRECTORY :
-                fileServerPath + PRIVATE_DIRECTORY + LoginMessageUtil.getLoginUser().get().getUserId() + "/";
-
-        File file = new File(directory + fileUploadRequest.getFilePath() + "/" + fileUploadRequest.getFileName());
 
         //如果不允许覆盖且文件已存在，返回提示
         if (!fileUploadRequest.getCoverFlag() && file.exists()) {
@@ -227,10 +239,13 @@ public class FileServiceImpl implements FileService {
         try {
             // 保存分片文件
             File chunkFile = new File(fileServerPath + "tmp/" + fileMD5 + ".part" + fileUploadRequest.getChunkIndex());
+            if (!chunkFile.getParentFile().exists()) {
+                chunkFile.getParentFile().mkdirs();
+            }
             fileUploadRequest.getFile().transferTo(chunkFile);
 
-            // 如果所有分片都上传完成，则合并文件
-            if (fileUploadRequest.getChunkIndex() == fileUploadRequest.getTotalChunks() - 1) {
+            // 如果所有分片都上传完成，则合并文件；支持乱序上传。
+            if (allChunksUploaded(fileMD5, fileUploadRequest.getTotalChunks())) {
                 mergeChunks(file, fileUploadRequest.getTotalChunks());
                 //上传完成后执行后置操作
                 fileAddAfter(file);
@@ -239,7 +254,7 @@ public class FileServiceImpl implements FileService {
             log.error("上传文件异常", e);
             //遍历删除分片
             for (int i = 0; i < fileUploadRequest.getTotalChunks(); i++) {
-                File chunkFile = new File(fileServerPath + "tmp/" + fileMD5 + ".part" + fileUploadRequest.getChunkIndex());
+                File chunkFile = new File(fileServerPath + "tmp/" + fileMD5 + ".part" + i);
                 if (chunkFile.exists()) {
                     chunkFile.delete();
                 }
@@ -252,6 +267,25 @@ public class FileServiceImpl implements FileService {
         }
 
         return new FileUploadResponse(1, "上传成功");
+    }
+
+    private void checkUploadChunk(FileUploadRequest fileUploadRequest) {
+        if (fileUploadRequest.getTotalChunks() <= 0) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件总块数不合法");
+        }
+        if (fileUploadRequest.getChunkIndex() < 0 || fileUploadRequest.getChunkIndex() >= fileUploadRequest.getTotalChunks()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件块索引不合法");
+        }
+    }
+
+    private boolean allChunksUploaded(String fileMD5, int totalChunks) {
+        for (int i = 0; i < totalChunks; i++) {
+            File chunkFile = new File(fileServerPath + TMP_DIRECTORY + fileMD5 + ".part" + i);
+            if (!chunkFile.exists()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // 合并所有分片
@@ -284,13 +318,15 @@ public class FileServiceImpl implements FileService {
         }
 
         //根据openType获取目录
-        String fileDirectory = addFileInkRequest.getOpenType() == 1 ?
-                fileServerPath + PUBLIC_DIRECTORY :
-                fileServerPath + PRIVATE_DIRECTORY + addFileInkRequest.getUserId();
+        String fileDirectory = getUserRootDirectory(addFileInkRequest.getOpenType(), addFileInkRequest.getUserId());
 
         // 拼接完整地址
-        String filePath = fileDirectory + "/" + addFileInkRequest.getFilePath().substring(1) + "/" + addFileInkRequest.getFileName();
-        File file = new File(filePath);
+        Path parentPath = FilePathGuard.resolveInsideRoot(fileDirectory, addFileInkRequest.getFilePath(), true);
+        String fileName = FilePathGuard.normalizeFileName(addFileInkRequest.getFileName());
+        File file = parentPath.resolve(fileName).normalize().toFile();
+        if (!file.toPath().startsWith(Paths.get(fileDirectory).toAbsolutePath().normalize())) {
+            throw new ServiceException(HttpStatus.FORBIDDEN, "文件路径不合法");
+        }
         if (file.exists()) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "目录下存在同名文件，无法同步至该目录");
         } else {
@@ -344,11 +380,11 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public Boolean createDirectory(FileRequestDto fileRequestDto) {
-        String fileDirectory = fileRequestDto.getOpenType() == 1 ?
-                fileServerPath + PUBLIC_DIRECTORY :
-                fileServerPath + PRIVATE_DIRECTORY + LoginMessageUtil.getLoginUser().get().getUserId();
+        checkPublicWriteAuthority(fileRequestDto.getOpenType());
+        LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
+        String fileDirectory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
 
-        File file = new File(fileDirectory + fileRequestDto.getFilePath());
+        File file = FilePathGuard.resolveInsideRoot(fileDirectory, fileRequestDto.getFilePath()).toFile();
 
         if (file.exists()) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "同名目录或文件已存在，无法创建");
@@ -359,15 +395,15 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public void moveFile(FileRenameRequestDto fileRenameRequestDto) {
-        String fileDirectory = fileRenameRequestDto.getOpenType() == 1 ?
-                fileServerPath + PUBLIC_DIRECTORY :
-                fileServerPath + PRIVATE_DIRECTORY + LoginMessageUtil.getLoginUser().get().getUserId() + "/";
+        checkPublicWriteAuthority(fileRenameRequestDto.getOpenType());
+        LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
+        String fileDirectory = getUserRootDirectory(fileRenameRequestDto.getOpenType(), loginUser.getUserId().toString());
 
-        File file = new File(fileDirectory + fileRenameRequestDto.getOriginFilePath());
+        File file = FilePathGuard.resolveInsideRoot(fileDirectory, fileRenameRequestDto.getOriginFilePath()).toFile();
 
         boolean isSuccess = false;
         if (file.exists()) {
-            File newFile = new File(fileDirectory + fileRenameRequestDto.getNewFilePath());
+            File newFile = FilePathGuard.resolveInsideRoot(fileDirectory, fileRenameRequestDto.getNewFilePath()).toFile();
             isSuccess = file.renameTo(newFile);
 
             //执行原文件删除后置操作
@@ -386,11 +422,11 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public Boolean deleteFile(FileRequestDto fileRequestDto) {
-        String fileDirectory = fileRequestDto.getOpenType() == 1 ?
-                fileServerPath + PUBLIC_DIRECTORY :
-                fileServerPath + PRIVATE_DIRECTORY + LoginMessageUtil.getLoginUser().get().getUserId();
+        checkPublicWriteAuthority(fileRequestDto.getOpenType());
+        LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
+        String fileDirectory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
 
-        File file = new File(fileDirectory + fileRequestDto.getFilePath());
+        File file = FilePathGuard.resolveInsideRoot(fileDirectory, fileRequestDto.getFilePath()).toFile();
 
         //如果文件存在，执行删除
         if (file.exists()) {
@@ -429,21 +465,27 @@ public class FileServiceImpl implements FileService {
     @SneakyThrows
     private void writeFileToResponse(HttpServletResponse response, HttpServletRequest request, File file) {
         if (file.exists()) {
+            File tmpFile = null;
+            File responseFile = file;
+            try {
             if (file.isDirectory()) {
-                File tmpFile = new File(fileServerPath + "tmp/" + System.currentTimeMillis() + ".zip");
+                tmpFile = new File(fileServerPath + TMP_DIRECTORY + System.currentTimeMillis() + ".zip");
+                if (!tmpFile.getParentFile().exists()) {
+                    tmpFile.getParentFile().mkdirs();
+                }
                 try (FileOutputStream tmpFileOutputStream = new FileOutputStream(tmpFile)){
                     ZipUtils.toZip(file, tmpFileOutputStream);
                     //将下载文件指向压缩后的临时文件
-                    file = tmpFile;
+                    responseFile = tmpFile;
                 }
             }
             //生成文件唯一标识
-            String eTag = generateETag(file);
+            String eTag = generateETag(responseFile);
 
             String contentType;
             try {
                 // 根据文件路径探测 MIME 类型
-                contentType = Files.probeContentType(file.toPath());
+                contentType = Files.probeContentType(responseFile.toPath());
                 if (contentType == null) {
                     // 默认二进制流类型
                     contentType = "application/octet-stream";
@@ -454,7 +496,7 @@ public class FileServiceImpl implements FileService {
             //设置部分响应信息
             response.setContentType(MediaType.parseMediaType(contentType).toString());
             response.setCharacterEncoding("utf-8");
-            response.setHeader("Content-disposition", "attachment;filename="+ URLEncoder.encode(file.getName(), StandardCharsets.UTF_8));
+            response.setHeader("Content-disposition", "attachment;filename="+ URLEncoder.encode(responseFile.getName(), StandardCharsets.UTF_8));
             //缓存24小时
             response.setHeader("Cache-Control", "max-age=86400");
             //文件资源唯一标识
@@ -464,7 +506,7 @@ public class FileServiceImpl implements FileService {
             String rangeString = request.getHeader("Range");
             if (StringUtils.isNotBlank(rangeString)) {
                 //如果范围存在，设定文件读取开始位置后输出
-                try (RandomAccessFile targetFile = new RandomAccessFile(file, "r")){
+                try (RandomAccessFile targetFile = new RandomAccessFile(responseFile, "r")){
                     // Parse the Range header
                     HttpRange range = HttpRange.parseRanges(rangeString).get(0);
                     long rangeStart = range.getRangeStart(targetFile.length());
@@ -507,9 +549,9 @@ public class FileServiceImpl implements FileService {
                 }
             }else {
                 //设置此次相应返回的数据长度
-                response.setHeader("Content-Length", String.valueOf(file.length()));
+                response.setHeader("Content-Length", String.valueOf(responseFile.length()));
 
-                try (BufferedInputStream fileInputStream = new BufferedInputStream(new FileInputStream(file));){
+                try (BufferedInputStream fileInputStream = new BufferedInputStream(new FileInputStream(responseFile));){
                     byte[] b = new byte[8192];
                     int length;
                     try {
@@ -525,7 +567,11 @@ public class FileServiceImpl implements FileService {
                     log.error("读取文件失败", e);
                 }
             }
-
+            } finally {
+                if (tmpFile != null && tmpFile.exists() && !tmpFile.delete()) {
+                    log.warn("临时ZIP文件删除失败：{}", tmpFile.getAbsolutePath());
+                }
+            }
 
         }else {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在");
@@ -563,5 +609,75 @@ public class FileServiceImpl implements FileService {
     private void fileDeleteAfter(File deleteFile) {
         //删除预览图片
         previewService.deletePreviewFile(deleteFile);
+    }
+
+    private String getUserRootDirectory(Integer openType, String userId) {
+        if (openType == null) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不能为空");
+        }
+        if (openType == 1) {
+            return fileServerPath + PUBLIC_DIRECTORY;
+        }
+        if (openType == 0) {
+            if (StringUtils.isBlank(userId)) {
+                throw new ServiceException(HttpStatus.BAD_REQUEST, "用户id不能为空");
+            }
+            return fileServerPath + PRIVATE_DIRECTORY + userId + "/";
+        }
+        throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不合法");
+    }
+
+    private void checkPublicWriteAuthority(Integer openType) {
+        if (openType != null && openType == 1
+                && !AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
+            throw new ServiceException(HttpStatus.UNAUTHORIZED, "当前用户无法修改公共文件");
+        }
+    }
+
+    private Path resolveTokenFile(String tokenFilePath, Claims claims) {
+        if (StringUtils.startsWith(tokenFilePath, PUBLIC_DIRECTORY)) {
+            String relativePath = tokenFilePath.substring(PUBLIC_DIRECTORY.length());
+            return FilePathGuard.resolveInsideRoot(fileServerPath + PUBLIC_DIRECTORY, relativePath);
+        }
+        if (StringUtils.startsWith(tokenFilePath, PRIVATE_DIRECTORY)) {
+            String privatePath = tokenFilePath.substring(PRIVATE_DIRECTORY.length());
+            int separatorIndex = privatePath.indexOf('/');
+            if (separatorIndex <= 0) {
+                throw new ServiceException(HttpStatus.FORBIDDEN, "下载链接不合法");
+            }
+            String userId = privatePath.substring(0, separatorIndex);
+            Object tokenUserId = claims.get("userId");
+            if (tokenUserId == null || !userId.equals(String.valueOf(tokenUserId))) {
+                throw new ServiceException(HttpStatus.FORBIDDEN, "下载链接不合法");
+            }
+            String relativePath = privatePath.substring(separatorIndex + 1);
+            return FilePathGuard.resolveInsideRoot(fileServerPath + PRIVATE_DIRECTORY + userId + "/", relativePath);
+        }
+        if (StringUtils.startsWith(tokenFilePath, PREVIEW_DIRECTORY)) {
+            String relativePath = tokenFilePath.substring(PREVIEW_DIRECTORY.length());
+            return FilePathGuard.resolveInsideRoot(fileServerPath + PREVIEW_DIRECTORY, relativePath);
+        }
+        throw new ServiceException(HttpStatus.FORBIDDEN, "下载链接不合法");
+    }
+
+    /**
+     * 清理过期上传分片和兜底残留的临时ZIP。
+     */
+    @Scheduled(cron = "${file.tmpClean:0 30 3 * * ?}")
+    public void cleanExpiredTmpFiles() {
+        File tmpDirectory = new File(fileServerPath + TMP_DIRECTORY);
+        if (!tmpDirectory.exists() || !tmpDirectory.isDirectory()) {
+            return;
+        }
+        long expireBefore = Instant.now().toEpochMilli() - TMP_FILE_EXPIRE_MILLIS;
+        File[] tmpFiles = tmpDirectory.listFiles((dir, name) -> name.contains(".part") || name.endsWith(".zip"));
+        if (tmpFiles == null) {
+            return;
+        }
+        for (File tmpFile : tmpFiles) {
+            if (tmpFile.isFile() && tmpFile.lastModified() < expireBefore && !tmpFile.delete()) {
+                log.warn("过期临时文件删除失败：{}", tmpFile.getAbsolutePath());
+            }
+        }
     }
 }

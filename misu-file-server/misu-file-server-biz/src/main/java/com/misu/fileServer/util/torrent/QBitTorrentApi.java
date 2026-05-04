@@ -145,7 +145,7 @@ public class QBitTorrentApi {
 
         //封装为cookie的header
         HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.set("Set-Cookie", "SID=" + cookie + "; path=/");
+        httpHeaders.set(HttpHeaders.COOKIE, "SID=" + cookie);
 
         //检查cookie是否有效
         try {
@@ -157,7 +157,7 @@ public class QBitTorrentApi {
                 //如果cookie无效，重新登录并更新cookie
                 cookie = login();
                 CacheUtils.setCacheObject(cookieKey, cookie);
-                httpHeaders.set("Set-Cookie", "SID=" + cookie + "; path=/");
+                httpHeaders.set(HttpHeaders.COOKIE, "SID=" + cookie);
             } else {
                 throw se;
             }
