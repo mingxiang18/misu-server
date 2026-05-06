@@ -59,6 +59,51 @@ public class FileController {
     }
 
     /**
+     * 登录态下载文件
+     */
+    @GetMapping({"/download"})
+    @ApiOperation(value="登录态下载文件")
+    public void downloadUserFile(@Valid FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
+        fileService.accessUserFile(fileRequestDto, request, response, true);
+    }
+
+    /**
+     * 登录态播放/预览原文件
+     */
+    @GetMapping({"/stream"})
+    @ApiOperation(value="登录态播放/预览原文件")
+    public void streamUserFile(@Valid FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
+        fileService.accessUserFile(fileRequestDto, request, response, false);
+    }
+
+    /**
+     * 登录态获取图片缩略图
+     */
+    @GetMapping({"/preview"})
+    @ApiOperation(value="登录态获取图片缩略图")
+    public void previewFile(@Valid FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
+        fileService.previewFile(fileRequestDto, request, response);
+    }
+
+    /**
+     * 登录态获取视频封面
+     */
+    @GetMapping({"/videoPreview"})
+    @ApiOperation(value="登录态获取视频封面")
+    public void videoPreviewFile(@Valid FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
+        fileService.videoPreviewFile(fileRequestDto, request, response);
+    }
+
+    /**
+     * 登录态播放转码视频
+     */
+    @GetMapping({"/transcodedVideo"})
+    @ApiOperation(value="登录态播放转码视频")
+    public void transcodedVideoFile(@Valid FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
+        fileService.transcodedVideoFile(fileRequestDto, request, response);
+    }
+
+    /**
      * 上传文件
      */
     @PostMapping({"/uploadFile"})

@@ -20,9 +20,9 @@ public class TorrentSchedule {
 
     /**
      * 从qBitTorrent获取并更新未完成的torrent状态
-     * 每5分钟更新一次torrent下载状态
+     * 每20分钟更新一次torrent下载状态
      **/
-    @Scheduled(cron = "${torrent.updateState:0 0/5 * * * ?}")
+    @Scheduled(cron = "${torrent.updateState:0 0/20 * * * ?}")
     public void updateNotCompletedTorrentState() {
         torrentService.updateNotCompletedTorrentState();
         torrentService.moveCompletedTorrentToUserDirectory();
@@ -30,9 +30,9 @@ public class TorrentSchedule {
 
     /**
      * 更新rss订阅状态
-     * 每5分钟更新一次
+     * 每20分钟更新一次
      **/
-    @Scheduled(cron = "${rss.updateState:0 0/5 * * * ?}")
+    @Scheduled(cron = "${rss.updateState:0 0/20 * * * ?}")
     public void updateRssState() {
         torrentService.updateRssStateSchedule();
     }

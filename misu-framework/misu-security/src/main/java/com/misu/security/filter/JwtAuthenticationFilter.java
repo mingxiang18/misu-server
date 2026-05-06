@@ -1,14 +1,16 @@
 package com.misu.security.filter;
 
 import com.misu.security.dto.LoginUser;
-import com.misu.security.properties.PermitAllUrlProperties;
 import com.misu.security.service.TokenService;
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -37,6 +39,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      */
     public static final String TOKEN_PREFIX = "Bearer ";
 
+    @Value("${token.cookieName:User-Token}")
+    private String tokenCookieName;
+
     /**
      * 检查令牌是否有效，如果用户和有效，更新安全上下文中的身份验证令牌
      * 最后一步执行过滤器chain，别忘记放行
@@ -53,13 +58,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             FilterChain filterChain) throws ServletException, IOException {
 
         // 从请求头中获取认证信息
-        final String authHeader = request.getHeader("Authorization");
-        final String token;
+        final String token = getTokenFromRequest(request);
 
-        if (authHeader != null && authHeader.startsWith(TOKEN_PREFIX)) {
-            // 提取 token
-            token = authHeader.substring(TOKEN_PREFIX.length());
-
+        if (StringUtils.isNotBlank(token)) {
             // 如果当前上下文中没有认证信息，则进行 token 验证
             if (SecurityContextHolder.getContext().getAuthentication() == null && tokenService.verifyAccessToken(token)) {
                 // 如果令牌有效，获取用户信息并创建认证对象
@@ -79,5 +80,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // 继续过滤链
         filterChain.doFilter(request, response);
+    }
+
+    private String getTokenFromRequest(HttpServletRequest request) {
+        final String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith(TOKEN_PREFIX)) {
+            return authHeader.substring(TOKEN_PREFIX.length());
+        }
+
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            return null;
+        }
+        for (Cookie cookie : cookies) {
+            if (tokenCookieName.equals(cookie.getName())) {
+                return cookie.getValue();
+            }
+        }
+        return null;
     }
 }

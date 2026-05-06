@@ -4,6 +4,30 @@ server:
   servlet:
     context-path: /fileServer
 
+# File download
+file:
+  download:
+    directory:
+      # Limit temporary ZIP downloads to avoid exhausting small outbound bandwidth.
+      maxBytes: 209715200
+      maxFiles: 1000
+
+video:
+  transcode:
+    enabled: true
+    # 1.5GB. Videos larger than this are not transcoded or played online by default.
+    max-bytes: 1610612736
+    queue-dir: ${file-server.path}transcode-queue
+    status-dir: ${file-server.path}transcode-status
+    transcode-dir: ${file-server.path}transcode
+    preview-dir: ${file-server.path}preview/video
+    # HEVC + AAC MP4. Keep original resolution up to 1080p and reduce size with quality-based encoding.
+    max-height: 1080
+    crf: 28
+    preset: medium
+    audio-bitrate: 128k
+    profile-version: hevc-aac-mp4-1080p-v1
+
 # Spring
 spring:
   application:

@@ -15,7 +15,7 @@
              @play="updateVideoProgress"
              @pause="updateVideoProgress"
              @seeked="updateVideoProgress"
-             preload="auto"
+             preload="metadata"
              webkit-playsinline='true'
              playsinline='true'/>
     </div>
@@ -455,8 +455,41 @@ const applyRemotePlaybackEvent = (event) => {
 
 // 在播放列表点击播放视频
 const playVideo = (file) => {
+  if (file.transcodeState === 'SUCCESS') {
+    if (!file.transcodedStreamLink) {
+      ElMessage.info('转码视频正在准备在线播放，请稍后刷新');
+      return;
+    }
+    createVideoRoomFromFile(file, file.transcodedStreamLink);
+    return;
+  }
+  if (file.transcodeState === 'TOO_LARGE') {
+    ElMessage.warning(file.transcodeMessage || '视频过大，无法在线播放，可下载后观看');
+    return;
+  }
+  if (file.transcodeState === 'FAILED' || file.transcodeState === 'UNSUPPORTED') {
+    ElMessage.warning(file.transcodeMessage || '视频暂时无法在线播放');
+    return;
+  }
+  if (!file.streamLink) {
+    ElMessage.info('视频正在准备在线播放，请稍后刷新');
+    return;
+  }
+  if (file.transcodeState === 'WAITING') {
+    ElMessage.info('视频正在等待转码，本次播放原视频');
+  } else if (file.transcodeState === 'PROCESSING') {
+    ElMessage.info(`视频正在转码 ${file.transcodeProgress || 0}%，本次播放原视频`);
+  }
+  createVideoRoomFromFile(file, file.streamLink);
+}
+
+const createVideoRoomFromFile = (file, streamLink) => {
+  if (!streamLink) {
+    ElMessage.info('视频链接不存在，请稍后刷新');
+    return;
+  }
   videoListLoading.value = true;
-  createNewVideoRoom(import.meta.env.VITE_RESOURCE_API + file.downloadLink, file.fileName, videoRoom.value.directoryOpenFlag, videoRoom.value.directoryPath)
+  createNewVideoRoom(import.meta.env.VITE_RESOURCE_API + streamLink, file.fileName, videoRoom.value.directoryOpenFlag, videoRoom.value.directoryPath)
 }
 
 // 创建新的视频放映室

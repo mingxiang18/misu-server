@@ -2,11 +2,16 @@ package com.misu.fileServer.service.impl;
 
 import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
+import com.misu.common.util.CacheUtils;
 import com.misu.common.util.ZipUtils;
 import com.misu.fileServer.constant.FileType;
+import com.misu.fileServer.constant.VideoTranscodeState;
 import com.misu.fileServer.domain.dto.*;
+import com.misu.fileServer.domain.entity.TorrentFileMapping;
+import com.misu.fileServer.repository.TorrentFileMappingRepository;
 import com.misu.fileServer.service.FileService;
 import com.misu.fileServer.service.PreviewService;
+import com.misu.fileServer.service.VideoTranscodeService;
 import com.misu.fileServer.util.FilePathGuard;
 import com.misu.fileServer.util.FileTypeUtils;
 import com.misu.security.constant.UserRole;
@@ -28,6 +33,7 @@ import org.springframework.http.HttpRange;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.*;
 import java.net.URLEncoder;
@@ -36,6 +42,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -54,15 +62,31 @@ public class FileServiceImpl implements FileService {
     private final static String PREVIEW_DIRECTORY = "preview/";
     private final static String TMP_DIRECTORY = "tmp/";
     private final static long TMP_FILE_EXPIRE_MILLIS = 24 * 60 * 60 * 1000L;
+    private final static String FILE_DOWNLOAD_TOKEN_CACHE_KEY = "file-download-token:";
 
     @Value("${file-server.path}")
     private String fileServerPath;
+
+    @Value("${token.expireTtl:86400000}")
+    private long tokenExpireTtl;
+
+    @Value("${file.download.directory.maxBytes:209715200}")
+    private long directoryDownloadMaxBytes;
+
+    @Value("${file.download.directory.maxFiles:1000}")
+    private long directoryDownloadMaxFiles;
 
     @Resource
     private TokenService tokenService;
     
     @Resource
     private PreviewService previewService;
+
+    @Resource
+    private VideoTranscodeService videoTranscodeService;
+
+    @Resource
+    private TorrentFileMappingRepository torrentFileMappingRepository;
 
     /**
      * 初始化检查文件目录是否存在，不存在则创建
@@ -84,15 +108,19 @@ public class FileServiceImpl implements FileService {
     public List<FileResponseDto> getFileList(FileRequestDto fileRequestDto) {
         Optional<LoginUser> loginUser = LoginMessageUtil.getLoginUser();
         if (loginUser.isPresent()) {
+            String userId = getMappingUserId(fileRequestDto.getOpenType(), loginUser.get().getUserId().toString());
             String directory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.get().getUserId().toString());
-            List<FileResponseDto> fileList = getFileListFromDirectory(fileRequestDto.getFilePath(), directory);
+            List<FileResponseDto> fileList = getFileListFromDirectory(fileRequestDto, directory, userId);
             for (FileResponseDto responseDto : fileList) {
                 //封装文件预览路径
-                packagePreviewLink(directory, responseDto);
+                packagePreviewLink(fileRequestDto.getOpenType(), responseDto);
+                packageVideoTranscodeInfo(fileRequestDto.getOpenType(), responseDto);
 
                 //设置下载路径
-                responseDto.setDownloadLink(getFileDownloadLink(new FileRequestDto(fileRequestDto.getFilePath() + responseDto.getFileName(),
-                        fileRequestDto.getOpenType())));
+                responseDto.setDownloadLink(createUserFileAccessLink("/download", fileRequestDto.getFilePath() + responseDto.getFileName(),
+                        fileRequestDto.getOpenType()));
+                responseDto.setStreamLink(createUserFileAccessLink("/stream", fileRequestDto.getFilePath() + responseDto.getFileName(),
+                        fileRequestDto.getOpenType()));
 
                 responseDto.setFile(null);
             }
@@ -102,15 +130,36 @@ public class FileServiceImpl implements FileService {
         }
     }
 
-    private void packagePreviewLink(String directory, FileResponseDto responseDto) {
+    private void packageVideoTranscodeInfo(Integer openType, FileResponseDto responseDto) {
+        if (!FileType.VIDEO_FILE.equals(responseDto.getFileType())) {
+            return;
+        }
+
+        VideoTranscodeStatusDto status = videoTranscodeService.getOrCreateTranscodeStatus(responseDto.getFile());
+        responseDto.setTranscodeState(status.getState());
+        responseDto.setTranscodeProgress(status.getProgress());
+        responseDto.setTranscodeMessage(status.getMessage());
+        responseDto.setTranscodeMaxBytes(videoTranscodeService.getMaxBytes());
+
+        if (videoTranscodeService.getVideoPreviewFile(responseDto.getFile()).exists()) {
+            responseDto.setVideoPreviewLink(createUserFileAccessLink("/videoPreview",
+                    responseDto.getFilePath() + responseDto.getFileName(), openType));
+        }
+        if (VideoTranscodeState.SUCCESS.equals(status.getState())) {
+            String transcodedStreamLink = createUserFileAccessLink("/transcodedVideo",
+                    responseDto.getFilePath() + responseDto.getFileName(), openType);
+            responseDto.setTranscodedStreamLink(transcodedStreamLink);
+        }
+    }
+
+    private void packagePreviewLink(Integer openType, FileResponseDto responseDto) {
         //图片类型的文件预览链接设置
         if (FileType.IMAGE_FILE.equals(responseDto.getFileType())) {
-            String previewPath = (directory + responseDto.getFilePath().substring(1) + responseDto.getFileName())
-                    .replace(fileServerPath, fileServerPath + "preview/");
-            File previewFile = new File(previewPath);
+            File previewFile = getPreviewFile(responseDto.getFile());
             //如果预览文件存在，生成预览链接，如果不存在，添加到缩略图生成队列
             if (previewFile.exists()) {
-                responseDto.setPreviewLink(createFileDownloadLink(previewPath.replace(fileServerPath, "")));
+                responseDto.setPreviewLink(createUserFileAccessLink("/preview",
+                        responseDto.getFilePath() + responseDto.getFileName(), openType));
             }else {
                 previewService.generatePreviewFile(responseDto.getFile());
             }
@@ -120,34 +169,63 @@ public class FileServiceImpl implements FileService {
     /**
      * 从指定目录获取文件列表
      */
-    private static List<FileResponseDto> getFileListFromDirectory(String filePath, String directory) {
-        File directoryFile = new File(directory);
-        File file = FilePathGuard.resolveInsideRoot(directory, filePath, true).toFile();
-        if (!file.exists()) {
-            return new ArrayList<>();
-        }
-
-        if (file.isDirectory()) {
-            File[] files = file.listFiles();
-            if (files == null) {
-                return new ArrayList<>();
-            }else {
-                //封装文件展示列表
-                return Arrays.stream(files).map(oneFile -> {
-                    FileResponseDto fileResponseDto = new FileResponseDto();
-                    fileResponseDto.setFileName(oneFile.getName());
-                    fileResponseDto.setFileSize(oneFile.length());
-                    fileResponseDto.setFileType(FileTypeUtils.getFileType(oneFile));
-                    fileResponseDto.setFile(oneFile);
-
-                    String fileRelativePath = getRelativePath(oneFile, directoryFile);
-                    fileResponseDto.setFilePath("/" + (StringUtils.isBlank(fileRelativePath) ? "" : fileRelativePath + "/"));
-
-                    return fileResponseDto;
-                }).collect(Collectors.toList());
+    private List<FileResponseDto> getFileListFromDirectory(FileRequestDto fileRequestDto, String directory, String userId) {
+        String requestPath = FilePathGuard.normalizeRelativePath(fileRequestDto.getFilePath(), true);
+        Optional<TorrentFileMapping> coveringMapping = findCoveringMapping(fileRequestDto.getOpenType(), userId, requestPath);
+        if (coveringMapping.isPresent()) {
+            File mappedFile = resolveMappedFile(coveringMapping.get(), requestPath).toFile();
+            if (mappedFile.exists() && mappedFile.isDirectory()) {
+                return getFileListFromRealDirectory(mappedFile, requestPath);
             }
         }
-        return new ArrayList<>();
+
+        File directoryFile = new File(directory);
+        File file = FilePathGuard.resolveInsideRoot(directory, requestPath, true).toFile();
+        Map<String, FileResponseDto> fileMap = new LinkedHashMap<>();
+        if (file.exists() && file.isDirectory()) {
+            File[] files = file.listFiles();
+            if (files != null) {
+                Arrays.stream(files).map(oneFile -> buildFileResponseDto(oneFile, directoryFile))
+                        .forEach(fileResponseDto -> fileMap.put(fileResponseDto.getFileName(), fileResponseDto));
+            }
+        }
+
+        getMappingChildren(fileRequestDto.getOpenType(), userId, requestPath).forEach(fileResponseDto ->
+                fileMap.putIfAbsent(fileResponseDto.getFileName(), fileResponseDto));
+
+        return new ArrayList<>(fileMap.values());
+    }
+
+    private List<FileResponseDto> getFileListFromRealDirectory(File directory, String virtualDirectoryPath) {
+        File[] files = directory.listFiles();
+        if (files == null) {
+            return new ArrayList<>();
+        }
+        return Arrays.stream(files).map(oneFile -> buildMappedFileResponseDto(oneFile, virtualDirectoryPath))
+                .collect(Collectors.toList());
+    }
+
+    private FileResponseDto buildFileResponseDto(File oneFile, File directoryFile) {
+        FileResponseDto fileResponseDto = new FileResponseDto();
+        fileResponseDto.setFileName(oneFile.getName());
+        fileResponseDto.setFileSize(oneFile.length());
+        fileResponseDto.setFileType(FileTypeUtils.getFileType(oneFile));
+        fileResponseDto.setFile(oneFile);
+
+        String fileRelativePath = getRelativePath(oneFile, directoryFile);
+        fileResponseDto.setFilePath("/" + (StringUtils.isBlank(fileRelativePath) ? "" : fileRelativePath + "/"));
+
+        return fileResponseDto;
+    }
+
+    private FileResponseDto buildMappedFileResponseDto(File oneFile, String virtualDirectoryPath) {
+        FileResponseDto fileResponseDto = new FileResponseDto();
+        fileResponseDto.setFileName(oneFile.getName());
+        fileResponseDto.setFileSize(oneFile.length());
+        fileResponseDto.setFileType(FileTypeUtils.getFileType(oneFile));
+        fileResponseDto.setFile(oneFile);
+        fileResponseDto.setFilePath("/" + (StringUtils.isBlank(virtualDirectoryPath) ? "" : virtualDirectoryPath + "/"));
+        return fileResponseDto;
     }
 
     /**
@@ -163,8 +241,7 @@ public class FileServiceImpl implements FileService {
     @Override
     public String getFileDownloadLink(FileRequestDto fileRequestDto) {
         LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
-        String directory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
-        Path targetPath = FilePathGuard.resolveInsideRoot(directory, fileRequestDto.getFilePath());
+        Path targetPath = resolveUserRequestFile(fileRequestDto);
         if (!targetPath.toFile().exists()) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或已被删除");
         }
@@ -182,9 +259,23 @@ public class FileServiceImpl implements FileService {
      */
     private String createFileDownloadLink(String filePath) {
         Map<String, Object> claims = new HashMap<>();
-        claims.put("userId", LoginMessageUtil.getLoginUser().get().getUserId());
+        Long userId = LoginMessageUtil.getLoginUser().get().getUserId();
+        claims.put("userId", userId);
         claims.put("filePath", filePath);
-        return "fileServer/file/downloadFile?fileToken=" + tokenService.createToken(claims);
+        String cacheKey = FILE_DOWNLOAD_TOKEN_CACHE_KEY + userId + ":" + filePath;
+        String fileToken = CacheUtils.getCacheObject(cacheKey);
+        if (StringUtils.isBlank(fileToken)) {
+            fileToken = tokenService.createToken(claims);
+            long cacheMillis = tokenExpireTtl > 120_000L ? tokenExpireTtl - 60_000L : Math.max(1_000L, tokenExpireTtl / 2);
+            CacheUtils.setCacheObject(cacheKey, fileToken, cacheMillis, ChronoUnit.MILLIS);
+        }
+        return "fileServer/file/downloadFile?fileToken=" + fileToken;
+    }
+
+    private String createUserFileAccessLink(String accessPath, String filePath, Integer openType) {
+        String relativePath = FilePathGuard.normalizeRelativePath(filePath);
+        return "fileServer/file" + accessPath + "?openType=" + openType
+                + "&filePath=" + URLEncoder.encode(relativePath, StandardCharsets.UTF_8);
     }
 
     @Override
@@ -195,7 +286,7 @@ public class FileServiceImpl implements FileService {
             if (claims.getExpiration().after(new Date()) ) {
                 File file = resolveTokenFile(tokenFilePath, claims).toFile();
                 if (file.exists()) {
-                    writeFileToResponse(response, request, file);
+                    writeFileToResponse(response, request, file, true);
                     return;
                 }else {
                     throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或已被删除");
@@ -208,6 +299,72 @@ public class FileServiceImpl implements FileService {
             log.error("token解析失败", e);
             throw new ServiceException(HttpStatus.FORBIDDEN, "下载链接已过期");
         }
+    }
+
+    @Override
+    public void accessUserFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response, boolean attachment) {
+        File file = resolveUserRequestFile(fileRequestDto).toFile();
+        if (!file.exists()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或已被删除");
+        }
+        writeFileToResponse(response, request, file, attachment);
+    }
+
+    @Override
+    public void previewFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
+        File originFile = resolveUserRequestFile(fileRequestDto).toFile();
+        if (!originFile.exists() || originFile.isDirectory()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或已被删除");
+        }
+        if (!FileType.IMAGE_FILE.equals(FileTypeUtils.getFileType(originFile))) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "当前文件不支持缩略图预览");
+        }
+
+        File previewFile = getPreviewFile(originFile);
+        if (!previewFile.exists()) {
+            previewService.generatePreviewFile(originFile);
+            previewFile = originFile;
+        }
+        writeFileToResponse(response, request, previewFile, false);
+    }
+
+    @Override
+    public void videoPreviewFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
+        File originFile = resolveUserRequestFile(fileRequestDto).toFile();
+        if (!originFile.exists() || originFile.isDirectory()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或已被删除");
+        }
+        if (!FileType.VIDEO_FILE.equals(FileTypeUtils.getFileType(originFile))) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "当前文件不支持视频封面预览");
+        }
+
+        File previewFile = videoTranscodeService.getVideoPreviewFile(originFile);
+        if (!previewFile.exists()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "视频封面尚未生成");
+        }
+        writeFileToResponse(response, request, previewFile, false);
+    }
+
+    @Override
+    public void transcodedVideoFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
+        File originFile = resolveUserRequestFile(fileRequestDto).toFile();
+        if (!originFile.exists() || originFile.isDirectory()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或已被删除");
+        }
+        if (!FileType.VIDEO_FILE.equals(FileTypeUtils.getFileType(originFile))) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "当前文件不支持视频播放");
+        }
+
+        VideoTranscodeStatusDto status = videoTranscodeService.getOrCreateTranscodeStatus(originFile);
+        if (!VideoTranscodeState.SUCCESS.equals(status.getState())) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, StringUtils.defaultIfBlank(status.getMessage(), "视频尚未完成转码"));
+        }
+
+        File transcodedFile = videoTranscodeService.getTranscodedFile(originFile);
+        if (!transcodedFile.exists()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "转码视频不存在或已被删除");
+        }
+        writeFileToResponse(response, request, transcodedFile, false);
     }
 
     @Override
@@ -312,6 +469,7 @@ public class FileServiceImpl implements FileService {
     }
 
     @Override
+    @Transactional("fileServerTransactionManager")
     public void addFileInk(AddFileInkRequest addFileInkRequest) throws IOException {
         if (addFileInkRequest.getOpenType() == 0 && StringUtils.isBlank(addFileInkRequest.getUserId())) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "添加私人文件时用户id不能为空");
@@ -327,54 +485,27 @@ public class FileServiceImpl implements FileService {
         if (!file.toPath().startsWith(Paths.get(fileDirectory).toAbsolutePath().normalize())) {
             throw new ServiceException(HttpStatus.FORBIDDEN, "文件路径不合法");
         }
-        if (file.exists()) {
+        String virtualPath = FilePathGuard.normalizeRelativePath(addFileInkRequest.getFilePath(), true);
+        virtualPath = StringUtils.isBlank(virtualPath) ? fileName : virtualPath + "/" + fileName;
+        String mappingUserId = getMappingUserId(addFileInkRequest.getOpenType(), addFileInkRequest.getUserId());
+
+        if (file.exists() || torrentFileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(addFileInkRequest.getOpenType(), mappingUserId, virtualPath)
+                .isPresent()) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "目录下存在同名文件，无法同步至该目录");
         } else {
-            // 判断源路径是否是文件夹
             Path target = Paths.get(addFileInkRequest.getInkFilePath());
-            Path link = Paths.get(file.getAbsolutePath());
-
-            if (Files.isDirectory(target)) {
-                // 如果源文件是文件夹，递归处理文件夹中的文件
-                createSymbolicLinksForDirectory(link, target);
-            } else {
-                // 如果目录不存在则创建
-                Path linkParent = link.getParent();
-                if (Files.notExists(linkParent)) {
-                    Files.createDirectories(linkParent);
-                }
-                // 如果源路径是文件，直接创建符号链接
-                Files.createSymbolicLink(link, target);
+            if (!Files.exists(target)) {
+                throw new ServiceException(HttpStatus.BAD_REQUEST, "映射的原文件不存在");
             }
-        }
-    }
-
-    // 递归处理文件夹并创建符号链接
-    private void createSymbolicLinksForDirectory(Path link, Path target) throws IOException {
-        if (Files.notExists(link)) {
-            Files.createDirectories(link);  // 创建目标文件夹
-        }
-
-        // 遍历源文件夹中的所有文件和子文件夹
-        try (Stream<Path> paths = Files.walk(target)) {
-            paths.filter(Files::isRegularFile)  // 只处理文件
-                    .forEach(sourceFile -> {
-                        try {
-                            Path relativePath = target.relativize(sourceFile);  // 获取相对路径
-                            Path linkFile = link.resolve(relativePath);    // 目标路径
-
-                            // 确保目标目录存在
-                            Path parentDir = linkFile.getParent();
-                            if (Files.notExists(parentDir)) {
-                                Files.createDirectories(parentDir);  // 创建父目录
-                            }
-
-                            // 创建符号链接
-                            Files.createSymbolicLink(linkFile, sourceFile);
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    });
+            TorrentFileMapping mapping = new TorrentFileMapping();
+            mapping.setOpenType(addFileInkRequest.getOpenType());
+            mapping.setUserId(mappingUserId);
+            mapping.setVirtualPath(virtualPath);
+            mapping.setTargetPath(target.toAbsolutePath().normalize().toString());
+            mapping.setDeleted(false);
+            mapping.setCreateTime(LocalDateTime.now());
+            torrentFileMappingRepository.save(mapping);
         }
     }
 
@@ -421,9 +552,22 @@ public class FileServiceImpl implements FileService {
     }
 
     @Override
+    @Transactional("fileServerTransactionManager")
     public Boolean deleteFile(FileRequestDto fileRequestDto) {
         checkPublicWriteAuthority(fileRequestDto.getOpenType());
         LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
+        String mappingUserId = getMappingUserId(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
+        String relativePath = FilePathGuard.normalizeRelativePath(fileRequestDto.getFilePath());
+        Optional<TorrentFileMapping> mappingOptional = torrentFileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(fileRequestDto.getOpenType(), mappingUserId, relativePath);
+        if (mappingOptional.isPresent()) {
+            TorrentFileMapping mapping = mappingOptional.get();
+            mapping.setDeleted(true);
+            mapping.setUpdateTime(LocalDateTime.now());
+            torrentFileMappingRepository.save(mapping);
+            return true;
+        }
+
         String fileDirectory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
 
         File file = FilePathGuard.resolveInsideRoot(fileDirectory, fileRequestDto.getFilePath()).toFile();
@@ -463,12 +607,13 @@ public class FileServiceImpl implements FileService {
      * 文件在http中响应
      */
     @SneakyThrows
-    private void writeFileToResponse(HttpServletResponse response, HttpServletRequest request, File file) {
+    private void writeFileToResponse(HttpServletResponse response, HttpServletRequest request, File file, boolean attachment) {
         if (file.exists()) {
             File tmpFile = null;
             File responseFile = file;
             try {
             if (file.isDirectory()) {
+                checkDirectoryDownloadLimit(file);
                 tmpFile = new File(fileServerPath + TMP_DIRECTORY + System.currentTimeMillis() + ".zip");
                 if (!tmpFile.getParentFile().exists()) {
                     tmpFile.getParentFile().mkdirs();
@@ -496,14 +641,20 @@ public class FileServiceImpl implements FileService {
             //设置部分响应信息
             response.setContentType(MediaType.parseMediaType(contentType).toString());
             response.setCharacterEncoding("utf-8");
-            response.setHeader("Content-disposition", "attachment;filename="+ URLEncoder.encode(responseFile.getName(), StandardCharsets.UTF_8));
+            String disposition = attachment ? "attachment" : "inline";
+            response.setHeader("Content-disposition", disposition + ";filename="+ URLEncoder.encode(responseFile.getName(), StandardCharsets.UTF_8));
             //缓存24小时
-            response.setHeader("Cache-Control", "max-age=86400");
+            response.setHeader("Cache-Control", "private, max-age=86400");
             //文件资源唯一标识
             response.setHeader("ETag", eTag);
+            response.setDateHeader("Last-Modified", responseFile.lastModified());
 
             //获取Range字段
             String rangeString = request.getHeader("Range");
+            if (StringUtils.isBlank(rangeString) && isNotModified(request, responseFile, eTag)) {
+                response.setStatus(HttpServletResponse.SC_NOT_MODIFIED);
+                return;
+            }
             if (StringUtils.isNotBlank(rangeString)) {
                 //如果范围存在，设定文件读取开始位置后输出
                 try (RandomAccessFile targetFile = new RandomAccessFile(responseFile, "r")){
@@ -593,6 +744,57 @@ public class FileServiceImpl implements FileService {
         return "W/\"" + DigestUtils.md5Hex(fileTag) + "\"";
     }
 
+    private boolean isNotModified(HttpServletRequest request, File file, String eTag) {
+        String ifNoneMatch = request.getHeader("If-None-Match");
+        if (StringUtils.isNotBlank(ifNoneMatch) && StringUtils.equals(ifNoneMatch, eTag)) {
+            return true;
+        }
+        long ifModifiedSince;
+        try {
+            ifModifiedSince = request.getDateHeader("If-Modified-Since");
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        if (ifModifiedSince < 0) {
+            return false;
+        }
+        return file.lastModified() / 1000 <= ifModifiedSince / 1000;
+    }
+
+    private void checkDirectoryDownloadLimit(File directory) {
+        DirectoryDownloadStat stat = getDirectoryDownloadStat(directory.toPath());
+        if (stat.fileCount > directoryDownloadMaxFiles) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "目录文件数量过多，请选择较小目录或单文件下载");
+        }
+        if (stat.totalBytes > directoryDownloadMaxBytes) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "目录体积过大，请选择较小目录或单文件下载");
+        }
+    }
+
+    private DirectoryDownloadStat getDirectoryDownloadStat(Path directory) {
+        try (Stream<Path> paths = Files.walk(directory)) {
+            DirectoryDownloadStat stat = new DirectoryDownloadStat();
+            paths.filter(Files::isRegularFile)
+                    .forEach(path -> {
+                        stat.fileCount++;
+                        try {
+                            stat.totalBytes += Files.size(path);
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                    });
+            return stat;
+        } catch (UncheckedIOException | IOException e) {
+            log.error("统计目录下载大小失败", e);
+            throw new ServiceException(HttpStatus.ERROR, "统计目录下载大小失败");
+        }
+    }
+
+    private static class DirectoryDownloadStat {
+        private long fileCount;
+        private long totalBytes;
+    }
+
     /**
      * 文件上传后置操作
      */
@@ -600,6 +802,9 @@ public class FileServiceImpl implements FileService {
         //如果文件是图片，生成缩略图
         if (FileType.IMAGE_FILE.equals(FileTypeUtils.getFileType(uploadFile))) {
             previewService.generatePreviewFile(uploadFile);
+        }
+        if (FileType.VIDEO_FILE.equals(FileTypeUtils.getFileType(uploadFile))) {
+            videoTranscodeService.getOrCreateTranscodeStatus(uploadFile);
         }
     }
 
@@ -609,6 +814,32 @@ public class FileServiceImpl implements FileService {
     private void fileDeleteAfter(File deleteFile) {
         //删除预览图片
         previewService.deletePreviewFile(deleteFile);
+    }
+
+    private Path resolveUserRequestFile(FileRequestDto fileRequestDto) {
+        LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
+        String mappingUserId = getMappingUserId(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
+        String relativePath = FilePathGuard.normalizeRelativePath(fileRequestDto.getFilePath());
+        Optional<TorrentFileMapping> mapping = findCoveringMapping(fileRequestDto.getOpenType(), mappingUserId, relativePath);
+        if (mapping.isPresent()) {
+            return resolveMappedFile(mapping.get(), relativePath);
+        }
+        String directory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
+        return FilePathGuard.resolveInsideRoot(directory, relativePath);
+    }
+
+    private File getPreviewFile(File originFile) {
+        Path rootPath = Paths.get(fileServerPath).toAbsolutePath().normalize();
+        Path originPath = originFile.toPath().toAbsolutePath().normalize();
+        Path relativePath;
+        try {
+            relativePath = rootPath.relativize(originPath);
+        } catch (IllegalArgumentException e) {
+            String extension = StringUtils.substringAfterLast(originFile.getName(), ".");
+            String fileName = DigestUtils.md5Hex(originPath.toString()) + (StringUtils.isBlank(extension) ? "" : "." + extension);
+            relativePath = Paths.get("external").resolve(fileName);
+        }
+        return rootPath.resolve(PREVIEW_DIRECTORY).resolve(relativePath).normalize().toFile();
     }
 
     private String getUserRootDirectory(Integer openType, String userId) {
@@ -627,6 +858,73 @@ public class FileServiceImpl implements FileService {
         throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不合法");
     }
 
+    private String getMappingUserId(Integer openType, String loginUserId) {
+        if (openType != null && openType == 1) {
+            return "public";
+        }
+        return loginUserId;
+    }
+
+    private List<FileResponseDto> getMappingChildren(Integer openType, String userId, String requestPath) {
+        String prefix = StringUtils.isBlank(requestPath) ? "" : requestPath + "/";
+        return torrentFileMappingRepository.findByOpenTypeAndUserIdAndDeletedFalse(openType, userId)
+                .stream()
+                .filter(mapping -> StringUtils.startsWith(mapping.getVirtualPath(), prefix))
+                .map(mapping -> toMappingChild(mapping, requestPath))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    private FileResponseDto toMappingChild(TorrentFileMapping mapping, String requestPath) {
+        String childPath = StringUtils.isBlank(requestPath)
+                ? mapping.getVirtualPath()
+                : StringUtils.removeStart(mapping.getVirtualPath(), requestPath + "/");
+        if (StringUtils.isBlank(childPath)) {
+            return null;
+        }
+
+        String childName = StringUtils.substringBefore(childPath, "/");
+        Path childTarget;
+        if (StringUtils.contains(childPath, "/")) {
+            childTarget = Path.of(mapping.getTargetPath());
+        } else {
+            childTarget = Path.of(mapping.getTargetPath());
+        }
+        File targetFile = childTarget.toFile();
+        if (!targetFile.exists()) {
+            return null;
+        }
+
+        FileResponseDto fileResponseDto = new FileResponseDto();
+        fileResponseDto.setFileName(childName);
+        fileResponseDto.setFileSize(targetFile.length());
+        fileResponseDto.setFileType(StringUtils.contains(childPath, "/") ? FileType.DIRECTORY_FILE : FileTypeUtils.getFileType(targetFile));
+        fileResponseDto.setFile(targetFile);
+        fileResponseDto.setFilePath("/" + (StringUtils.isBlank(requestPath) ? "" : requestPath + "/"));
+        return fileResponseDto;
+    }
+
+    private Optional<TorrentFileMapping> findCoveringMapping(Integer openType, String userId, String relativePath) {
+        return torrentFileMappingRepository.findByOpenTypeAndUserIdAndDeletedFalse(openType, userId)
+                .stream()
+                .filter(mapping -> relativePath.equals(mapping.getVirtualPath())
+                        || StringUtils.startsWith(relativePath, mapping.getVirtualPath() + "/"))
+                .max(Comparator.comparingInt(mapping -> mapping.getVirtualPath().length()));
+    }
+
+    private Path resolveMappedFile(TorrentFileMapping mapping, String relativePath) {
+        Path targetRoot = Path.of(mapping.getTargetPath()).toAbsolutePath().normalize();
+        String suffix = "";
+        if (!relativePath.equals(mapping.getVirtualPath())) {
+            suffix = relativePath.substring(mapping.getVirtualPath().length() + 1);
+        }
+        Path targetPath = targetRoot.resolve(suffix).normalize();
+        if (!targetPath.startsWith(targetRoot)) {
+            throw new ServiceException(HttpStatus.FORBIDDEN, "文件路径不合法");
+        }
+        return targetPath;
+    }
+
     private void checkPublicWriteAuthority(Integer openType) {
         if (openType != null && openType == 1
                 && !AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
@@ -637,6 +935,10 @@ public class FileServiceImpl implements FileService {
     private Path resolveTokenFile(String tokenFilePath, Claims claims) {
         if (StringUtils.startsWith(tokenFilePath, PUBLIC_DIRECTORY)) {
             String relativePath = tokenFilePath.substring(PUBLIC_DIRECTORY.length());
+            Optional<TorrentFileMapping> mapping = findCoveringMapping(1, "public", relativePath);
+            if (mapping.isPresent()) {
+                return resolveMappedFile(mapping.get(), relativePath);
+            }
             return FilePathGuard.resolveInsideRoot(fileServerPath + PUBLIC_DIRECTORY, relativePath);
         }
         if (StringUtils.startsWith(tokenFilePath, PRIVATE_DIRECTORY)) {
@@ -651,6 +953,10 @@ public class FileServiceImpl implements FileService {
                 throw new ServiceException(HttpStatus.FORBIDDEN, "下载链接不合法");
             }
             String relativePath = privatePath.substring(separatorIndex + 1);
+            Optional<TorrentFileMapping> mapping = findCoveringMapping(0, userId, relativePath);
+            if (mapping.isPresent()) {
+                return resolveMappedFile(mapping.get(), relativePath);
+            }
             return FilePathGuard.resolveInsideRoot(fileServerPath + PRIVATE_DIRECTORY + userId + "/", relativePath);
         }
         if (StringUtils.startsWith(tokenFilePath, PREVIEW_DIRECTORY)) {

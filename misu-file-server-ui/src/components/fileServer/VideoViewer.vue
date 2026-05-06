@@ -5,7 +5,7 @@
       <video :src="videoUrl"
              ref="videoRef"
              controls
-             preload="auto"
+             preload="metadata"
              width="100%"
              height="auto"/>
     </div>

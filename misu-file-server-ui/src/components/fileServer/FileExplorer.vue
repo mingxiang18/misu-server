@@ -38,7 +38,21 @@
                     loading="lazy" />
           <Picture v-if="file.fileType === 'image' && !file.previewLink" class="file-show"/>
           <Document v-if="file.fileType === 'other'" class="file-show"/>
-          <Film v-if="file.fileType === 'video'" class="file-show"/>
+          <div v-if="file.fileType === 'video'" class="video-file-show">
+            <el-image v-if="!!file.videoPreviewLink" class="video-preview"
+                      :src="downloadBaseUrl + file.videoPreviewLink"
+                      fit="cover"
+                      loading="lazy" />
+            <Film v-else class="file-show"/>
+            <div v-if="file.transcodeState && file.transcodeState !== 'SUCCESS'" class="video-status-mask">
+              <span class="video-status-text">{{ getVideoStatusText(file) }}</span>
+              <el-progress v-if="file.transcodeState === 'PROCESSING'"
+                           class="video-progress"
+                           :percentage="file.transcodeProgress || 0"
+                           :show-text="false"
+                           :stroke-width="4"/>
+            </div>
+          </div>
         </el-main>
         <el-footer class="file-card-footer">
           <el-tooltip
@@ -314,6 +328,7 @@ onMounted(() => {
 // 组件卸载时移除事件监听器
 onBeforeUnmount(() => {
   document.removeEventListener('click', hideContextMenu);
+  clearTranscodePollTimer();
 });
 
 // 隐藏右键菜单
@@ -471,23 +486,63 @@ const openFile = (file) => {
     //加载对应的图片链接到显示链接
     switchImageViewer(imageIndex.value);
   }else if (file.fileType === 'video') {
-    //如果是视频，创建放映室观看
-    const createVideoRoomRequest = {
-      roomName: file.fileName,
-      videoPath: downloadBaseUrl + file.downloadLink,
-      directoryPath: file.filePath,
-      directoryOpenFlag: props.openType
-    }
-    createVideoRoom(createVideoRoomRequest).then((response) => {
-      //跳转到/fileServer/videoRoom/:roomId
-      router.push(`/fileServer/videoRoom/${response.data.roomId}`);
-    });
+    openVideoFile(file);
   }else if (!!extName && extName === 'epub'){
     //跳转到epub浏览目录
-    router.push({path: '/fileServer/epubViewer', query: { url: downloadBaseUrl + file.downloadLink}});
+    router.push({path: '/fileServer/epubViewer', query: { url: downloadBaseUrl + file.streamLink}});
   }else {
     ElMessage.info('当前文件暂不支持预览，可下载后查看');
   }
+};
+
+const openVideoFile = (file) => {
+  if (file.transcodeState === 'SUCCESS') {
+    if (!file.transcodedStreamLink) {
+      ElMessage.info('转码视频正在准备在线播放，请稍后刷新');
+      return;
+    }
+    createVideoRoomFromFile(file, file.transcodedStreamLink);
+    return;
+  }
+
+  if (file.transcodeState === 'TOO_LARGE') {
+    ElMessage.warning(file.transcodeMessage || `视频超过 ${formatFileSize(file.transcodeMaxBytes)}，无法在线播放，可下载后观看`);
+    return;
+  }
+
+  if (file.transcodeState === 'FAILED' || file.transcodeState === 'UNSUPPORTED') {
+    ElMessage.warning(file.transcodeMessage || '视频暂时无法在线播放');
+    return;
+  }
+
+  if (!file.streamLink) {
+    ElMessage.info('视频正在准备在线播放，请稍后刷新');
+    return;
+  }
+
+  if (file.transcodeState === 'WAITING') {
+    ElMessage.info('视频正在等待转码，本次播放原视频');
+  } else if (file.transcodeState === 'PROCESSING') {
+    ElMessage.info(`视频正在转码 ${file.transcodeProgress || 0}%，本次播放原视频`);
+  }
+
+  createVideoRoomFromFile(file, file.streamLink);
+};
+
+const createVideoRoomFromFile = (file, streamLink) => {
+  if (!streamLink) {
+    ElMessage.info('视频链接不存在，请稍后刷新');
+    return;
+  }
+  const createVideoRoomRequest = {
+    roomName: file.fileName,
+    videoPath: downloadBaseUrl + streamLink,
+    directoryPath: file.filePath,
+    directoryOpenFlag: props.openType
+  }
+  createVideoRoom(createVideoRoomRequest).then((response) => {
+    router.push(`/fileServer/videoRoom/${response.data.roomId}`);
+  });
 };
 
 const switchImageViewer = (index) => {
@@ -500,25 +555,77 @@ const closeImageViewer = () => {
 };
 
 // 获取当前目录下的文件
-const queryFileList = () => {
-  fileListLoading.value = true;
+let transcodePollTimer = null;
+
+const queryFileList = (silent = false) => {
+  if (!silent) {
+    fileListLoading.value = true;
+  }
   getFileList(filePath.value, props.openType).then((response) => {
-    fileListLoading.value = false;
     fileList.value = response.data.sort((a, b) => a.fileName.localeCompare(b.fileName));
     //封装图片列表
     imageFullSrcList.value = fileList.value.filter((file) => file.fileType === "image")
-        .map((file) => downloadBaseUrl + file.downloadLink);
+        .map((file) => downloadBaseUrl + file.streamLink);
     //封装空图片列表，到对应图片时才加载
     imageSrcList.value = new Array(imageFullSrcList.value.length).fill("");
   }).catch(() => {
-    fileListLoading.value = false;
+  }).finally(() => {
+    if (!silent) {
+      fileListLoading.value = false;
+    }
+    scheduleTranscodePolling();
   });
+};
+
+const scheduleTranscodePolling = () => {
+  clearTranscodePollTimer();
+  const hasRunningTask = fileList.value.some((file) => file.fileType === 'video'
+      && ['WAITING', 'PROCESSING'].includes(file.transcodeState));
+  if (hasRunningTask) {
+    transcodePollTimer = setTimeout(() => queryFileList(true), 4000);
+  }
+};
+
+const clearTranscodePollTimer = () => {
+  if (transcodePollTimer) {
+    clearTimeout(transcodePollTimer);
+    transcodePollTimer = null;
+  }
+};
+
+const getVideoStatusText = (file) => {
+  if (file.transcodeState === 'WAITING') {
+    return '等待转码';
+  }
+  if (file.transcodeState === 'PROCESSING') {
+    return `转码中 ${file.transcodeProgress || 0}%`;
+  }
+  if (file.transcodeState === 'TOO_LARGE') {
+    return '视频过大';
+  }
+  if (file.transcodeState === 'FAILED') {
+    return '转码失败';
+  }
+  if (file.transcodeState === 'UNSUPPORTED') {
+    return '不支持';
+  }
+  return file.transcodeMessage || '准备中';
+};
+
+const formatFileSize = (bytes) => {
+  if (!bytes) {
+    return '当前上限';
+  }
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(1)}GB`;
+  }
+  return `${Math.round(bytes / 1024 / 1024)}MB`;
 };
 
 // 获取当前图片的索引
 const getImageIndex = (file) => {
   if (file.fileType !== "image") return -1;
-  return imageFullSrcList.value.indexOf(downloadBaseUrl + file.downloadLink);
+  return imageFullSrcList.value.indexOf(downloadBaseUrl + file.streamLink);
 };
 
 // 当文件拖到页面区域时触发
@@ -708,6 +815,44 @@ queryFileList();
 .file-show {
   max-width: 80%;
   max-height: 100%;
+}
+
+.video-file-show {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.video-preview {
+  width: 100%;
+  height: 100%;
+}
+
+.video-status-mask {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.56);
+  box-sizing: border-box;
+}
+
+.video-status-text {
+  color: #fff;
+  text-align: center;
+  font-size: 12px;
+  line-height: 16px;
+  word-break: break-word;
+}
+
+.video-progress {
+  width: 100%;
 }
 
 .file-card {

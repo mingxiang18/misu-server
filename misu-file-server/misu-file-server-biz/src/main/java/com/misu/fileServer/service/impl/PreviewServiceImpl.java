@@ -5,12 +5,16 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import net.coobird.thumbnailator.Thumbnails;
 import net.coobird.thumbnailator.geometry.Positions;
+import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Set;
 import java.util.concurrent.*;
 
@@ -60,10 +64,7 @@ public class PreviewServiceImpl implements PreviewService { // 用于去重，�
     @Override
     public void deletePreviewFile(File deleteFile) {
         fileExecutor.execute(() -> {
-            String previewPath = deleteFile.getAbsolutePath()
-                    .replace("\\", "/")
-                    .replace(fileServerPath.startsWith("/") ? fileServerPath.substring(1) : fileServerPath, fileServerPath + "preview/");
-            File previewFile = new File(previewPath);
+            File previewFile = getPreviewFile(deleteFile);
             //如果目录不存在则创建
             if (previewFile.exists()) {
                 previewFile.delete();
@@ -73,10 +74,7 @@ public class PreviewServiceImpl implements PreviewService { // 用于去重，�
 
     // 生成缩略图
     private void generateThumbnail(File imgFile) {
-        String previewPath = imgFile.getAbsolutePath()
-                .replace("\\", "/")
-                .replace(fileServerPath.startsWith("/") ? fileServerPath.substring(1) : fileServerPath, fileServerPath + "preview/");
-        File previewFile = new File(previewPath);
+        File previewFile = getPreviewFile(imgFile);
         //如果目录不存在则创建
         if (!previewFile.getParentFile().exists()) {
             previewFile.getParentFile().mkdirs();
@@ -95,6 +93,20 @@ public class PreviewServiceImpl implements PreviewService { // 用于去重，�
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private File getPreviewFile(File originFile) {
+        Path rootPath = Paths.get(fileServerPath).toAbsolutePath().normalize();
+        Path originPath = originFile.toPath().toAbsolutePath().normalize();
+        Path relativePath;
+        try {
+            relativePath = rootPath.relativize(originPath);
+        } catch (IllegalArgumentException e) {
+            String extension = StringUtils.substringAfterLast(originFile.getName(), ".");
+            String fileName = DigestUtils.md5Hex(originPath.toString()) + (StringUtils.isBlank(extension) ? "" : "." + extension);
+            relativePath = Paths.get("external").resolve(fileName);
+        }
+        return rootPath.resolve("preview").resolve(relativePath).normalize().toFile();
     }
 
 }

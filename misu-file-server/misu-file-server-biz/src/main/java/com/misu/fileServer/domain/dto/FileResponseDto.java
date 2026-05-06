@@ -38,6 +38,27 @@ public class FileResponseDto {
     @ApiModelProperty("文件下载链接")
     private String downloadLink;
 
+    @ApiModelProperty("文件播放/预览链接")
+    private String streamLink;
+
+    @ApiModelProperty("视频封面链接")
+    private String videoPreviewLink;
+
+    @ApiModelProperty("视频转码后播放链接")
+    private String transcodedStreamLink;
+
+    @ApiModelProperty("视频转码状态")
+    private String transcodeState;
+
+    @ApiModelProperty("视频转码进度")
+    private Integer transcodeProgress;
+
+    @ApiModelProperty("视频转码提示")
+    private String transcodeMessage;
+
+    @ApiModelProperty("允许转码的最大视频大小")
+    private Long transcodeMaxBytes;
+
     @JsonIgnore
     @ApiModelProperty("文件数据")
     private File file;

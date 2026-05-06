@@ -30,6 +30,26 @@ public interface FileService {
     void downloadFile(FileDownloadRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response);
 
     /**
+     * 访问登录用户可见文件。
+     */
+    void accessUserFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response, boolean attachment);
+
+    /**
+     * 访问登录用户可见图片缩略图。
+     */
+    void previewFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response);
+
+    /**
+     * 访问登录用户可见视频封面。
+     */
+    void videoPreviewFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response);
+
+    /**
+     * 访问登录用户可见转码视频。
+     */
+    void transcodedVideoFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response);
+
+    /**
      * 上传文件
      */
     FileUploadResponse uploadFile(FileUploadRequest fileUploadRequest);
