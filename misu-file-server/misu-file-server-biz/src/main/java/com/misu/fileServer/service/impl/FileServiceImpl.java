@@ -7,8 +7,8 @@ import com.misu.common.util.ZipUtils;
 import com.misu.fileServer.constant.FileType;
 import com.misu.fileServer.constant.VideoTranscodeState;
 import com.misu.fileServer.domain.dto.*;
-import com.misu.fileServer.domain.entity.TorrentFileMapping;
-import com.misu.fileServer.repository.TorrentFileMappingRepository;
+import com.misu.fileServer.domain.entity.FileMapping;
+import com.misu.fileServer.repository.FileMappingRepository;
 import com.misu.fileServer.service.FileService;
 import com.misu.fileServer.service.PreviewService;
 import com.misu.fileServer.service.VideoTranscodeService;
@@ -32,6 +32,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpRange;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,6 +46,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -61,6 +65,8 @@ public class FileServiceImpl implements FileService {
     private final static String PRIVATE_DIRECTORY = "private/";
     private final static String PREVIEW_DIRECTORY = "preview/";
     private final static String TMP_DIRECTORY = "tmp/";
+    private final static String STORAGE_DIRECTORY = "storage/";
+    private final static String VIRTUAL_DIRECTORY_STORAGE = "virtual-directory/";
     private final static long TMP_FILE_EXPIRE_MILLIS = 24 * 60 * 60 * 1000L;
     private final static String FILE_DOWNLOAD_TOKEN_CACHE_KEY = "file-download-token:";
 
@@ -76,6 +82,12 @@ public class FileServiceImpl implements FileService {
     @Value("${file.download.directory.maxFiles:1000}")
     private long directoryDownloadMaxFiles;
 
+    @Value("${file.mapping.gc.retentionDays:7}")
+    private long fileMappingGcRetentionDays;
+
+    @Value("${file.upload.lock.expireMillis:1800000}")
+    private long uploadLockExpireMillis;
+
     @Resource
     private TokenService tokenService;
     
@@ -86,7 +98,20 @@ public class FileServiceImpl implements FileService {
     private VideoTranscodeService videoTranscodeService;
 
     @Resource
-    private TorrentFileMappingRepository torrentFileMappingRepository;
+    private FileMappingRepository fileMappingRepository;
+
+    @Resource
+    private ThreadPoolTaskExecutor fileExecutor;
+
+    private final AtomicBoolean backfillRunning = new AtomicBoolean(false);
+    private volatile LocalDateTime backfillStartTime;
+    private volatile LocalDateTime backfillEndTime;
+    private volatile String backfillLastError;
+    private final AtomicLong backfillProcessedCount = new AtomicLong(0L);
+    private final AtomicLong backfillCreatedCount = new AtomicLong(0L);
+    private final AtomicLong backfillUpdatedCount = new AtomicLong(0L);
+    private final Map<String, Object> uploadMergeLocks = new ConcurrentHashMap<>();
+    private final Map<String, Long> uploadMergeLockAccessTime = new ConcurrentHashMap<>();
 
     /**
      * 初始化检查文件目录是否存在，不存在则创建
@@ -109,8 +134,7 @@ public class FileServiceImpl implements FileService {
         Optional<LoginUser> loginUser = LoginMessageUtil.getLoginUser();
         if (loginUser.isPresent()) {
             String userId = getMappingUserId(fileRequestDto.getOpenType(), loginUser.get().getUserId().toString());
-            String directory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.get().getUserId().toString());
-            List<FileResponseDto> fileList = getFileListFromDirectory(fileRequestDto, directory, userId);
+            List<FileResponseDto> fileList = getFileListFromDirectory(fileRequestDto, userId);
             for (FileResponseDto responseDto : fileList) {
                 //封装文件预览路径
                 packagePreviewLink(fileRequestDto.getOpenType(), responseDto);
@@ -169,73 +193,24 @@ public class FileServiceImpl implements FileService {
     /**
      * 从指定目录获取文件列表
      */
-    private List<FileResponseDto> getFileListFromDirectory(FileRequestDto fileRequestDto, String directory, String userId) {
+    private List<FileResponseDto> getFileListFromDirectory(FileRequestDto fileRequestDto, String userId) {
         String requestPath = FilePathGuard.normalizeRelativePath(fileRequestDto.getFilePath(), true);
-        Optional<TorrentFileMapping> coveringMapping = findCoveringMapping(fileRequestDto.getOpenType(), userId, requestPath);
-        if (coveringMapping.isPresent()) {
-            File mappedFile = resolveMappedFile(coveringMapping.get(), requestPath).toFile();
-            if (mappedFile.exists() && mappedFile.isDirectory()) {
-                return getFileListFromRealDirectory(mappedFile, requestPath);
-            }
-        }
-
-        File directoryFile = new File(directory);
-        File file = FilePathGuard.resolveInsideRoot(directory, requestPath, true).toFile();
-        Map<String, FileResponseDto> fileMap = new LinkedHashMap<>();
-        if (file.exists() && file.isDirectory()) {
-            File[] files = file.listFiles();
-            if (files != null) {
-                Arrays.stream(files).map(oneFile -> buildFileResponseDto(oneFile, directoryFile))
-                        .forEach(fileResponseDto -> fileMap.put(fileResponseDto.getFileName(), fileResponseDto));
-            }
-        }
-
-        getMappingChildren(fileRequestDto.getOpenType(), userId, requestPath).forEach(fileResponseDto ->
-                fileMap.putIfAbsent(fileResponseDto.getFileName(), fileResponseDto));
-
-        return new ArrayList<>(fileMap.values());
-    }
-
-    private List<FileResponseDto> getFileListFromRealDirectory(File directory, String virtualDirectoryPath) {
-        File[] files = directory.listFiles();
-        if (files == null) {
-            return new ArrayList<>();
-        }
-        return Arrays.stream(files).map(oneFile -> buildMappedFileResponseDto(oneFile, virtualDirectoryPath))
+        return fileMappingRepository.findByOpenTypeAndUserIdAndParentPathAndDeletedFalseOrderByFileTypeDescFileNameAsc(
+                        fileRequestDto.getOpenType(), userId, requestPath)
+                .stream()
+                .map(this::toFileResponseDto)
+                .filter(dto -> dto.getFile() != null && dto.getFile().exists())
                 .collect(Collectors.toList());
     }
 
-    private FileResponseDto buildFileResponseDto(File oneFile, File directoryFile) {
+    private FileResponseDto toFileResponseDto(FileMapping mapping) {
         FileResponseDto fileResponseDto = new FileResponseDto();
-        fileResponseDto.setFileName(oneFile.getName());
-        fileResponseDto.setFileSize(oneFile.length());
-        fileResponseDto.setFileType(FileTypeUtils.getFileType(oneFile));
-        fileResponseDto.setFile(oneFile);
-
-        String fileRelativePath = getRelativePath(oneFile, directoryFile);
-        fileResponseDto.setFilePath("/" + (StringUtils.isBlank(fileRelativePath) ? "" : fileRelativePath + "/"));
-
+        fileResponseDto.setFileName(mapping.getFileName());
+        fileResponseDto.setFileSize(mapping.getFileSize());
+        fileResponseDto.setFileType(mapping.getFileType());
+        fileResponseDto.setFile(resolveMappedFile(mapping));
+        fileResponseDto.setFilePath("/" + (StringUtils.isBlank(mapping.getParentPath()) ? "" : mapping.getParentPath() + "/"));
         return fileResponseDto;
-    }
-
-    private FileResponseDto buildMappedFileResponseDto(File oneFile, String virtualDirectoryPath) {
-        FileResponseDto fileResponseDto = new FileResponseDto();
-        fileResponseDto.setFileName(oneFile.getName());
-        fileResponseDto.setFileSize(oneFile.length());
-        fileResponseDto.setFileType(FileTypeUtils.getFileType(oneFile));
-        fileResponseDto.setFile(oneFile);
-        fileResponseDto.setFilePath("/" + (StringUtils.isBlank(virtualDirectoryPath) ? "" : virtualDirectoryPath + "/"));
-        return fileResponseDto;
-    }
-
-    /**
-     * 获取相对路径
-     */
-    private static String getRelativePath(File originFile, File directoryFile) {
-        // 使用 Path 把绝对路径中私密路径去掉，返回相对路径
-        Path path = Paths.get(originFile.getParentFile().getAbsolutePath());
-        Path base = Paths.get(directoryFile.getAbsolutePath());
-        return base.relativize(path).toString().replace("\\", "/");
     }
 
     @Override
@@ -311,6 +286,16 @@ public class FileServiceImpl implements FileService {
     }
 
     @Override
+    public void accessUserFileAsUser(Integer openType, String userId, String filePath,
+                                     HttpServletRequest request, HttpServletResponse response, boolean attachment) {
+        File file = resolveUserRequestFile(openType, userId, filePath).toFile();
+        if (!file.exists()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或已被删除");
+        }
+        writeFileToResponse(response, request, file, attachment);
+    }
+
+    @Override
     public void previewFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
         File originFile = resolveUserRequestFile(fileRequestDto).toFile();
         if (!originFile.exists() || originFile.isDirectory()) {
@@ -348,6 +333,17 @@ public class FileServiceImpl implements FileService {
     @Override
     public void transcodedVideoFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
         File originFile = resolveUserRequestFile(fileRequestDto).toFile();
+        writeTranscodedVideoToResponse(originFile, request, response);
+    }
+
+    @Override
+    public void transcodedVideoFileAsUser(Integer openType, String userId, String filePath,
+                                          HttpServletRequest request, HttpServletResponse response) {
+        File originFile = resolveUserRequestFile(openType, userId, filePath).toFile();
+        writeTranscodedVideoToResponse(originFile, request, response);
+    }
+
+    private void writeTranscodedVideoToResponse(File originFile, HttpServletRequest request, HttpServletResponse response) {
         if (!originFile.exists() || originFile.isDirectory()) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或已被删除");
         }
@@ -372,46 +368,57 @@ public class FileServiceImpl implements FileService {
         checkPublicWriteAuthority(fileUploadRequest.getOpenType());
         checkUploadChunk(fileUploadRequest);
         LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
-        String directory = getUserRootDirectory(fileUploadRequest.getOpenType(), loginUser.getUserId().toString());
-
         String fileName = FilePathGuard.normalizeFileName(fileUploadRequest.getFileName());
-        Path parentPath = FilePathGuard.resolveInsideRoot(directory, fileUploadRequest.getFilePath(), true);
-        File file = parentPath.resolve(fileName).normalize().toFile();
-        if (!file.toPath().startsWith(Paths.get(directory).toAbsolutePath().normalize())) {
-            throw new ServiceException(HttpStatus.FORBIDDEN, "文件路径不合法");
-        }
+        String relativePath = FilePathGuard.normalizeRelativePath(fileUploadRequest.getFilePath(), true);
+        String virtualPath = StringUtils.isBlank(relativePath) ? fileName : relativePath + "/" + fileName;
+        String mappingUserId = getMappingUserId(fileUploadRequest.getOpenType(), loginUser.getUserId().toString());
+        Optional<FileMapping> existingMapping = fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(fileUploadRequest.getOpenType(), mappingUserId, virtualPath);
 
-        //如果不允许覆盖且文件已存在，返回提示
-        if (!fileUploadRequest.getCoverFlag() && file.exists()) {
+        if (!fileUploadRequest.getCoverFlag() && existingMapping.isPresent()) {
             return new FileUploadResponse(2, "文件已存在");
         }
 
-        //如果目录不存在，新建目录
-        if (!file.getParentFile().exists()) {
-            file.getParentFile().mkdirs();
+        File file = buildUploadStorageFile(fileUploadRequest.getOpenType(), loginUser.getUserId().toString(), fileName);
+        if (!file.getParentFile().exists() && !file.getParentFile().mkdirs()) {
+            throw new ServiceException(HttpStatus.ERROR, "上传目录创建失败");
         }
 
-        String fileMD5 = DigestUtils.md5Hex(file.getAbsolutePath());
+        String fileMD5 = DigestUtils.md5Hex(fileUploadRequest.getOpenType() + ":" + mappingUserId + ":" + virtualPath);
         //上传文件
+        boolean mergeCompleted = false;
         try {
-            // 保存分片文件
-            File chunkFile = new File(fileServerPath + "tmp/" + fileMD5 + ".part" + fileUploadRequest.getChunkIndex());
-            if (!chunkFile.getParentFile().exists()) {
-                chunkFile.getParentFile().mkdirs();
-            }
-            fileUploadRequest.getFile().transferTo(chunkFile);
+            Object lock = uploadMergeLocks.computeIfAbsent(fileMD5, k -> new Object());
+            uploadMergeLockAccessTime.put(fileMD5, System.currentTimeMillis());
+            synchronized (lock) {
+                uploadMergeLockAccessTime.put(fileMD5, System.currentTimeMillis());
+                // 保存分片文件
+                File chunkFile = new File(fileServerPath + TMP_DIRECTORY + fileMD5 + ".part" + fileUploadRequest.getChunkIndex());
+                if (!chunkFile.getParentFile().exists()) {
+                    chunkFile.getParentFile().mkdirs();
+                }
+                fileUploadRequest.getFile().transferTo(chunkFile);
+                uploadMergeLockAccessTime.put(fileMD5, System.currentTimeMillis());
 
-            // 如果所有分片都上传完成，则合并文件；支持乱序上传。
-            if (allChunksUploaded(fileMD5, fileUploadRequest.getTotalChunks())) {
-                mergeChunks(file, fileUploadRequest.getTotalChunks());
-                //上传完成后执行后置操作
-                fileAddAfter(file);
+                // 如果所有分片都上传完成，则合并文件；支持乱序上传。
+                if (allChunksUploaded(fileMD5, fileUploadRequest.getTotalChunks())) {
+                    mergeChunks(file, fileMD5, fileUploadRequest.getTotalChunks());
+                    //上传完成后执行后置操作
+                    fileAddAfter(file);
+                    saveOrUpdateFileMapping(fileUploadRequest.getOpenType(),
+                            mappingUserId,
+                            virtualPath,
+                            relativePath,
+                            fileName,
+                            file);
+                    mergeCompleted = true;
+                }
             }
         }catch (Exception e) {
             log.error("上传文件异常", e);
             //遍历删除分片
             for (int i = 0; i < fileUploadRequest.getTotalChunks(); i++) {
-                File chunkFile = new File(fileServerPath + "tmp/" + fileMD5 + ".part" + i);
+                File chunkFile = new File(fileServerPath + TMP_DIRECTORY + fileMD5 + ".part" + i);
                 if (chunkFile.exists()) {
                     chunkFile.delete();
                 }
@@ -421,6 +428,11 @@ public class FileServiceImpl implements FileService {
                 file.delete();
             }
             throw new ServiceException(HttpStatus.ERROR, "上传文件异常");
+        } finally {
+            if (mergeCompleted) {
+                uploadMergeLocks.remove(fileMD5);
+                uploadMergeLockAccessTime.remove(fileMD5);
+            }
         }
 
         return new FileUploadResponse(1, "上传成功");
@@ -446,14 +458,11 @@ public class FileServiceImpl implements FileService {
     }
 
     // 合并所有分片
-    private void mergeChunks(File file, int totalChunks) throws IOException {
-        //从绝对路径计算MD5
-        String fileMD5 = DigestUtils.md5Hex(file.getAbsolutePath());
-
+    private void mergeChunks(File file, String fileMD5, int totalChunks) throws IOException {
         try (FileOutputStream fileOutputStream = new FileOutputStream(file);) {
             for (int i = 0; i < totalChunks; i++) {
                 // 分片文件
-                File chunkFile = new File(fileServerPath + "tmp/" + fileMD5 + ".part" + i);
+                File chunkFile = new File(fileServerPath + TMP_DIRECTORY + fileMD5 + ".part" + i);
                 FileInputStream chunkInputStream = new FileInputStream(chunkFile);
 
                 byte[] buffer = new byte[4096];
@@ -489,66 +498,169 @@ public class FileServiceImpl implements FileService {
         virtualPath = StringUtils.isBlank(virtualPath) ? fileName : virtualPath + "/" + fileName;
         String mappingUserId = getMappingUserId(addFileInkRequest.getOpenType(), addFileInkRequest.getUserId());
 
-        if (file.exists() || torrentFileMappingRepository
-                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(addFileInkRequest.getOpenType(), mappingUserId, virtualPath)
-                .isPresent()) {
+        if (hasMappingUnderPath(addFileInkRequest.getOpenType(), mappingUserId, virtualPath)
+                || hasMappingParentConflict(addFileInkRequest.getOpenType(), mappingUserId, virtualPath)) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "目录下存在同名文件，无法同步至该目录");
         } else {
             Path target = Paths.get(addFileInkRequest.getInkFilePath());
             if (!Files.exists(target)) {
                 throw new ServiceException(HttpStatus.BAD_REQUEST, "映射的原文件不存在");
             }
-            TorrentFileMapping mapping = new TorrentFileMapping();
-            mapping.setOpenType(addFileInkRequest.getOpenType());
-            mapping.setUserId(mappingUserId);
-            mapping.setVirtualPath(virtualPath);
-            mapping.setTargetPath(target.toAbsolutePath().normalize().toString());
-            mapping.setDeleted(false);
-            mapping.setCreateTime(LocalDateTime.now());
-            torrentFileMappingRepository.save(mapping);
+            mapPhysicalTreeToVirtualPaths(addFileInkRequest.getOpenType(), mappingUserId, virtualPath, target.toFile());
         }
     }
 
     @Override
+    @Transactional("fileServerTransactionManager")
     public Boolean createDirectory(FileRequestDto fileRequestDto) {
         checkPublicWriteAuthority(fileRequestDto.getOpenType());
         LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
-        String fileDirectory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
+        String mappingUserId = getMappingUserId(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
 
-        File file = FilePathGuard.resolveInsideRoot(fileDirectory, fileRequestDto.getFilePath()).toFile();
+        String relativePath = FilePathGuard.normalizeRelativePath(fileRequestDto.getFilePath());
+        String parentPath = getParentPath(relativePath);
+        String fileName = FilePathGuard.normalizeFileName(Path.of(relativePath).getFileName().toString());
+        File file = buildVirtualDirectoryStorage(fileRequestDto.getOpenType(), loginUser.getUserId().toString(), fileName);
 
-        if (file.exists()) {
+        if (file.exists() || fileMappingRepository.findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(
+                fileRequestDto.getOpenType(), mappingUserId, relativePath).isPresent()) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "同名目录或文件已存在，无法创建");
-        }else {
-            return file.mkdirs();
         }
+        if (!file.exists() && !file.mkdirs()) {
+            return false;
+        }
+        saveOrUpdateFileMapping(fileRequestDto.getOpenType(), mappingUserId, relativePath, parentPath, fileName, file);
+        return true;
     }
 
     @Override
+    @Transactional("fileServerTransactionManager")
     public void moveFile(FileRenameRequestDto fileRenameRequestDto) {
         checkPublicWriteAuthority(fileRenameRequestDto.getOpenType());
         LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
-        String fileDirectory = getUserRootDirectory(fileRenameRequestDto.getOpenType(), loginUser.getUserId().toString());
+        String mappingUserId = getMappingUserId(fileRenameRequestDto.getOpenType(), loginUser.getUserId().toString());
 
-        File file = FilePathGuard.resolveInsideRoot(fileDirectory, fileRenameRequestDto.getOriginFilePath()).toFile();
+        String originRelativePath = FilePathGuard.normalizeRelativePath(fileRenameRequestDto.getOriginFilePath());
+        String newRelativePath = FilePathGuard.normalizeRelativePath(fileRenameRequestDto.getNewFilePath());
 
-        boolean isSuccess = false;
-        if (file.exists()) {
-            File newFile = FilePathGuard.resolveInsideRoot(fileDirectory, fileRenameRequestDto.getNewFilePath()).toFile();
-            isSuccess = file.renameTo(newFile);
+        if (originRelativePath.equals(newRelativePath)) {
+            return;
+        }
 
-            //执行原文件删除后置操作
-            fileDeleteAfter(file);
-            //执行新文件添加的后置操作
-            fileAddAfter(newFile);
-        }else {
+        if (StringUtils.startsWith(newRelativePath + "/", originRelativePath + "/")) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "不允许将目录移动到自身子目录");
+        }
+
+        boolean sourceExists = hasMappingUnderPath(fileRenameRequestDto.getOpenType(), mappingUserId, originRelativePath);
+        if (!sourceExists) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "原文件不存在");
         }
 
-        //如果不成功，抛出异常
-        if (!isSuccess) {
+        boolean targetExists = fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(
+                        fileRenameRequestDto.getOpenType(), mappingUserId, newRelativePath)
+                .isPresent();
+        if (targetExists) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "移动失败，新的位置存在同名文件");
         }
+        if (hasMoveDestinationConflict(fileRenameRequestDto.getOpenType(), mappingUserId, originRelativePath, newRelativePath)) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "移动失败，新的位置存在同名文件");
+        }
+
+        moveFileMappingTree(fileRenameRequestDto.getOpenType(), mappingUserId, originRelativePath, newRelativePath);
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public void sharePrivateFileToPublic(SharePrivateFileToPublicRequestDto requestDto) {
+        checkPublicWriteAuthority(1);
+        LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
+
+        String sourceRelativePath = FilePathGuard.normalizeRelativePath(requestDto.getSourceFilePath());
+        String sourceFileName = FilePathGuard.normalizeFileName(Path.of(sourceRelativePath).getFileName().toString());
+        Path sourcePath = resolveUserRequestFile(0, loginUser.getUserId().toString(), sourceRelativePath);
+        File sourceFile = sourcePath.toFile();
+        if (!sourceFile.exists()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "源文件不存在或已被删除");
+        }
+
+        String targetDirectoryRelativePath = FilePathGuard.normalizeRelativePath(requestDto.getTargetDirectoryPath(), true);
+        String targetVirtualPath = StringUtils.isBlank(targetDirectoryRelativePath)
+                ? sourceFileName
+                : targetDirectoryRelativePath + "/" + sourceFileName;
+        if (StringUtils.isNotBlank(targetDirectoryRelativePath)) {
+            FileMapping targetDirectoryMapping = fileMappingRepository
+                    .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(1, "public", targetDirectoryRelativePath)
+                    .orElseThrow(() -> new ServiceException(HttpStatus.BAD_REQUEST, "公共目标目录不存在"));
+            if (!FileType.DIRECTORY_FILE.equals(targetDirectoryMapping.getFileType())) {
+                throw new ServiceException(HttpStatus.BAD_REQUEST, "公共目标目录不存在");
+            }
+        }
+        if (fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(1, "public", targetVirtualPath)
+                .isPresent()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "公共目录已存在同名文件或文件夹");
+        }
+        savePublicFileMapping(targetVirtualPath, sourcePath, loginUser.getUserId().toString(), sourceRelativePath);
+    }
+
+    private void savePublicFileMapping(String targetVirtualPath,
+                                       Path sourcePath,
+                                       String sourceUserId,
+                                       String sourceRelativePath) {
+        if (hasMappingUnderPath(1, "public", targetVirtualPath)
+                || hasMappingParentConflict(1, "public", targetVirtualPath)) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "公共目录已存在同名文件或文件夹");
+        }
+        Optional<FileMapping> sourceRootMapping = fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(0, sourceUserId, sourceRelativePath);
+        if (sourceRootMapping.isPresent() && FileType.DIRECTORY_FILE.equals(sourceRootMapping.get().getFileType())) {
+            try {
+                cloneMappingSubtreeToPublic(sourceUserId, sourceRelativePath, targetVirtualPath);
+            } catch (Exception e) {
+                log.error("共享目录映射失败，sourceUserId={}, sourceRelativePath={}, targetVirtualPath={}",
+                        sourceUserId, sourceRelativePath, targetVirtualPath, e);
+                throw new ServiceException(HttpStatus.ERROR, "共享目录失败，请稍后重试");
+            }
+            return;
+        }
+        mapPhysicalTreeToVirtualPaths(1, "public", targetVirtualPath, sourcePath.toFile());
+    }
+
+    private void cloneMappingSubtreeToPublic(String sourceUserId, String sourceRootPath, String targetRootPath) {
+        String sourcePrefix = sourceRootPath + "/";
+        List<FileMapping> sourceMappings = fileMappingRepository.findByOpenTypeAndUserIdAndDeletedFalse(0, sourceUserId)
+                .stream()
+                .filter(one -> one.getVirtualPath().equals(sourceRootPath)
+                        || StringUtils.startsWith(one.getVirtualPath(), sourcePrefix))
+                .toList();
+        if (sourceMappings.isEmpty()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "源目录映射不存在");
+        }
+        List<FileMapping> targetMappings = new ArrayList<>(sourceMappings.size());
+        for (FileMapping source : sourceMappings) {
+            String suffix = source.getVirtualPath().equals(sourceRootPath)
+                    ? ""
+                    : source.getVirtualPath().substring(sourceRootPath.length());
+            String targetVirtualPath = targetRootPath + suffix;
+            if (fileMappingRepository.findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(1, "public", targetVirtualPath).isPresent()) {
+                throw new ServiceException(HttpStatus.BAD_REQUEST, "公共目录存在冲突路径：" + targetVirtualPath);
+            }
+            FileMapping target = new FileMapping();
+            target.setOpenType(1);
+            target.setUserId("public");
+            target.setVirtualPath(targetVirtualPath);
+            target.setParentPath(getParentPath(targetVirtualPath));
+            target.setFileName(Path.of(targetVirtualPath).getFileName().toString());
+            target.setFileType(source.getFileType());
+            target.setFileSize(source.getFileSize());
+            target.setTargetPath(source.getTargetPath());
+            target.setDeleted(false);
+            target.setCreateTime(LocalDateTime.now());
+            target.setUpdateTime(LocalDateTime.now());
+            targetMappings.add(target);
+        }
+        fileMappingRepository.saveAll(targetMappings);
     }
 
     @Override
@@ -558,25 +670,10 @@ public class FileServiceImpl implements FileService {
         LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
         String mappingUserId = getMappingUserId(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
         String relativePath = FilePathGuard.normalizeRelativePath(fileRequestDto.getFilePath());
-        Optional<TorrentFileMapping> mappingOptional = torrentFileMappingRepository
-                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(fileRequestDto.getOpenType(), mappingUserId, relativePath);
-        if (mappingOptional.isPresent()) {
-            TorrentFileMapping mapping = mappingOptional.get();
-            mapping.setDeleted(true);
-            mapping.setUpdateTime(LocalDateTime.now());
-            torrentFileMappingRepository.save(mapping);
+        if (hasMappingUnderPath(fileRequestDto.getOpenType(), mappingUserId, relativePath)) {
+            markDeletedByPrefix(fileRequestDto.getOpenType(), mappingUserId, relativePath);
             return true;
         }
-
-        String fileDirectory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
-
-        File file = FilePathGuard.resolveInsideRoot(fileDirectory, fileRequestDto.getFilePath()).toFile();
-
-        //如果文件存在，执行删除
-        if (file.exists()) {
-            return deleteFile(file);
-        }
-
         return false;
     }
 
@@ -818,14 +915,18 @@ public class FileServiceImpl implements FileService {
 
     private Path resolveUserRequestFile(FileRequestDto fileRequestDto) {
         LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
-        String mappingUserId = getMappingUserId(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
-        String relativePath = FilePathGuard.normalizeRelativePath(fileRequestDto.getFilePath());
-        Optional<TorrentFileMapping> mapping = findCoveringMapping(fileRequestDto.getOpenType(), mappingUserId, relativePath);
+        return resolveUserRequestFile(fileRequestDto.getOpenType(), loginUser.getUserId().toString(), fileRequestDto.getFilePath());
+    }
+
+    private Path resolveUserRequestFile(Integer openType, String userId, String filePath) {
+        String mappingUserId = getMappingUserId(openType, userId);
+        String relativePath = FilePathGuard.normalizeRelativePath(filePath);
+        Optional<FileMapping> mapping = fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(openType, mappingUserId, relativePath);
         if (mapping.isPresent()) {
-            return resolveMappedFile(mapping.get(), relativePath);
+            return resolveMappedFile(mapping.get()).toPath();
         }
-        String directory = getUserRootDirectory(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
-        return FilePathGuard.resolveInsideRoot(directory, relativePath);
+        throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或已被删除");
     }
 
     private File getPreviewFile(File originFile) {
@@ -865,64 +966,163 @@ public class FileServiceImpl implements FileService {
         return loginUserId;
     }
 
-    private List<FileResponseDto> getMappingChildren(Integer openType, String userId, String requestPath) {
-        String prefix = StringUtils.isBlank(requestPath) ? "" : requestPath + "/";
-        return torrentFileMappingRepository.findByOpenTypeAndUserIdAndDeletedFalse(openType, userId)
+    private String getParentPath(String relativePath) {
+        int index = relativePath.lastIndexOf('/');
+        return index > 0 ? relativePath.substring(0, index) : "";
+    }
+
+    private boolean hasMappingUnderPath(Integer openType, String userId, String relativePath) {
+        String prefix = relativePath + "/";
+        return fileMappingRepository.findByOpenTypeAndUserIdAndDeletedFalse(openType, userId)
                 .stream()
-                .filter(mapping -> StringUtils.startsWith(mapping.getVirtualPath(), prefix))
-                .map(mapping -> toMappingChild(mapping, requestPath))
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+                .anyMatch(one -> one.getVirtualPath().equals(relativePath)
+                        || StringUtils.startsWith(one.getVirtualPath(), prefix));
     }
 
-    private FileResponseDto toMappingChild(TorrentFileMapping mapping, String requestPath) {
-        String childPath = StringUtils.isBlank(requestPath)
-                ? mapping.getVirtualPath()
-                : StringUtils.removeStart(mapping.getVirtualPath(), requestPath + "/");
-        if (StringUtils.isBlank(childPath)) {
-            return null;
+    private boolean hasMappingParentConflict(Integer openType, String userId, String relativePath) {
+        String current = relativePath;
+        while (StringUtils.isNotBlank(current)) {
+            String parent = getParentPath(current);
+            if (StringUtils.equals(current, parent)) {
+                break;
+            }
+            if (StringUtils.isBlank(parent)) {
+                break;
+            }
+            Optional<FileMapping> parentMapping = fileMappingRepository
+                    .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(openType, userId, parent);
+            if (parentMapping.isPresent() && !FileType.DIRECTORY_FILE.equals(parentMapping.get().getFileType())) {
+                return true;
+            }
+            current = parent;
         }
-
-        String childName = StringUtils.substringBefore(childPath, "/");
-        Path childTarget;
-        if (StringUtils.contains(childPath, "/")) {
-            childTarget = Path.of(mapping.getTargetPath());
-        } else {
-            childTarget = Path.of(mapping.getTargetPath());
-        }
-        File targetFile = childTarget.toFile();
-        if (!targetFile.exists()) {
-            return null;
-        }
-
-        FileResponseDto fileResponseDto = new FileResponseDto();
-        fileResponseDto.setFileName(childName);
-        fileResponseDto.setFileSize(targetFile.length());
-        fileResponseDto.setFileType(StringUtils.contains(childPath, "/") ? FileType.DIRECTORY_FILE : FileTypeUtils.getFileType(targetFile));
-        fileResponseDto.setFile(targetFile);
-        fileResponseDto.setFilePath("/" + (StringUtils.isBlank(requestPath) ? "" : requestPath + "/"));
-        return fileResponseDto;
+        return false;
     }
 
-    private Optional<TorrentFileMapping> findCoveringMapping(Integer openType, String userId, String relativePath) {
-        return torrentFileMappingRepository.findByOpenTypeAndUserIdAndDeletedFalse(openType, userId)
+    private boolean hasMoveDestinationConflict(Integer openType, String userId, String originRelativePath, String newRelativePath) {
+        String originPrefix = originRelativePath + "/";
+        List<String> movingPaths = fileMappingRepository.findByOpenTypeAndUserIdAndDeletedFalse(openType, userId)
                 .stream()
-                .filter(mapping -> relativePath.equals(mapping.getVirtualPath())
-                        || StringUtils.startsWith(relativePath, mapping.getVirtualPath() + "/"))
-                .max(Comparator.comparingInt(mapping -> mapping.getVirtualPath().length()));
+                .map(FileMapping::getVirtualPath)
+                .filter(path -> path.equals(originRelativePath) || StringUtils.startsWith(path, originPrefix))
+                .toList();
+        if (movingPaths.isEmpty()) {
+            return false;
+        }
+        Set<String> movingPathSet = new HashSet<>(movingPaths);
+        for (String oldPath : movingPaths) {
+            String suffix = oldPath.equals(originRelativePath) ? "" : oldPath.substring(originRelativePath.length());
+            String destinationPath = newRelativePath + suffix;
+            Optional<FileMapping> destinationMapping = fileMappingRepository
+                    .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(openType, userId, destinationPath);
+            if (destinationMapping.isPresent() && !movingPathSet.contains(destinationPath)) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    private Path resolveMappedFile(TorrentFileMapping mapping, String relativePath) {
-        Path targetRoot = Path.of(mapping.getTargetPath()).toAbsolutePath().normalize();
-        String suffix = "";
-        if (!relativePath.equals(mapping.getVirtualPath())) {
-            suffix = relativePath.substring(mapping.getVirtualPath().length() + 1);
+    private void mapPhysicalTreeToVirtualPaths(Integer openType, String userId, String rootVirtualPath, File physicalRoot) {
+        saveOrUpdateFileMapping(openType, userId, rootVirtualPath, getParentPath(rootVirtualPath),
+                Path.of(rootVirtualPath).getFileName().toString(), physicalRoot);
+        if (!physicalRoot.isDirectory()) {
+            return;
         }
-        Path targetPath = targetRoot.resolve(suffix).normalize();
-        if (!targetPath.startsWith(targetRoot)) {
-            throw new ServiceException(HttpStatus.FORBIDDEN, "文件路径不合法");
+        walkAndMapChildren(openType, userId, rootVirtualPath, physicalRoot, physicalRoot);
+    }
+
+    private void walkAndMapChildren(Integer openType, String userId, String rootVirtualPath, File rootPhysical, File current) {
+        File[] children = current.listFiles();
+        if (children == null) {
+            return;
         }
-        return targetPath;
+        Path rootPath = rootPhysical.toPath().toAbsolutePath().normalize();
+        for (File child : children) {
+            Path childPath = child.toPath().toAbsolutePath().normalize();
+            String suffix = rootPath.relativize(childPath).toString().replace("\\", "/");
+            String childVirtualPath = rootVirtualPath + "/" + suffix;
+            saveOrUpdateFileMapping(openType, userId, childVirtualPath, getParentPath(childVirtualPath), child.getName(), child);
+            if (child.isDirectory()) {
+                walkAndMapChildren(openType, userId, rootVirtualPath, rootPhysical, child);
+            }
+        }
+    }
+
+    private File buildUploadStorageFile(Integer openType, String userId, String fileName) {
+        String extension = StringUtils.substringAfterLast(fileName, ".");
+        String uniqueName = UUID.randomUUID() + (StringUtils.isBlank(extension) ? "" : "." + extension);
+        Path path = Path.of(fileServerPath, STORAGE_DIRECTORY, String.valueOf(openType), userId, uniqueName)
+                .toAbsolutePath()
+                .normalize();
+        return path.toFile();
+    }
+
+    private File buildVirtualDirectoryStorage(Integer openType, String userId, String directoryName) {
+        Path path = Path.of(fileServerPath, VIRTUAL_DIRECTORY_STORAGE, String.valueOf(openType), userId,
+                        UUID.randomUUID() + "-" + directoryName)
+                .toAbsolutePath()
+                .normalize();
+        return path.toFile();
+    }
+
+    private void saveOrUpdateFileMapping(Integer openType, String mappingUserId, String virtualPath,
+                                         String parentPath, String fileName, File file) {
+        FileMapping mapping = fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(openType, mappingUserId, virtualPath)
+                .orElseGet(FileMapping::new);
+        mapping.setOpenType(openType);
+        mapping.setUserId(mappingUserId);
+        mapping.setVirtualPath(virtualPath);
+        mapping.setParentPath(StringUtils.defaultString(parentPath));
+        mapping.setFileName(fileName);
+        mapping.setFileType(FileTypeUtils.getFileType(file));
+        mapping.setFileSize(file.length());
+        mapping.setTargetPath(file.toPath().toAbsolutePath().normalize().toString());
+        mapping.setDeleted(false);
+        if (mapping.getCreateTime() == null) {
+            mapping.setCreateTime(LocalDateTime.now());
+        }
+        mapping.setUpdateTime(LocalDateTime.now());
+        fileMappingRepository.save(mapping);
+    }
+
+    private void markDeletedByPrefix(Integer openType, String mappingUserId, String relativePath) {
+        String prefix = relativePath + "/";
+        LocalDateTime now = LocalDateTime.now();
+        fileMappingRepository.findByOpenTypeAndUserIdAndDeletedFalse(openType, mappingUserId)
+                .stream()
+                .filter(one -> one.getVirtualPath().equals(relativePath)
+                        || StringUtils.startsWith(one.getVirtualPath(), prefix))
+                .forEach(one -> {
+                    one.setDeleted(true);
+                    one.setUpdateTime(now);
+                    fileMappingRepository.save(one);
+                });
+    }
+
+    private void moveFileMappingTree(Integer openType, String mappingUserId, String originRelativePath, String newRelativePath) {
+        String originPrefix = originRelativePath + "/";
+        LocalDateTime now = LocalDateTime.now();
+        fileMappingRepository.findByOpenTypeAndUserIdAndDeletedFalse(openType, mappingUserId)
+                .stream()
+                .filter(one -> one.getVirtualPath().equals(originRelativePath)
+                        || StringUtils.startsWith(one.getVirtualPath(), originPrefix))
+                .forEach(one -> {
+                    String oldPath = one.getVirtualPath();
+                    String suffix = oldPath.equals(originRelativePath)
+                            ? ""
+                            : oldPath.substring(originRelativePath.length());
+                    String updatedPath = newRelativePath + suffix;
+                    one.setVirtualPath(updatedPath);
+                    one.setParentPath(getParentPath(updatedPath));
+                    one.setFileName(Path.of(updatedPath).getFileName().toString());
+                    one.setUpdateTime(now);
+                    fileMappingRepository.save(one);
+                });
+    }
+
+    private File resolveMappedFile(FileMapping mapping) {
+        return Path.of(mapping.getTargetPath()).toAbsolutePath().normalize().toFile();
     }
 
     private void checkPublicWriteAuthority(Integer openType) {
@@ -935,11 +1135,12 @@ public class FileServiceImpl implements FileService {
     private Path resolveTokenFile(String tokenFilePath, Claims claims) {
         if (StringUtils.startsWith(tokenFilePath, PUBLIC_DIRECTORY)) {
             String relativePath = tokenFilePath.substring(PUBLIC_DIRECTORY.length());
-            Optional<TorrentFileMapping> mapping = findCoveringMapping(1, "public", relativePath);
+            Optional<FileMapping> mapping = fileMappingRepository
+                    .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(1, "public", relativePath);
             if (mapping.isPresent()) {
-                return resolveMappedFile(mapping.get(), relativePath);
+                return resolveMappedFile(mapping.get()).toPath();
             }
-            return FilePathGuard.resolveInsideRoot(fileServerPath + PUBLIC_DIRECTORY, relativePath);
+            throw new ServiceException(HttpStatus.FORBIDDEN, "下载链接不合法");
         }
         if (StringUtils.startsWith(tokenFilePath, PRIVATE_DIRECTORY)) {
             String privatePath = tokenFilePath.substring(PRIVATE_DIRECTORY.length());
@@ -953,11 +1154,12 @@ public class FileServiceImpl implements FileService {
                 throw new ServiceException(HttpStatus.FORBIDDEN, "下载链接不合法");
             }
             String relativePath = privatePath.substring(separatorIndex + 1);
-            Optional<TorrentFileMapping> mapping = findCoveringMapping(0, userId, relativePath);
+            Optional<FileMapping> mapping = fileMappingRepository
+                    .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(0, userId, relativePath);
             if (mapping.isPresent()) {
-                return resolveMappedFile(mapping.get(), relativePath);
+                return resolveMappedFile(mapping.get()).toPath();
             }
-            return FilePathGuard.resolveInsideRoot(fileServerPath + PRIVATE_DIRECTORY + userId + "/", relativePath);
+            throw new ServiceException(HttpStatus.FORBIDDEN, "下载链接不合法");
         }
         if (StringUtils.startsWith(tokenFilePath, PREVIEW_DIRECTORY)) {
             String relativePath = tokenFilePath.substring(PREVIEW_DIRECTORY.length());
@@ -984,6 +1186,213 @@ public class FileServiceImpl implements FileService {
             if (tmpFile.isFile() && tmpFile.lastModified() < expireBefore && !tmpFile.delete()) {
                 log.warn("过期临时文件删除失败：{}", tmpFile.getAbsolutePath());
             }
+        }
+    }
+
+    /**
+     * 清理已逻辑删除且无有效映射引用的物理文件。
+     */
+    @Scheduled(cron = "${file.mapping.gc.cron:0 0 4 * * ?}")
+    @Transactional("fileServerTransactionManager")
+    public void cleanDeletedFileMappings() {
+        LocalDateTime threshold = LocalDateTime.now().minusDays(Math.max(0, fileMappingGcRetentionDays));
+        List<FileMapping> allMappings = fileMappingRepository.findAll();
+        Set<String> activeTargetPaths = allMappings.stream()
+                .filter(one -> !Boolean.TRUE.equals(one.getDeleted()))
+                .map(FileMapping::getTargetPath)
+                .filter(StringUtils::isNotBlank)
+                .collect(Collectors.toSet());
+
+        for (FileMapping mapping : allMappings) {
+            if (!Boolean.TRUE.equals(mapping.getDeleted())) {
+                continue;
+            }
+            LocalDateTime updateTime = mapping.getUpdateTime() != null ? mapping.getUpdateTime() : mapping.getCreateTime();
+            if (updateTime != null && updateTime.isAfter(threshold)) {
+                continue;
+            }
+            String targetPath = mapping.getTargetPath();
+            if (StringUtils.isBlank(targetPath) || activeTargetPaths.contains(targetPath)) {
+                continue;
+            }
+
+            File target = Path.of(targetPath).toFile();
+            if (target.exists()) {
+                boolean deleted = deletePhysicalRecursively(target);
+                if (!deleted) {
+                    log.warn("物理文件清理失败，id={}, targetPath={}", mapping.getId(), targetPath);
+                    continue;
+                }
+            }
+            fileMappingRepository.delete(mapping);
+        }
+    }
+
+    /**
+     * 清理长时间未活动的上传合并锁，防止异常中断后锁对象堆积。
+     */
+    @Scheduled(cron = "${file.upload.lock.clean.cron:0 */10 * * * ?}")
+    public void cleanExpiredUploadLocks() {
+        long expireBefore = System.currentTimeMillis() - Math.max(60_000L, uploadLockExpireMillis);
+        uploadMergeLockAccessTime.forEach((key, lastAccess) -> {
+            if (lastAccess != null && lastAccess < expireBefore) {
+                uploadMergeLocks.remove(key);
+                uploadMergeLockAccessTime.remove(key);
+            }
+        });
+    }
+
+    private boolean deletePhysicalRecursively(File target) {
+        if (!target.exists()) {
+            return true;
+        }
+        boolean success = true;
+        if (target.isDirectory() && !Files.isSymbolicLink(target.toPath())) {
+            File[] children = target.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    success = deletePhysicalRecursively(child) && success;
+                }
+            }
+        }
+        return target.delete() && success;
+    }
+
+    @Override
+    public void startFileMappingBackfill() {
+        if (!AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
+            throw new ServiceException(HttpStatus.UNAUTHORIZED, "当前用户无权限执行回填");
+        }
+        if (!backfillRunning.compareAndSet(false, true)) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "回填任务正在执行中，请稍后再试");
+        }
+        backfillStartTime = LocalDateTime.now();
+        backfillEndTime = null;
+        backfillLastError = null;
+        backfillProcessedCount.set(0L);
+        backfillCreatedCount.set(0L);
+        backfillUpdatedCount.set(0L);
+        fileExecutor.execute(() -> {
+            try {
+                doBackfillFileMapping();
+            } catch (Exception e) {
+                backfillLastError = e.getMessage();
+                log.error("file_mapping 回填任务执行失败", e);
+            } finally {
+                backfillEndTime = LocalDateTime.now();
+                backfillRunning.set(false);
+            }
+        });
+    }
+
+    @Override
+    public Map<String, Object> getFileMappingBackfillStatus() {
+        if (!AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
+            throw new ServiceException(HttpStatus.UNAUTHORIZED, "当前用户无权限查看回填状态");
+        }
+        Map<String, Object> status = new HashMap<>();
+        status.put("running", backfillRunning.get());
+        status.put("startTime", backfillStartTime);
+        status.put("endTime", backfillEndTime);
+        status.put("lastError", backfillLastError);
+        status.put("processedCount", backfillProcessedCount.get());
+        status.put("createdCount", backfillCreatedCount.get());
+        status.put("updatedCount", backfillUpdatedCount.get());
+        return status;
+    }
+
+    @Override
+    public boolean existsUserFile(Integer openType, String userId, String filePath, boolean allowDirectory) {
+        String mappingUserId = getMappingUserId(openType, userId);
+        String relativePath = FilePathGuard.normalizeRelativePath(filePath, true);
+        if (allowDirectory) {
+            Optional<FileMapping> directoryMapping = fileMappingRepository
+                    .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(openType, mappingUserId, relativePath);
+            if (directoryMapping.isPresent()) {
+                File mappedFile = resolveMappedFile(directoryMapping.get());
+                return mappedFile.exists() && mappedFile.isDirectory();
+            }
+            String prefix = StringUtils.isBlank(relativePath) ? "" : relativePath + "/";
+            boolean hasChildren = fileMappingRepository.findByOpenTypeAndUserIdAndDeletedFalse(openType, mappingUserId)
+                    .stream()
+                    .anyMatch(one -> StringUtils.isBlank(prefix) || StringUtils.startsWith(one.getVirtualPath(), prefix));
+            if (hasChildren) {
+                return true;
+            }
+        }
+        try {
+            Path path = resolveUserRequestFile(openType, userId, filePath);
+            File file = path.toFile();
+            if (!file.exists()) {
+                return false;
+            }
+            return allowDirectory || !file.isDirectory();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void doBackfillFileMapping() {
+        File publicRoot = Path.of(fileServerPath, "public").toFile();
+        if (publicRoot.exists() && publicRoot.isDirectory()) {
+            upsertTree(1, "public", publicRoot);
+        }
+
+        File privateRoot = Path.of(fileServerPath, "private").toFile();
+        if (privateRoot.exists() && privateRoot.isDirectory()) {
+            File[] userDirectories = privateRoot.listFiles(File::isDirectory);
+            if (userDirectories != null) {
+                for (File userDirectory : userDirectories) {
+                    String userId = userDirectory.getName();
+                    if (StringUtils.isNotBlank(userId)) {
+                        upsertTree(0, userId, userDirectory);
+                    }
+                }
+            }
+        }
+    }
+
+    private void upsertTree(Integer openType, String userId, File rootDirectory) {
+        List<FileMapping> existing = fileMappingRepository.findByOpenTypeAndUserIdAndDeletedFalse(openType, userId);
+        Map<String, FileMapping> existingMap = new HashMap<>();
+        for (FileMapping mapping : existing) {
+            existingMap.put(mapping.getVirtualPath(), mapping);
+        }
+        walkAndUpsert(openType, userId, rootDirectory, rootDirectory, existingMap);
+    }
+
+    private void walkAndUpsert(Integer openType, String userId, File rootDirectory, File current,
+                               Map<String, FileMapping> existingMap) {
+        if (!current.exists()) {
+            return;
+        }
+
+        if (!rootDirectory.equals(current)) {
+            String virtualPath = rootDirectory.toPath()
+                    .toAbsolutePath()
+                    .normalize()
+                    .relativize(current.toPath().toAbsolutePath().normalize())
+                    .toString()
+                    .replace("\\", "/");
+            FileMapping oldMapping = existingMap.get(virtualPath);
+            saveOrUpdateFileMapping(openType, userId, virtualPath, getParentPath(virtualPath), current.getName(), current);
+            if (oldMapping == null) {
+                backfillCreatedCount.incrementAndGet();
+            } else {
+                backfillUpdatedCount.incrementAndGet();
+            }
+            backfillProcessedCount.incrementAndGet();
+        }
+
+        if (!current.isDirectory()) {
+            return;
+        }
+        File[] children = current.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File child : children) {
+            walkAndUpsert(openType, userId, rootDirectory, child, existingMap);
         }
     }
 }

@@ -8,25 +8,26 @@ import com.misu.fileServer.domain.dto.*;
 import com.misu.fileServer.domain.entity.VideoRoom;
 import com.misu.fileServer.domain.entity.VideoRoomEvent;
 import com.misu.fileServer.repository.VideoRoomEventRepository;
+import com.misu.fileServer.service.FileService;
 import com.misu.fileServer.service.VideoRoomService;
 import com.misu.fileServer.util.FilePathGuard;
 import com.misu.security.dto.LoginUser;
-import com.misu.security.service.TokenService;
 import com.misu.security.utils.LoginMessageUtil;
-import io.jsonwebtoken.Claims;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.net.URI;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.*;
 
 /**
@@ -42,23 +43,14 @@ public class VideoRoomServiceImpl implements VideoRoomService {
     private VideoRoomDao videoRoomDao;
 
     @Resource
-    private TokenService tokenService;
+    private FileService fileService;
 
     @Resource
     private VideoRoomEventRepository videoRoomEventRepository;
 
-    @Value("${file-server.path}")
-    private String fileServerPath;
-
     private final static String VIDEO_STATE_KEY = "video-room-state:";
 
     private final static String VIDEO_ROOM_USER_KEY = "video-room-user:";
-
-    private final static String PUBLIC_DIRECTORY = "public/";
-
-    private final static String PRIVATE_DIRECTORY = "private/";
-
-    private final static String PREVIEW_DIRECTORY = "preview/";
 
     @Override
     public VideoRoomDto getVideoRoomFromId(String roomId) {
@@ -66,14 +58,7 @@ public class VideoRoomServiceImpl implements VideoRoomService {
 
         if (videoRoomOptional.isPresent()) {
             VideoRoom videoRoom = videoRoomOptional.get();
-            VideoRoomDto videoRoomDto = new VideoRoomDto();
-            videoRoomDto.setRoomId(videoRoom.getRoomId());
-            videoRoomDto.setRoomName(videoRoom.getRoomName());
-            videoRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
-            videoRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
-            videoRoomDto.setVideoPath(videoRoom.getVideoPath());
-            videoRoomDto.setCreatorId(videoRoom.getCreatorId());
-            videoRoomDto.setCreateTime(videoRoom.getCreateTime());
+            VideoRoomDto videoRoomDto = convertToRoomDto(videoRoom);
             //判断当前用户是否为放映室创建者
             if (videoRoom.getCreatorId().equals(LoginMessageUtil.getLoginUser().get().getUserId().toString())) {
                 videoRoomDto.setCreatorFlag(true);
@@ -102,7 +87,7 @@ public class VideoRoomServiceImpl implements VideoRoomService {
                 videoStateInRoomDto.setRoomName(videoRoom.getRoomName());
                 videoStateInRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
                 videoStateInRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
-                videoStateInRoomDto.setVideoPath(videoRoom.getVideoPath());
+                videoStateInRoomDto.setVideoPath(getPlaybackVideoPath(videoRoom));
                 videoStateInRoomDto.setState(videoRoom.getState());
                 videoStateInRoomDto.setSyncTime(videoRoom.getSyncTime());
                 videoStateInRoomDto.setVideoTime(videoRoom.getVideoTime());
@@ -185,15 +170,17 @@ public class VideoRoomServiceImpl implements VideoRoomService {
         videoStateInRoomDto.setRoomName(videoRoom.getRoomName());
         videoStateInRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
         videoStateInRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
-        videoStateInRoomDto.setVideoPath(videoRoom.getVideoPath());
+        videoStateInRoomDto.setVideoPath(getPlaybackVideoPath(videoRoom));
         videoStateInRoomDto.setState(videoRoom.getState());
         videoStateInRoomDto.setSyncTime(videoRoom.getSyncTime());
         videoStateInRoomDto.setVideoTime(videoRoom.getVideoTime());
         CacheUtils.setCacheObject(cacheKey, videoStateInRoomDto, 10, ChronoUnit.MINUTES);
 
         addToRoomUser(roomId, loginUser);
-        return saveRoomEvent(roomId, "PLAYBACK", loginUser, state, safeVideoTimeSeconds,
+        VideoRoomEventDto eventDto = saveRoomEvent(roomId, "PLAYBACK", loginUser, state, safeVideoTimeSeconds,
                 clientSendTime, null, payload);
+        fillRoomSnapshot(eventDto, videoRoom);
+        return eventDto;
     }
 
     @Override
@@ -206,59 +193,60 @@ public class VideoRoomServiceImpl implements VideoRoomService {
     }
 
     @Override
+    public VideoRoomDto getMyActiveRoom() {
+        Optional<LoginUser> loginUserOptional = LoginMessageUtil.getLoginUser();
+        if (loginUserOptional.isEmpty()) {
+            return null;
+        }
+        return videoRoomDao.selectOneByCreatorId(String.valueOf(loginUserOptional.get().getUserId()))
+                .map(this::convertToRoomDto)
+                .orElse(null);
+    }
+
+    @Override
     @Transactional(transactionManager = "fileServerTransactionManager")
-    public VideoRoomDto createVideoRoom(CreateVideoRoomRequestDto createVideoRoomRequestDto) {
+    public VideoRoomDto playMyVideo(PlayMyVideoRequestDto requestDto) {
         Optional<LoginUser> loginUserOptional = LoginMessageUtil.getLoginUser();
         if (loginUserOptional.isEmpty()) {
             return null;
         }
 
         LoginUser loginUser = loginUserOptional.get();
-        validateCreateVideoRoomRequest(createVideoRoomRequestDto, loginUser);
+        validatePlayMyVideoRequest(requestDto, loginUser);
+        String videoPath = buildInternalVideoPath(requestDto.getDirectoryOpenFlag(), requestDto.getFilePath(),
+                Boolean.TRUE.equals(requestDto.getPreferTranscoded()));
 
         Optional<VideoRoom> videoRoomOptional = videoRoomDao.selectOneByCreatorId(loginUser.getUserId().toString());
         if (videoRoomOptional.isEmpty()) {
-            //如果原来的放映室已过期则重新创建
             VideoRoom videoRoom = new VideoRoom();
             videoRoom.setRoomId(UUID.randomUUID().toString());
-            videoRoom.setRoomName(createVideoRoomRequestDto.getRoomName());
-            videoRoom.setDirectoryOpenFlag(createVideoRoomRequestDto.getDirectoryOpenFlag());
-            videoRoom.setDirectoryPath(createVideoRoomRequestDto.getDirectoryPath());
-            videoRoom.setVideoPath(createVideoRoomRequestDto.getVideoPath());
+            videoRoom.setRoomName(requestDto.getRoomName());
+            videoRoom.setDirectoryOpenFlag(requestDto.getDirectoryOpenFlag());
+            videoRoom.setDirectoryPath(extractDirectoryPath(requestDto.getFilePath()));
+            videoRoom.setVideoPath(videoPath);
             videoRoom.setCreatorId(String.valueOf(loginUser.getUserId()));
             videoRoom.setCreateTime(LocalDateTime.now());
             videoRoom.setState("pause");
             videoRoom.setVideoTime(LocalTime.of(0, 0, 0));
             videoRoom.setSyncTime(LocalDateTime.now());
-            //12小时后过期
             videoRoom.setExpireTime(LocalDateTime.now().plusHours(12));
             videoRoomDao.save(videoRoom);
-
-            //返回id
-            VideoRoomDto videoRoomDto = new VideoRoomDto();
-            videoRoomDto.setRoomId(videoRoom.getRoomId());
-            return videoRoomDto;
-        }else {
-            //如果原来的放映室仍然存在则更新
+            refreshVideoStateCache(videoRoom);
+            return convertToRoomDto(videoRoom);
+        } else {
             VideoRoom videoRoom = videoRoomOptional.get();
-            videoRoom.setRoomName(createVideoRoomRequestDto.getRoomName());
-            videoRoom.setDirectoryOpenFlag(createVideoRoomRequestDto.getDirectoryOpenFlag());
-            videoRoom.setDirectoryPath(createVideoRoomRequestDto.getDirectoryPath());
-            videoRoom.setVideoPath(createVideoRoomRequestDto.getVideoPath());
+            videoRoom.setRoomName(requestDto.getRoomName());
+            videoRoom.setDirectoryOpenFlag(requestDto.getDirectoryOpenFlag());
+            videoRoom.setDirectoryPath(extractDirectoryPath(requestDto.getFilePath()));
+            videoRoom.setVideoPath(videoPath);
             videoRoom.setState("pause");
             videoRoom.setVideoTime(LocalTime.of(0, 0, 0));
             videoRoom.setSyncTime(LocalDateTime.now());
-            //12小时后过期
             videoRoom.setExpireTime(LocalDateTime.now().plusHours(12));
             videoRoomDao.updateById(videoRoom);
-
-            //返回id
-            VideoRoomDto videoRoomDto = new VideoRoomDto();
-            videoRoomDto.setRoomId(videoRoom.getRoomId());
-            return videoRoomDto;
+            refreshVideoStateCache(videoRoom);
+            return convertToRoomDto(videoRoom);
         }
-
-
     }
 
     @Override
@@ -294,7 +282,7 @@ public class VideoRoomServiceImpl implements VideoRoomService {
         videoStateInRoomDto.setRoomName(videoRoom.getRoomName());
         videoStateInRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
         videoStateInRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
-        videoStateInRoomDto.setVideoPath(videoRoom.getVideoPath());
+        videoStateInRoomDto.setVideoPath(getPlaybackVideoPath(videoRoom));
         videoStateInRoomDto.setState(videoRoom.getState());
         videoStateInRoomDto.setSyncTime(videoRoom.getSyncTime());
         videoStateInRoomDto.setVideoTime(videoRoom.getVideoTime());
@@ -339,6 +327,110 @@ public class VideoRoomServiceImpl implements VideoRoomService {
         String videoStateKey = VIDEO_STATE_KEY + videoRoomRequestDto.getRoomId();
         CacheUtils.removeCacheObject(roomUserKey);
         CacheUtils.removeCacheObject(videoStateKey);
+    }
+
+    @Override
+    public void streamRoomVideo(String roomId, HttpServletRequest request, HttpServletResponse response) {
+        VideoRoom videoRoom = assertRoomExists(roomId);
+        InternalFileVideoPath internalPath = parseInternalFileVideoPath(videoRoom.getVideoPath());
+        if (internalPath == null) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "当前放映室视频不是内部文件");
+        }
+        String ownerUserId = internalPath.openType() == 1 ? "public" : videoRoom.getCreatorId();
+        if ("transcodedVideo".equals(internalPath.action())) {
+            fileService.transcodedVideoFileAsUser(internalPath.openType(), ownerUserId, internalPath.filePath(), request, response);
+        } else {
+            fileService.accessUserFileAsUser(internalPath.openType(), ownerUserId, internalPath.filePath(), request, response, false);
+        }
+    }
+
+    private VideoRoomDto convertToRoomDto(VideoRoom videoRoom) {
+        VideoRoomDto videoRoomDto = new VideoRoomDto();
+        videoRoomDto.setRoomId(videoRoom.getRoomId());
+        videoRoomDto.setRoomName(videoRoom.getRoomName());
+        videoRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
+        videoRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
+        videoRoomDto.setVideoPath(getPlaybackVideoPath(videoRoom));
+        videoRoomDto.setCreatorId(videoRoom.getCreatorId());
+        videoRoomDto.setCreateTime(videoRoom.getCreateTime());
+        return videoRoomDto;
+    }
+
+    private void refreshVideoStateCache(VideoRoom videoRoom) {
+        VideoStateInRoomDto videoStateInRoomDto = new VideoStateInRoomDto();
+        videoStateInRoomDto.setRoomId(videoRoom.getRoomId());
+        videoStateInRoomDto.setRoomName(videoRoom.getRoomName());
+        videoStateInRoomDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
+        videoStateInRoomDto.setDirectoryPath(videoRoom.getDirectoryPath());
+        videoStateInRoomDto.setVideoPath(getPlaybackVideoPath(videoRoom));
+        videoStateInRoomDto.setState(videoRoom.getState());
+        videoStateInRoomDto.setSyncTime(videoRoom.getSyncTime());
+        videoStateInRoomDto.setVideoTime(videoRoom.getVideoTime());
+        CacheUtils.setCacheObject(VIDEO_STATE_KEY + videoRoom.getRoomId(), videoStateInRoomDto, 10, ChronoUnit.MINUTES);
+    }
+
+    private void fillRoomSnapshot(VideoRoomEventDto eventDto, VideoRoom videoRoom) {
+        eventDto.setRoomName(videoRoom.getRoomName());
+        eventDto.setDirectoryOpenFlag(videoRoom.getDirectoryOpenFlag());
+        eventDto.setDirectoryPath(videoRoom.getDirectoryPath());
+        eventDto.setVideoPath(getPlaybackVideoPath(videoRoom));
+    }
+
+    private String getPlaybackVideoPath(VideoRoom videoRoom) {
+        if (parseInternalFileVideoPath(videoRoom.getVideoPath()) == null) {
+            return videoRoom.getVideoPath();
+        }
+        String videoKey = Integer.toHexString(StringUtils.defaultString(videoRoom.getVideoPath()).hashCode());
+        return "fileServer/videoRoom/video?roomId=" + videoRoom.getRoomId() + "&videoKey=" + videoKey;
+    }
+
+    private InternalFileVideoPath parseInternalFileVideoPath(String videoPath) {
+        if (StringUtils.isBlank(videoPath)) {
+            return null;
+        }
+        URI uri;
+        try {
+            uri = URI.create(videoPath);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        String path = StringUtils.defaultString(uri.getPath());
+        if (!path.endsWith("/file/stream") && !path.endsWith("/file/transcodedVideo")) {
+            return null;
+        }
+        Map<String, String> queryParams = parseQueryParams(uri.getRawQuery());
+        String openTypeValue = queryParams.get("openType");
+        String filePath = queryParams.get("filePath");
+        if (StringUtils.isBlank(openTypeValue) || StringUtils.isBlank(filePath)) {
+            return null;
+        }
+        try {
+            int openType = Integer.parseInt(openTypeValue);
+            String action = path.endsWith("/file/transcodedVideo") ? "transcodedVideo" : "stream";
+            return new InternalFileVideoPath(openType, filePath, action);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private Map<String, String> parseQueryParams(String rawQuery) {
+        Map<String, String> queryParams = new HashMap<>();
+        if (StringUtils.isBlank(rawQuery)) {
+            return queryParams;
+        }
+        for (String pair : rawQuery.split("&")) {
+            int separatorIndex = pair.indexOf('=');
+            if (separatorIndex <= 0) {
+                continue;
+            }
+            String key = URLDecoder.decode(pair.substring(0, separatorIndex), StandardCharsets.UTF_8);
+            String value = URLDecoder.decode(pair.substring(separatorIndex + 1), StandardCharsets.UTF_8);
+            queryParams.put(key, value);
+        }
+        return queryParams;
+    }
+
+    private record InternalFileVideoPath(Integer openType, String filePath, String action) {
     }
 
     /**
@@ -442,105 +534,25 @@ public class VideoRoomServiceImpl implements VideoRoomService {
         return dto;
     }
 
-    private void validateCreateVideoRoomRequest(CreateVideoRoomRequestDto requestDto, LoginUser loginUser) {
-        if (StringUtils.isBlank(requestDto.getVideoPath())) {
-            throw new ServiceException(HttpStatus.BAD_REQUEST, "视频路径不能为空");
-        }
-        validateVideoPath(requestDto.getVideoPath(), loginUser);
-
-        boolean hasDirectoryOpenFlag = requestDto.getDirectoryOpenFlag() != null;
-        boolean hasDirectoryPath = StringUtils.isNotBlank(requestDto.getDirectoryPath());
-        if (hasDirectoryOpenFlag || hasDirectoryPath) {
-            if (!hasDirectoryOpenFlag || !hasDirectoryPath) {
-                throw new ServiceException(HttpStatus.BAD_REQUEST, "放映室目录信息不完整");
-            }
-            Path directoryPath = resolveUserFile(requestDto.getDirectoryOpenFlag(),
-                    loginUser.getUserId().toString(),
-                    requestDto.getDirectoryPath(),
-                    true);
-            if (!Files.exists(directoryPath) || !Files.isDirectory(directoryPath)) {
-                throw new ServiceException(HttpStatus.BAD_REQUEST, "放映室目录不存在");
-            }
+    private void validatePlayMyVideoRequest(PlayMyVideoRequestDto requestDto, LoginUser loginUser) {
+        boolean fileExists = fileService.existsUserFile(requestDto.getDirectoryOpenFlag(),
+                loginUser.getUserId().toString(), requestDto.getFilePath(), false);
+        if (!fileExists) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "视频文件不存在或已被删除");
         }
     }
 
-    private void validateVideoPath(String videoPath, LoginUser loginUser) {
-        String fileToken = parseFileToken(videoPath);
-        if (StringUtils.isNotBlank(fileToken)) {
-            Claims claims = tokenService.parseToken(fileToken);
-            if (!claims.getExpiration().after(new Date())) {
-                throw new ServiceException(HttpStatus.FORBIDDEN, "视频链接已过期");
-            }
-            String tokenFilePath = claims.get("filePath", String.class);
-            Path tokenPath = resolveTokenFile(tokenFilePath, claims, loginUser);
-            if (!Files.exists(tokenPath) || Files.isDirectory(tokenPath)) {
-                throw new ServiceException(HttpStatus.BAD_REQUEST, "视频文件不存在或已被删除");
-            }
-            return;
-        }
-
-        try {
-            URI uri = URI.create(videoPath);
-            String scheme = uri.getScheme();
-            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
-                throw new ServiceException(HttpStatus.BAD_REQUEST, "视频路径不合法");
-            }
-        } catch (IllegalArgumentException e) {
-            throw new ServiceException(HttpStatus.BAD_REQUEST, "视频路径不合法");
-        }
+    private String extractDirectoryPath(String filePath) {
+        String normalizedPath = FilePathGuard.normalizeRelativePath(filePath, false);
+        int index = normalizedPath.lastIndexOf('/');
+        return index < 0 ? "" : normalizedPath.substring(0, index);
     }
 
-    private String parseFileToken(String videoPath) {
-        int tokenIndex = videoPath.indexOf("fileToken=");
-        if (tokenIndex < 0) {
-            return null;
-        }
-        String token = videoPath.substring(tokenIndex + "fileToken=".length());
-        int nextParamIndex = token.indexOf('&');
-        if (nextParamIndex >= 0) {
-            token = token.substring(0, nextParamIndex);
-        }
-        return token;
-    }
-
-    private Path resolveTokenFile(String tokenFilePath, Claims claims, LoginUser loginUser) {
-        if (StringUtils.startsWith(tokenFilePath, PUBLIC_DIRECTORY)) {
-            String relativePath = tokenFilePath.substring(PUBLIC_DIRECTORY.length());
-            return FilePathGuard.resolveInsideRoot(fileServerPath + PUBLIC_DIRECTORY, relativePath);
-        }
-        if (StringUtils.startsWith(tokenFilePath, PRIVATE_DIRECTORY)) {
-            String privatePath = tokenFilePath.substring(PRIVATE_DIRECTORY.length());
-            int separatorIndex = privatePath.indexOf('/');
-            if (separatorIndex <= 0) {
-                throw new ServiceException(HttpStatus.FORBIDDEN, "视频链接不合法");
-            }
-            String userId = privatePath.substring(0, separatorIndex);
-            Object tokenUserId = claims.get("userId");
-            if (tokenUserId == null
-                    || !userId.equals(String.valueOf(tokenUserId))
-                    || !userId.equals(loginUser.getUserId().toString())) {
-                throw new ServiceException(HttpStatus.FORBIDDEN, "视频链接不合法");
-            }
-            String relativePath = privatePath.substring(separatorIndex + 1);
-            return FilePathGuard.resolveInsideRoot(fileServerPath + PRIVATE_DIRECTORY + userId + "/", relativePath);
-        }
-        if (StringUtils.startsWith(tokenFilePath, PREVIEW_DIRECTORY)) {
-            String relativePath = tokenFilePath.substring(PREVIEW_DIRECTORY.length());
-            return FilePathGuard.resolveInsideRoot(fileServerPath + PREVIEW_DIRECTORY, relativePath);
-        }
-        throw new ServiceException(HttpStatus.FORBIDDEN, "视频链接不合法");
-    }
-
-    private Path resolveUserFile(Integer openType, String userId, String requestPath, boolean allowRoot) {
-        if (openType == null) {
-            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不能为空");
-        }
-        if (openType == 1) {
-            return FilePathGuard.resolveInsideRoot(fileServerPath + PUBLIC_DIRECTORY, requestPath, allowRoot);
-        }
-        if (openType == 0) {
-            return FilePathGuard.resolveInsideRoot(fileServerPath + PRIVATE_DIRECTORY + userId + "/", requestPath, allowRoot);
-        }
-        throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不合法");
+    private String buildInternalVideoPath(Integer openType, String filePath, boolean preferTranscoded) {
+        String normalizedPath = FilePathGuard.normalizeRelativePath(filePath, false);
+        String actionPath = preferTranscoded ? "transcodedVideo" : "stream";
+        return "fileServer/file/" + actionPath
+                + "?openType=" + openType
+                + "&filePath=" + URLEncoder.encode(normalizedPath, StandardCharsets.UTF_8);
     }
 }

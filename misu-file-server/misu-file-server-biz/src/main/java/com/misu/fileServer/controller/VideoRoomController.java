@@ -6,6 +6,8 @@ import com.misu.fileServer.service.VideoRoomService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -79,13 +81,16 @@ public class VideoRoomController {
         return AjaxResult.success(videoRoomService.getVideoRoomShareUrl(videoRoomRequestDto.getRoomId()));
     }
 
-    /**
-     * 创建放映室
-     */
-    @PostMapping({"/createVideoRoom"})
-    @ApiOperation(value="创建放映室")
-    public AjaxResult createVideoRoom(@Valid @RequestBody CreateVideoRoomRequestDto createVideoRoomRequestDto) {
-        return AjaxResult.success(videoRoomService.createVideoRoom(createVideoRoomRequestDto));
+    @GetMapping({"/myActiveRoom"})
+    @ApiOperation(value="获取当前用户活动放映室")
+    public AjaxResult getMyActiveRoom() {
+        return AjaxResult.success(videoRoomService.getMyActiveRoom());
+    }
+
+    @PostMapping({"/playMyVideo"})
+    @ApiOperation(value="播放当前用户选中的视频")
+    public AjaxResult playMyVideo(@Valid @RequestBody PlayMyVideoRequestDto requestDto) {
+        return AjaxResult.success(videoRoomService.playMyVideo(requestDto));
     }
 
     /**
@@ -116,5 +121,16 @@ public class VideoRoomController {
     public AjaxResult closeVideoRoom(@Valid @RequestBody VideoRoomRequestDto videoRoomRequestDto) {
         videoRoomService.closeVideoRoom(videoRoomRequestDto);
         return AjaxResult.success();
+    }
+
+    /**
+     * 播放放映室当前视频
+     */
+    @GetMapping({"/video"})
+    @ApiOperation(value="播放放映室当前视频")
+    public void streamRoomVideo(@Valid VideoRoomRequestDto videoRoomRequestDto,
+                                HttpServletRequest request,
+                                HttpServletResponse response) {
+        videoRoomService.streamRoomVideo(videoRoomRequestDto.getRoomId(), request, response);
     }
 }

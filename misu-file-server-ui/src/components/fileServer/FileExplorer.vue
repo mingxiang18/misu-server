@@ -117,13 +117,37 @@
           <el-form-item label="文件名称" prop="fileName">
             <el-input v-model="moveFileInfo.fileName"/>
           </el-form-item>
-          <el-form-item label="选择目录" prop="filePath">
+          <el-form-item label="选择目录" prop="newFilePath">
             <file-path-selector v-model="moveFileInfo.newFilePath" :open-type="props.openType"/>
           </el-form-item>
         </el-form>
         <div style="display: flex; justify-content: center;">
           <el-button @click="closeMoveFileDialog()">取消</el-button>
           <el-button type="primary" @click="moveFile()">添加</el-button>
+        </div>
+      </div>
+    </el-dialog>
+
+    <el-dialog
+        v-model="shareToPublicDialogVisible"
+        title="共享到公共目录"
+        style="width: min(520px, 92vw);"
+        @close="closeShareToPublicDialog()">
+      <div v-loading="shareToPublicLoading">
+        <el-form :model="shareToPublicInfo"
+                 ref="shareToPublicFormRef"
+                 :rules="shareToPublicRules"
+                 label-width="auto">
+          <el-form-item label="共享文件">
+            <el-input v-model="shareToPublicInfo.fileName" disabled/>
+          </el-form-item>
+          <el-form-item label="公共目录" prop="targetDirectoryPath">
+            <file-path-selector v-model="shareToPublicInfo.targetDirectoryPath" :open-type="1"/>
+          </el-form-item>
+        </el-form>
+        <div style="display: flex; justify-content: center;">
+          <el-button @click="closeShareToPublicDialog()">取消</el-button>
+          <el-button type="primary" @click="sharePrivateFileToPublic()">共享</el-button>
         </div>
       </div>
     </el-dialog>
@@ -139,6 +163,7 @@
         <li @click="onMenuItemClick('download')">下载</li>
         <li @click="onMenuItemClick('move')">移动/重命名</li>
         <li @click="onMenuItemClick('share')">分享</li>
+        <li v-if="canSharePrivateFileToPublic" @click="onMenuItemClick('shareToPublic')">共享到公共目录</li>
         <li @click="onMenuItemClick('delete')">删除</li>
       </ul>
     </div>
@@ -147,7 +172,7 @@
 
 <script setup>
 import {Document, Film, Folder, Picture} from "@element-plus/icons-vue";
-import {defineProps, onBeforeUnmount, onMounted, ref, watch} from "vue";
+import {computed, defineProps, onBeforeUnmount, onMounted, ref, watch} from "vue";
 import VideoViewer from '@/components/fileServer/VideoViewer.vue'
 import FileUpload from '@/components/fileServer/FileUpload.vue'
 import {ElMessage, ElMessageBox} from "element-plus";
@@ -156,12 +181,14 @@ import {
   moveFile as moveFileApi,
   deleteFile as deleteFileApi,
   createDirectory as createDirectoryApi,
-  getFileDownloadLink
+  getFileDownloadLink,
+  sharePrivateFileToPublic as sharePrivateFileToPublicApi
 } from '@/api/fileServer/fileServer';
 import { useRouter, useRoute } from 'vue-router';
-import { createVideoRoom } from '@/api/fileServer/videoRoom';
+import { playMyVideo } from '@/api/fileServer/videoRoom';
 import FilePathSelector from "@/components/fileServer/FilePathSelector.vue";
 import {addUserTorrent as addUserTorrentApi} from "@/api/fileServer/torrent";
+import {getUserInfo} from "@/api/user/user";
 
 // 接收外部传入的接口函数
 const props = defineProps({
@@ -178,7 +205,7 @@ const fileList = ref([]);
 //文件列表的加载函数
 const fileListLoading = ref(false);
 // 下载文件基本url
-const downloadBaseUrl = import.meta.env.VITE_RESOURCE_API
+const downloadBaseUrl = normalizeResourceBaseUrl(import.meta.env.VITE_RESOURCE_API)
 
 // 图片组件相关参数
 const imageIndex = ref(0);
@@ -220,8 +247,9 @@ const moveFileDialogVisible = ref(false);
 const moveFileLoading = ref(false);
 const moveFileInfo = ref({
   fileName: null,
+  originFileName: null,
   originFilePath: null,
-  newFilePath: null
+  newFilePath: '/'
 });
 const moveFileRules = ref({
   fileName: [
@@ -236,6 +264,45 @@ const moveFileRules = ref({
     { required: true, message: '文件路径不能为空', trigger: 'blur' }
   ],
 });
+
+//共享到公共目录相关
+const shareToPublicFormRef = ref();
+const shareToPublicDialogVisible = ref(false);
+const shareToPublicLoading = ref(false);
+const shareToPublicInfo = ref({
+  fileName: null,
+  sourceFilePath: null,
+  targetDirectoryPath: '/'
+});
+const shareToPublicRules = ref({
+  targetDirectoryPath: [
+    { required: true, message: '公共目录不能为空', trigger: 'change' }
+  ],
+});
+const currentUserInfo = ref(getUserInfo());
+const canSharePrivateFileToPublic = computed(() => {
+  const authorities = currentUserInfo.value.authorities || [];
+  return props.openType === 0 && (authorities.includes('ADMIN') || authorities.includes('FILE_ADMIN'));
+});
+
+function normalizeResourceBaseUrl(resourceApi) {
+  if (!resourceApi) {
+    return '';
+  }
+  try {
+    const url = new URL(resourceApi, window.location.origin);
+    const currentHost = window.location.hostname;
+    const isLocalPage = currentHost === 'localhost' || currentHost === '127.0.0.1';
+    const isLocalResource = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    if (isLocalPage && isLocalResource && url.hostname !== currentHost) {
+      url.hostname = currentHost;
+      return url.toString();
+    }
+  } catch (e) {
+    return resourceApi;
+  }
+  return resourceApi;
+}
 
 // 使用 Vue Router
 const router = useRouter();
@@ -348,14 +415,17 @@ const onMenuItemClick = (option) => {
   }else if (option === 'move') {
     moveFileInfo.value = {
       fileName: menuChooseFile.value.fileName,
+      originFileName: menuChooseFile.value.fileName,
       originFilePath: menuChooseFile.value.filePath,
-      newFilePath: '/'
+      newFilePath: normalizeDirectoryPath(menuChooseFile.value.filePath)
     };
     moveFileDialogVisible.value = true;
   }else if (option === 'delete') {
     deleteFile(menuChooseFile.value);
   }else if (option === 'share') {
     shareFile(menuChooseFile.value);
+  }else if (option === 'shareToPublic') {
+    openShareToPublicDialog(menuChooseFile.value);
   }
   // 点击后隐藏菜单
   menuVisible.value = false;
@@ -372,8 +442,9 @@ const downloadFile = (file) => {
 const closeMoveFileDialog = () => {
   moveFileInfo.value = {
     fileName: null,
+    originFileName: null,
     originFilePath: null,
-    newFilePath: null
+    newFilePath: '/'
   };
   moveFileDialogVisible.value = false;
 }
@@ -383,9 +454,9 @@ const moveFile = () => {
   moveFileFormRef.value.validate((valid, fields) => {
     if (valid) {
       moveFileLoading.value = true;
-      //请求接口，注意要把路径开头的所有"/"符号去掉
-      moveFileApi(moveFileInfo.value.originFilePath.replace(/^\/+/, '') + moveFileInfo.value.fileName,
-          (moveFileInfo.value.newFilePath + '/').replace(/^\/+/, '') + moveFileInfo.value.fileName,
+      moveFileApi(
+          buildApiFilePath(moveFileInfo.value.originFilePath, moveFileInfo.value.originFileName),
+          buildApiFilePath(moveFileInfo.value.newFilePath, moveFileInfo.value.fileName),
           props.openType).then((response) => {
         ElMessage.success("修改成功");
         //关闭对话框
@@ -412,7 +483,7 @@ const deleteFile = (file) => {
       }
   ).then(() => {
     //删除文件
-    deleteFileApi(file.filePath + file.fileName, props.openType).then((response) => {
+    deleteFileApi(buildApiFilePath(file.filePath, file.fileName), props.openType).then((response) => {
       ElMessage.success('删除成功')
       queryFileList();
     })
@@ -424,7 +495,7 @@ const deleteFile = (file) => {
 
 // 分享文件
 const shareFile = (file) => {
-  getFileDownloadLink(file.filePath + file.fileName, props.openType).then((response) => {
+  getFileDownloadLink(buildApiFilePath(file.filePath, file.fileName), props.openType).then((response) => {
     let shareLink = downloadBaseUrl + response.data;
 
     ElMessageBox.alert(
@@ -438,6 +509,70 @@ const shareFile = (file) => {
     ElMessage.error('获取分享链接失败')
   })
 }
+
+const openShareToPublicDialog = (file) => {
+  if (!file) {
+    return;
+  }
+  shareToPublicInfo.value = {
+    fileName: file.fileName,
+    sourceFilePath: joinFilePath(file.filePath, file.fileName),
+    targetDirectoryPath: normalizeDirectoryPath(filePath.value)
+  };
+  shareToPublicDialogVisible.value = true;
+};
+
+const closeShareToPublicDialog = () => {
+  shareToPublicInfo.value = {
+    fileName: null,
+    sourceFilePath: null,
+    targetDirectoryPath: '/'
+  };
+  shareToPublicDialogVisible.value = false;
+};
+
+const sharePrivateFileToPublic = () => {
+  shareToPublicFormRef.value.validate((valid) => {
+    if (!valid) {
+      return;
+    }
+    shareToPublicLoading.value = true;
+    sharePrivateFileToPublicApi(
+        shareToPublicInfo.value.sourceFilePath,
+        shareToPublicInfo.value.targetDirectoryPath
+    ).then(() => {
+      ElMessage.success('共享成功');
+      closeShareToPublicDialog();
+    }).finally(() => {
+      shareToPublicLoading.value = false;
+    });
+  });
+};
+
+const joinFilePath = (directoryPath, fileName) => {
+  return buildApiFilePath(directoryPath, fileName);
+};
+
+const normalizeDirectoryPath = (directoryPath) => {
+  let normalized = String(directoryPath || '/').replace(/\\/g, '/').trim();
+  if (!normalized) {
+    return '/';
+  }
+  normalized = normalized.replace(/\/+/g, '/');
+  if (!normalized.startsWith('/')) {
+    normalized = `/${normalized}`;
+  }
+  if (normalized !== '/' && !normalized.endsWith('/')) {
+    normalized = `${normalized}/`;
+  }
+  return normalized;
+};
+
+const buildApiFilePath = (directoryPath, fileName) => {
+  const normalizedDirectory = normalizeDirectoryPath(directoryPath);
+  const normalizedFileName = String(fileName || '').trim().replace(/^\/+|\/+$/g, '');
+  return `${normalizedDirectory}${normalizedFileName}`.replace(/^\/+/, '');
+};
 
 // 创建文件目录
 const createDirectory = () => {
@@ -534,13 +669,13 @@ const createVideoRoomFromFile = (file, streamLink) => {
     ElMessage.info('视频链接不存在，请稍后刷新');
     return;
   }
-  const createVideoRoomRequest = {
+  const playMyVideoRequest = {
     roomName: file.fileName,
-    videoPath: downloadBaseUrl + streamLink,
-    directoryPath: file.filePath,
-    directoryOpenFlag: props.openType
+    filePath: `${file.filePath || ''}${file.fileName}`,
+    directoryOpenFlag: props.openType,
+    preferTranscoded: file.transcodeState === 'SUCCESS',
   }
-  createVideoRoom(createVideoRoomRequest).then((response) => {
+  playMyVideo(playMyVideoRequest).then((response) => {
     router.push(`/fileServer/videoRoom/${response.data.roomId}`);
   });
 };

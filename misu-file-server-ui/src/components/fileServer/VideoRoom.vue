@@ -129,7 +129,8 @@ import {
   updateVideoState,
   quitVideoRoom as quitVideoRoomApi,
   closeVideoRoom as closeVideoRoomApi,
-  setVideoRoomToCookie, createVideoRoom, getHistoryVideoRoomFromCookie
+  getMyActiveRoom,
+  playMyVideo
 } from '@/api/fileServer/videoRoom';
 import { getFileList as getFileListApi} from '@/api/fileServer/fileServer';
 import { Share } from "@element-plus/icons-vue";
@@ -152,7 +153,7 @@ const videoRoom = ref({
 
 // 在url中获取id
 const route = useRoute();
-const roomId = !route.params.roomId ? getHistoryVideoRoomFromCookie() : route.params.roomId;
+const roomId = route.params.roomId;
 
 const videoCanPlay = ref(false);
 
@@ -186,7 +187,16 @@ const videoNotFoundNoticeFlag = ref(false);
 // 获取放映室信息
 const getVideoRoomMessage = () => {
   if (!roomId) {
-    videoRoomNotFoundHandle();
+    getMyActiveRoom().then((response) => {
+      if (response.data && response.data.roomId) {
+        router.replace(`/fileServer/videoRoom/${response.data.roomId}`);
+        return;
+      }
+      videoRoomNotFoundHandle();
+    }).catch(() => {
+      videoRoomNotFoundHandle();
+    });
+    return;
   }
 
   getVideoRoomFromId(roomId).then((response) => {
@@ -197,7 +207,7 @@ const getVideoRoomMessage = () => {
     videoRef.value.addEventListener('error', handleError);
 
     videoRoom.value = response.data;
-    setVideoRoomToCookie(videoRoom.value.roomId)
+    videoRoom.value.videoPath = normalizeResourceUrl(videoRoom.value.videoPath);
     videoRoom.value.state = 'pause';
     videoRoom.value.videoTime = '00:00:00';
     noticeList.value = [videoRoom.value.roomName]
@@ -217,17 +227,14 @@ const handleCanPlay = () => {
 const handleError = () => {
   videoCanPlay.value = false;
   ElMessageBox.prompt(
-      '当前放映室视频无法播放，可尝试刷新页面或者重新创建放映室',
+      '当前放映室视频无法播放，可尝试刷新页面或者回到文件目录重新选择视频',
       '放映室视频无法播放',
       {
-        confirmButtonText: '从视频链接创建',
-        cancelButtonText: '从文件创建',
-        inputPlaceholder: '视频链接',
-        inputPattern: /^(https?:\/\/)([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,6}(:\d+)?(\/[^\s]*)?$/,
-        inputErrorMessage: '视频链接不合法',
+        confirmButtonText: '回到文件目录',
+        showCancelButton: false,
       }
-  ).then(({ value }) => {
-    createNewVideoRoom(value);
+  ).then(() => {
+    router.push('/fileServer/publicDirectory');
   }).catch(() => {
     router.push('/fileServer/publicDirectory');
   })
@@ -431,7 +438,11 @@ const formatDateTime = (timestamp) => {
 };
 
 const applyRemotePlaybackEvent = (event) => {
-  if (!event || videoRoom.value.creatorFlag === true || videoCanPlay.value !== true) {
+  if (!event || videoRoom.value.creatorFlag === true) {
+    return;
+  }
+  applyRoomSnapshot(event);
+  if (videoCanPlay.value !== true) {
     return;
   }
   videoRoom.value.state = event.state;
@@ -451,6 +462,50 @@ const applyRemotePlaybackEvent = (event) => {
   if (event.state === 'pause' && !videoRef.value.paused) {
     videoRef.value.pause();
   }
+};
+
+const normalizeResourceUrl = (url) => {
+  if (!url) {
+    return '';
+  }
+  if (/^https?:\/\//i.test(url)) {
+    return url;
+  }
+  const resourceBase = import.meta.env.VITE_RESOURCE_API || '';
+  if (/^https?:\/\//i.test(resourceBase)) {
+    try {
+      const resourceUrl = new URL(resourceBase, window.location.origin);
+      const currentHost = window.location.hostname;
+      const isLocalPage = currentHost === 'localhost' || currentHost === '127.0.0.1';
+      const isLocalResource = resourceUrl.hostname === 'localhost' || resourceUrl.hostname === '127.0.0.1';
+      if (isLocalPage && isLocalResource && resourceUrl.hostname !== currentHost) {
+        resourceUrl.hostname = currentHost;
+      }
+      return resourceUrl.toString().replace(/\/$/, '') + '/' + url.replace(/^\//, '');
+    } catch (e) {
+      return resourceBase.replace(/\/$/, '') + '/' + url.replace(/^\//, '');
+    }
+  }
+  return url.startsWith('/') ? url : '/' + url;
+};
+
+const applyRoomSnapshot = (snapshot) => {
+  if (!snapshot) {
+    return;
+  }
+  const nextVideoPath = normalizeResourceUrl(snapshot.videoPath);
+  if (nextVideoPath && videoRoom.value.videoPath !== nextVideoPath) {
+    ElMessage({message: '房主切换了视频', type: 'info'});
+    videoCanPlay.value = false;
+    videoRoom.value.videoPath = nextVideoPath;
+    nextTick(() => {
+      videoRef.value?.load();
+    });
+  }
+  videoRoom.value.roomName = snapshot.roomName || videoRoom.value.roomName;
+  videoRoom.value.directoryPath = snapshot.directoryPath || videoRoom.value.directoryPath;
+  videoRoom.value.directoryOpenFlag = snapshot.directoryOpenFlag ?? videoRoom.value.directoryOpenFlag;
+  noticeList.value = [videoRoom.value.roomName];
 };
 
 // 在播放列表点击播放视频
@@ -489,24 +544,33 @@ const createVideoRoomFromFile = (file, streamLink) => {
     return;
   }
   videoListLoading.value = true;
-  createNewVideoRoom(import.meta.env.VITE_RESOURCE_API + streamLink, file.fileName, videoRoom.value.directoryOpenFlag, videoRoom.value.directoryPath)
-}
-
-// 创建新的视频放映室
-const createNewVideoRoom = (videoPath, videoName = '', directoryOpenFlag = null, directoryPath = null ) => {
-  const createVideoRoomRequest = {
-    roomName: videoName,
-    directoryPath: directoryPath,
-    directoryOpenFlag: directoryOpenFlag,
-    videoPath: videoPath,
-  }
-  createVideoRoom(createVideoRoomRequest).then((response) => {
-    ElMessage.success('创建放映室成功');
-    //跳转到/fileServer/videoRoom/:roomId
+  playMyVideo({
+    roomName: file.fileName,
+    directoryOpenFlag: videoRoom.value.directoryOpenFlag,
+    filePath: `${file.filePath || ''}${file.fileName}`,
+    preferTranscoded: file.transcodeState === 'SUCCESS',
+  }).then((response) => {
+    ElMessage.success('已切换放映视频');
+    if (response.data.roomId === videoRoom.value.roomId) {
+      videoListVisible.value = false;
+      videoListLoading.value = false;
+      applyRoomSnapshot(response.data);
+      if (isSocketOpen()) {
+        videoRoomSocket.send(JSON.stringify({
+          type: 'PLAYBACK',
+          state: 'pause',
+          videoTimeSeconds: 0,
+          clientSendTime: Date.now(),
+        }));
+      } else {
+        getVideoStateMessage();
+      }
+      return;
+    }
     window.location.href = `/fileServer/videoRoom/${response.data.roomId}`;
-  }).catch((error) => {
-    console.error(error);
-    ElMessage.error('放映室创建失败');
+  }).catch(() => {
+    videoListLoading.value = false;
+    ElMessage.error('切换放映视频失败');
   });
 }
 
@@ -516,17 +580,16 @@ const openVideoListVisible = () => {
   videoList.value = [];
   videoListVisible.value = true;
   videoListLoading.value = true;
-  //如果目录不为空，查询用户目录
-  if (!!videoRoom.value.directoryPath) {
-    getFileListApi(videoRoom.value.directoryPath, videoRoom.value.directoryOpenFlag).then((response) => {
-      videoListLoading.value = false;
-      videoList.value = response.data
-          .sort((a, b) => a.fileName.localeCompare(b.fileName))
-          .filter((file) => file.fileType === "video");
-    }).catch(() => {
-      videoListLoading.value = false;
-    });
-  }
+  const directoryPath = videoRoom.value.directoryPath || '/';
+  getFileListApi(directoryPath, videoRoom.value.directoryOpenFlag).then((response) => {
+    videoList.value = (response.data || [])
+        .sort((a, b) => a.fileName.localeCompare(b.fileName))
+        .filter((file) => file.fileType === "video");
+  }).catch(() => {
+    videoList.value = [];
+  }).finally(() => {
+    videoListLoading.value = false;
+  });
 }
 
 // 获取放映室视频状态信息
@@ -543,9 +606,14 @@ const getVideoStateMessage = () => {
       videoRoom.value.directoryOpenFlag = response.data.directoryOpenFlag;
       noticeList.value = [videoRoom.value.roomName];
 
-      if (videoRoom.value.videoPath !== response.data.videoPath) {
+      const nextVideoPath = normalizeResourceUrl(response.data.videoPath);
+      if (videoRoom.value.videoPath !== nextVideoPath) {
         ElMessage({message: '房主切换了视频', type: 'info'})
-        videoRoom.value.videoPath = response.data.videoPath;
+        videoCanPlay.value = false;
+        videoRoom.value.videoPath = nextVideoPath;
+        nextTick(() => {
+          videoRef.value?.load();
+        });
       }
 
       //将进度条状态从'HH:mm:ss'转为播放组件的进度，如果进度条相差大于10秒，更新video组件的进度条
@@ -583,17 +651,14 @@ const videoRoomNotFoundHandle = () => {
     beforeUnmountHandler();
 
     ElMessageBox.prompt(
-        '当前放映室不存在或已关闭，可在通过视频链接或文件目录的视频重新创建放映室',
+        '当前放映室不存在或已关闭，可回到文件目录点击视频重新创建',
         '放映室不存在',
         {
-          confirmButtonText: '从视频链接创建',
-          cancelButtonText: '从文件创建',
-          inputPlaceholder: '视频链接',
-          inputPattern: /^(https?:\/\/)([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,6}(:\d+)?(\/[^\s]*)?$/,
-          inputErrorMessage: '视频链接不合法',
+          confirmButtonText: '回到文件目录',
+          showCancelButton: false,
         }
-    ).then(({value}) => {
-      createNewVideoRoom(value);
+    ).then(() => {
+      router.push('/fileServer/publicDirectory');
     }).catch(() => {
       router.push('/fileServer/publicDirectory');
     })
@@ -660,7 +725,8 @@ const closeVideoRoom = () => {
 
 const getRoomShareUrl = () => {
   getVideoRoomShareUrl(videoRoom.value.roomId).then((response) => {
-    let shareLink = import.meta.env.VITE_BASE_URL + response.data;
+    const baseUrl = import.meta.env.VITE_BASE_URL || `${window.location.origin}/`;
+    let shareLink = baseUrl.replace(/\/$/, '/') + response.data.replace(/^\//, '');
 
     ElMessageBox.alert(
         '分享链接为：<a style="word-break: break-all;">' + shareLink + '</a>',

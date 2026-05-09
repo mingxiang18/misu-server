@@ -1,9 +1,15 @@
 package com.misu.fileServer.service.impl;
 
 import com.alibaba.fastjson2.JSON;
+import com.misu.common.constant.HttpStatus;
+import com.misu.common.exception.ServiceException;
 import com.misu.fileServer.constant.VideoTranscodeState;
 import com.misu.fileServer.domain.dto.VideoTranscodeStatusDto;
+import com.misu.fileServer.domain.dto.VideoTranscodeTaskAdminDto;
+import com.misu.fileServer.domain.dto.VideoTranscodeTaskAdminSummaryDto;
 import com.misu.fileServer.service.VideoTranscodeService;
+import com.misu.security.constant.UserRole;
+import com.misu.security.utils.AuthorityUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.digest.DigestUtils;
@@ -17,11 +23,22 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
 public class VideoTranscodeServiceImpl implements VideoTranscodeService {
+
+    private static final Pattern TASK_ID_PATTERN = Pattern.compile("[0-9a-fA-F]{32}");
+
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @Value("${file-server.path}")
     private String fileServerPath;
@@ -122,6 +139,65 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
         return maxBytes;
     }
 
+    @Override
+    public VideoTranscodeTaskAdminSummaryDto getAdminTaskSummary() {
+        checkAdmin();
+
+        VideoTranscodeTaskAdminSummaryDto summaryDto = new VideoTranscodeTaskAdminSummaryDto();
+        Map<String, VideoTranscodeTaskAdminDto> taskMap = new HashMap<>();
+
+        collectTaskFiles(taskMap, getQueueDirectory(), "WAITING");
+        collectTaskFiles(taskMap, getQueueDirectory().resolve("running"), "RUNNING");
+        collectTaskFiles(taskMap, getQueueDirectory().resolve("failed"), "FAILED");
+        collectTaskFiles(taskMap, getQueueDirectory().resolve("done"), "DONE");
+        collectStatusFiles(taskMap);
+
+        taskMap.values().forEach(task -> {
+            task.setRetryable("FAILED".equals(task.getQueueState()));
+            if ("WAITING".equals(task.getQueueState())) {
+                summaryDto.setWaitingCount(summaryDto.getWaitingCount() + 1);
+            } else if ("RUNNING".equals(task.getQueueState())) {
+                summaryDto.setRunningCount(summaryDto.getRunningCount() + 1);
+            } else if ("FAILED".equals(task.getQueueState())) {
+                summaryDto.setFailedCount(summaryDto.getFailedCount() + 1);
+            } else if ("DONE".equals(task.getQueueState())) {
+                summaryDto.setDoneCount(summaryDto.getDoneCount() + 1);
+            }
+            if (VideoTranscodeState.FAILED.equals(task.getState())
+                    && StringUtils.contains(task.getMessage(), "软链接")) {
+                summaryDto.setSkippedCount(summaryDto.getSkippedCount() + 1);
+            }
+        });
+
+        summaryDto.setTasks(taskMap.values().stream()
+                .sorted(Comparator.comparing(VideoTranscodeTaskAdminDto::getUpdateTime,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList());
+        return summaryDto;
+    }
+
+    @Override
+    public void retryFailedTask(String taskId) {
+        checkAdmin();
+        Path failedTask = resolveQueueTaskPath("failed", taskId);
+        if (!Files.exists(failedTask) || !Files.isRegularFile(failedTask)) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "失败任务不存在");
+        }
+        moveTaskToQueue(failedTask);
+    }
+
+    @Override
+    public int retryAllFailedTasks() {
+        checkAdmin();
+        return moveDirectoryTasksToQueue(getQueueDirectory().resolve("failed"));
+    }
+
+    @Override
+    public int recoverRunningTasks() {
+        checkAdmin();
+        return moveDirectoryTasksToQueue(getQueueDirectory().resolve("running"));
+    }
+
     private VideoTranscodeStatusDto readStatus(File sourceFile) {
         File statusFile = getStatusFile(sourceFile);
         if (!statusFile.exists() || !statusFile.isFile()) {
@@ -143,6 +219,161 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
         Path tmpPath = statusPath.resolveSibling(statusFile.getName() + ".tmp");
         Files.writeString(tmpPath, JSON.toJSONString(status), StandardCharsets.UTF_8);
         Files.move(tmpPath, statusPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    private void checkAdmin() {
+        if (!AuthorityUtil.hasAuthority(UserRole.ADMIN)) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "只有 ADMIN 用户可以管理视频转码任务");
+        }
+    }
+
+    private void collectTaskFiles(Map<String, VideoTranscodeTaskAdminDto> taskMap, Path directory, String queueState) {
+        if (!Files.exists(directory) || !Files.isDirectory(directory)) {
+            return;
+        }
+        try (Stream<Path> stream = Files.list(directory)) {
+            stream.filter(path -> Files.isRegularFile(path) && path.getFileName().toString().endsWith(".task"))
+                    .forEach(taskPath -> mergeTaskFile(taskMap, taskPath, queueState));
+        } catch (IOException e) {
+            log.warn("读取视频转码任务目录失败：{}", directory, e);
+        }
+    }
+
+    private void mergeTaskFile(Map<String, VideoTranscodeTaskAdminDto> taskMap, Path taskPath, String queueState) {
+        String taskId = StringUtils.removeEnd(taskPath.getFileName().toString(), ".task");
+        VideoTranscodeTaskAdminDto taskDto = taskMap.computeIfAbsent(taskId, this::createAdminTaskDto);
+        taskDto.setQueueState(queueState);
+        taskDto.setTaskPath(taskPath.toAbsolutePath().normalize().toString());
+        taskDto.setUpdateTime(formatLastModifiedTime(taskPath));
+
+        Map<String, String> taskVariables = readTaskVariables(taskPath);
+        taskDto.setSourcePath(StringUtils.defaultIfBlank(taskDto.getSourcePath(), taskVariables.get("SOURCE")));
+        taskDto.setOutputPath(StringUtils.defaultIfBlank(taskDto.getOutputPath(), taskVariables.get("OUTPUT")));
+        taskDto.setPreviewPath(StringUtils.defaultIfBlank(taskDto.getPreviewPath(), taskVariables.get("PREVIEW")));
+        taskDto.setStatusPath(StringUtils.defaultIfBlank(taskDto.getStatusPath(), taskVariables.get("STATUS")));
+    }
+
+    private void collectStatusFiles(Map<String, VideoTranscodeTaskAdminDto> taskMap) {
+        Path directory = getStatusDirectory();
+        if (!Files.exists(directory) || !Files.isDirectory(directory)) {
+            return;
+        }
+        try (Stream<Path> stream = Files.list(directory)) {
+            stream.filter(path -> Files.isRegularFile(path) && path.getFileName().toString().endsWith(".json"))
+                    .forEach(statusPath -> mergeStatusFile(taskMap, statusPath));
+        } catch (IOException e) {
+            log.warn("读取视频转码状态目录失败：{}", directory, e);
+        }
+    }
+
+    private void mergeStatusFile(Map<String, VideoTranscodeTaskAdminDto> taskMap, Path statusPath) {
+        try {
+            VideoTranscodeStatusDto statusDto = JSON.parseObject(Files.readString(statusPath, StandardCharsets.UTF_8),
+                    VideoTranscodeStatusDto.class);
+            if (statusDto == null || StringUtils.isBlank(statusDto.getTaskId())) {
+                return;
+            }
+            VideoTranscodeTaskAdminDto taskDto = taskMap.computeIfAbsent(statusDto.getTaskId(), this::createAdminTaskDto);
+            taskDto.setState(statusDto.getState());
+            taskDto.setProgress(statusDto.getProgress());
+            taskDto.setMessage(statusDto.getMessage());
+            taskDto.setPreviewPath(StringUtils.defaultIfBlank(taskDto.getPreviewPath(), statusDto.getPreviewPath()));
+            taskDto.setOutputPath(StringUtils.defaultIfBlank(taskDto.getOutputPath(), statusDto.getTranscodedPath()));
+            taskDto.setStatusPath(statusPath.toAbsolutePath().normalize().toString());
+            taskDto.setUpdateTime(maxTime(taskDto.getUpdateTime(), formatLastModifiedTime(statusPath)));
+        } catch (Exception e) {
+            log.warn("读取视频转码状态失败：{}", statusPath, e);
+        }
+    }
+
+    private VideoTranscodeTaskAdminDto createAdminTaskDto(String taskId) {
+        VideoTranscodeTaskAdminDto taskDto = new VideoTranscodeTaskAdminDto();
+        taskDto.setTaskId(taskId);
+        taskDto.setQueueState("UNKNOWN");
+        taskDto.setProgress(0);
+        taskDto.setRetryable(false);
+        return taskDto;
+    }
+
+    private Map<String, String> readTaskVariables(Path taskPath) {
+        Map<String, String> variableMap = new HashMap<>();
+        try {
+            for (String line : Files.readAllLines(taskPath, StandardCharsets.UTF_8)) {
+                if (StringUtils.isBlank(line)) {
+                    break;
+                }
+                int splitIndex = line.indexOf('=');
+                if (splitIndex <= 0) {
+                    continue;
+                }
+                String key = line.substring(0, splitIndex).trim();
+                if (!key.matches("[A-Z_][A-Z0-9_]*")) {
+                    continue;
+                }
+                variableMap.put(key, unquoteShellValue(line.substring(splitIndex + 1).trim()));
+            }
+        } catch (IOException e) {
+            log.warn("读取视频转码任务文件失败：{}", taskPath, e);
+        }
+        return variableMap;
+    }
+
+    private String unquoteShellValue(String value) {
+        if (value.length() >= 2 && value.startsWith("'") && value.endsWith("'")) {
+            return value.substring(1, value.length() - 1).replace("'\"'\"'", "'");
+        }
+        return value;
+    }
+
+    private String formatLastModifiedTime(Path path) {
+        try {
+            return Files.getLastModifiedTime(path).toInstant()
+                    .atZone(ZoneId.systemDefault())
+                    .format(DATE_TIME_FORMATTER);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private String maxTime(String left, String right) {
+        if (StringUtils.isBlank(left)) {
+            return right;
+        }
+        if (StringUtils.isBlank(right)) {
+            return left;
+        }
+        return left.compareTo(right) >= 0 ? left : right;
+    }
+
+    @SneakyThrows
+    private void moveTaskToQueue(Path taskPath) {
+        Path queueDirectory = getQueueDirectory();
+        Files.createDirectories(queueDirectory);
+        Path targetPath = queueDirectory.resolve(taskPath.getFileName()).normalize();
+        Files.move(taskPath, targetPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    private int moveDirectoryTasksToQueue(Path directory) {
+        if (!Files.exists(directory) || !Files.isDirectory(directory)) {
+            return 0;
+        }
+        try (Stream<Path> stream = Files.list(directory)) {
+            return stream.filter(path -> Files.isRegularFile(path) && path.getFileName().toString().endsWith(".task"))
+                    .mapToInt(taskPath -> {
+                        moveTaskToQueue(taskPath);
+                        return 1;
+                    })
+                    .sum();
+        } catch (IOException e) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "读取任务目录失败");
+        }
+    }
+
+    private Path resolveQueueTaskPath(String queueStateDirectory, String taskId) {
+        if (!TASK_ID_PATTERN.matcher(StringUtils.defaultString(taskId)).matches()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "任务ID不合法");
+        }
+        return getQueueDirectory().resolve(queueStateDirectory).resolve(taskId + ".task").toAbsolutePath().normalize();
     }
 
     @SneakyThrows
@@ -254,15 +485,23 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
     }
 
     private File getStatusFile(File sourceFile) {
-        return resolveConfiguredDirectory(statusDir, "transcode-status").resolve(getTaskId(sourceFile) + ".json").toFile();
+        return getStatusDirectory().resolve(getTaskId(sourceFile) + ".json").toFile();
     }
 
     private File getTaskFile(File sourceFile) {
-        return resolveConfiguredDirectory(queueDir, "transcode-queue").resolve(getTaskId(sourceFile) + ".task").toFile();
+        return getQueueDirectory().resolve(getTaskId(sourceFile) + ".task").toFile();
     }
 
     private File getRunningTaskFile(File sourceFile) {
-        return resolveConfiguredDirectory(queueDir, "transcode-queue").resolve("running").resolve(getTaskId(sourceFile) + ".task").toFile();
+        return getQueueDirectory().resolve("running").resolve(getTaskId(sourceFile) + ".task").toFile();
+    }
+
+    private Path getQueueDirectory() {
+        return resolveConfiguredDirectory(queueDir, "transcode-queue");
+    }
+
+    private Path getStatusDirectory() {
+        return resolveConfiguredDirectory(statusDir, "transcode-status");
     }
 
     private Path resolveConfiguredDirectory(String configuredDirectory, String defaultRelativeDirectory) {

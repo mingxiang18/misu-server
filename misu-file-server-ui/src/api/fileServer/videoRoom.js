@@ -1,7 +1,4 @@
 import request from '@/api/request'
-import Cookies from 'js-cookie'
-
-const VideoRoomKey = 'video-room-url';
 
 // 根据id获取对应的放映室数据
 export function getVideoRoomFromId(roomId) {
@@ -72,12 +69,20 @@ export function getVideoRoomShareUrl(roomId) {
     })
 }
 
-// 创建放映室
-export function createVideoRoom(createVideoRoomRequest) {
+// 获取当前用户活动放映室
+export function getMyActiveRoom() {
     return request({
-        url: '/fileServer/videoRoom/createVideoRoom',
+        url: '/fileServer/videoRoom/myActiveRoom',
+        method: 'get'
+    })
+}
+
+// 播放当前用户选中的视频
+export function playMyVideo(playMyVideoRequest) {
+    return request({
+        url: '/fileServer/videoRoom/playMyVideo',
         method: 'post',
-        data: createVideoRoomRequest
+        data: playMyVideoRequest
     })
 }
 
@@ -106,19 +111,4 @@ export function closeVideoRoom(closeVideoRoomRequest) {
         method: 'post',
         data: closeVideoRoomRequest
     })
-}
-
-// 把当前进入的放映室添加到Cookie
-export function setVideoRoomToCookie(videoRoomId) {
-    return Cookies.set(VideoRoomKey, videoRoomId);
-}
-
-// 从Cookie中获取最后一次进入的放映室
-export function getHistoryVideoRoomFromCookie() {
-    return Cookies.get(VideoRoomKey);
-}
-
-// 清理Cookie中记录的放映室
-export function removeVideoRoomFromCookie() {
-    return Cookies.remove(VideoRoomKey);
 }

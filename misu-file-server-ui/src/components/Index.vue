@@ -9,7 +9,7 @@
           <el-icon><icon-menu /></el-icon>
           <span>文件服务器</span>
         </template>
-        <el-menu-item v-for="fileServerMenu in fileServerMenuInfoList" @click="navigateTo(fileServerMenu.toUrl)">
+        <el-menu-item v-for="fileServerMenu in visibleFileServerMenuInfoList" @click="navigateTo(fileServerMenu.toUrl)">
           {{ fileServerMenu.menuName }}
         </el-menu-item>
       </el-sub-menu>
@@ -42,7 +42,7 @@
             <el-icon :size="menuIconSize" :color="menuIconColor"><Folder /></el-icon>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item v-for="fileServerMenu in fileServerMenuInfoList" @click="navigateTo(fileServerMenu.toUrl)">
+                <el-dropdown-item v-for="fileServerMenu in visibleFileServerMenuInfoList" @click="navigateTo(fileServerMenu.toUrl)">
                   {{ fileServerMenu.menuName }}
                 </el-dropdown-item>
               </el-dropdown-menu>
@@ -76,7 +76,6 @@ import {computed, onMounted, ref} from 'vue'
 import {User, Folder, Document, Menu as IconMenu, Message, Setting, ChatDotRound, Memo} from '@element-plus/icons-vue'
 import UserToolBar from "@/components/user/UserToolBar.vue";
 import {logOut} from "@/api/auth/auth";
-import {getHistoryVideoRoomFromCookie} from "@/api/fileServer/videoRoom";
 import { useRouter } from 'vue-router';
 import { getUserInfo, getUserInfoFromToken } from '@/api/user/user';
 
@@ -108,8 +107,15 @@ const fileServerMenuInfoList = [
   {
     "menuName": "放映室",
     "toUrl": "/fileServer/videoRoom"
+  },
+  {
+    "menuName": "转码管理",
+    "toUrl": "/fileServer/videoTranscodeManagement",
+    "adminOnly": true
   }
 ]
+
+const visibleFileServerMenuInfoList = computed(() => fileServerMenuInfoList.filter(menu => !menu.adminOnly || isAdmin.value));
 
 onMounted(() => {
   getUserInfoFromToken().then(response => {

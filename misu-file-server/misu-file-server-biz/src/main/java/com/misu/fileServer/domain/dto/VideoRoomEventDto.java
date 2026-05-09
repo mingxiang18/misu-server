@@ -49,6 +49,18 @@ public class VideoRoomEventDto {
     @ApiModelProperty("扩展内容")
     private String payload;
 
+    @ApiModelProperty("放映室名称")
+    private String roomName;
+
+    @ApiModelProperty("目录开放标识，0-私人目录，1-公共目录")
+    private Integer directoryOpenFlag;
+
+    @ApiModelProperty("目录路径")
+    private String directoryPath;
+
+    @ApiModelProperty("当前放映视频路径")
+    private String videoPath;
+
     @ApiModelProperty("创建时间")
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @JsonSerialize(using = LocalDateTimeSerializer.class)

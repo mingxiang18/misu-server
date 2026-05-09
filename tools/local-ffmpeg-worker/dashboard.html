@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local FFmpeg Worker</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f7fb;
+      color: #172033;
+    }
+    body {
+      margin: 0;
+      padding: 28px;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 26px;
+      font-weight: 700;
+    }
+    .muted {
+      color: #647089;
+      font-size: 13px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .panel {
+      background: #fff;
+      border: 1px solid #dfe5ef;
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 8px 24px rgba(34, 51, 84, 0.06);
+    }
+    .wide {
+      grid-column: 1 / -1;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: #e8f2ff;
+      color: #1257a8;
+      font-weight: 650;
+      font-size: 13px;
+    }
+    .status.failed {
+      background: #ffeceb;
+      color: #b42318;
+    }
+    .status.skipped {
+      background: #fff4db;
+      color: #946200;
+    }
+    .status.idle {
+      background: #eef7ef;
+      color: #217a3b;
+    }
+    .progress {
+      overflow: hidden;
+      height: 14px;
+      border-radius: 999px;
+      background: #e8edf5;
+      margin: 14px 0 8px;
+    }
+    .bar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #1976d2, #2e9d68);
+      transition: width .35s ease;
+    }
+    dl {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 10px 12px;
+      margin: 16px 0 0;
+      font-size: 14px;
+    }
+    dt {
+      color: #647089;
+    }
+    dd {
+      margin: 0;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th,
+    td {
+      border-top: 1px solid #edf1f7;
+      padding: 9px 6px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      color: #647089;
+      font-weight: 650;
+      background: #fafcff;
+    }
+    .path {
+      max-width: 420px;
+      overflow-wrap: anywhere;
+    }
+    .nowrap {
+      color: #647089;
+      white-space: nowrap;
+    }
+    @media (max-width: 760px) {
+      body {
+        padding: 16px;
+      }
+      header,
+      .grid {
+        display: block;
+      }
+      .panel {
+        margin-bottom: 14px;
+      }
+      dl {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Local FFmpeg Worker</h1>
+      <div class="muted" id="remote">等待 worker 写入状态</div>
+    </div>
+    <div class="muted" id="updated">未连接</div>
+  </header>
+
+  <section class="grid">
+    <div class="panel">
+      <span class="status idle" id="workerState">IDLE</span>
+      <dl>
+        <dt>消息</dt>
+        <dd id="message">等待状态文件</dd>
+        <dt>队列目录</dt>
+        <dd id="queueDir">-</dd>
+        <dt>路径映射</dt>
+        <dd id="mapping">-</dd>
+      </dl>
+    </div>
+
+    <div class="panel">
+      <span class="status" id="taskState">NO TASK</span>
+      <div class="progress"><div class="bar" id="bar"></div></div>
+      <div class="muted" id="progressText">0%</div>
+      <dl>
+        <dt>Task ID</dt>
+        <dd id="taskId">-</dd>
+        <dt>源文件</dt>
+        <dd id="source">-</dd>
+        <dt>输出</dt>
+        <dd id="output">-</dd>
+      </dl>
+    </div>
+
+    <div class="panel wide">
+      <h2 style="font-size:16px;margin:0 0 10px;">任务记录</h2>
+      <table>
+        <thead>
+        <tr>
+          <th>更新时间</th>
+          <th>状态</th>
+          <th>进度</th>
+          <th>源文件</th>
+          <th>结果 / 原因</th>
+        </tr>
+        </thead>
+        <tbody id="tasks"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function setStatus(el, value) {
+  el.textContent = value;
+  el.className = "status";
+  if (value === "IDLE" || value === "SUCCESS" || value === "NO TASK") el.classList.add("idle");
+  if (value === "FAILED" || value === "ERROR") el.classList.add("failed");
+  if (value === "SKIPPED") el.classList.add("skipped");
+}
+
+function text(value) {
+  return value === undefined || value === null || value === "" ? "-" : String(value);
+}
+
+function escapeHtml(value) {
+  return text(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function taskLabel(task) {
+  if (!task) return "NO TASK";
+  if (task.result === "SUCCESS") return "SUCCESS";
+  if (task.result === "FAILED") return "FAILED";
+  if (task.result === "SKIPPED") return "SKIPPED";
+  return task.state || "RUNNING";
+}
+
+function taskSummary(task) {
+  if (!task) return "-";
+  if (task.result === "SUCCESS") return "转码完成";
+  if (task.result === "SKIPPED") return task.message || "已跳过";
+  if (task.result === "FAILED") return task.reason || task.message || "失败";
+  return task.message || task.state || "处理中";
+}
+
+async function refresh() {
+  try {
+    const response = await fetch(`.work/state.json?t=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const state = await response.json();
+    const tasks = state.tasks || [];
+    const runningTask = tasks.find((item) => item.result === "RUNNING");
+    const task = runningTask || state.currentTask;
+
+    setStatus($("workerState"), text(state.workerState));
+    $("remote").textContent = text(state.remote);
+    $("updated").textContent = `更新于 ${text(state.updatedAt)}`;
+    $("message").textContent = text(state.message);
+    $("queueDir").textContent = text(state.queueDir);
+    $("mapping").textContent = `${text(state.containerRoot)} -> ${text(state.remoteRoot)}`;
+
+    if (task) {
+      const progress = Number(task.progress || 0);
+      setStatus($("taskState"), taskLabel(task));
+      $("bar").style.width = `${Math.max(0, Math.min(100, progress))}%`;
+      $("progressText").textContent = `${progress}%`;
+      $("taskId").textContent = text(task.taskId);
+      $("source").textContent = text(task.remoteSource || task.source);
+      $("output").textContent = text(task.remoteOutput || task.output);
+    } else {
+      setStatus($("taskState"), "NO TASK");
+      $("bar").style.width = "0%";
+      $("progressText").textContent = "0%";
+      $("taskId").textContent = "-";
+      $("source").textContent = "-";
+      $("output").textContent = "-";
+    }
+
+    $("tasks").innerHTML = tasks.map((item) =>
+      `<tr>
+        <td class="nowrap">${escapeHtml(item.updatedAt)}</td>
+        <td><span class="status ${item.result === "FAILED" ? "failed" : item.result === "SKIPPED" ? "skipped" : item.result === "SUCCESS" ? "idle" : ""}">${escapeHtml(taskLabel(item))}</span></td>
+        <td>${escapeHtml(item.progress)}%</td>
+        <td class="path">${escapeHtml(item.remoteSource || item.source)}</td>
+        <td class="path">${escapeHtml(taskSummary(item))}</td>
+      </tr>`
+    ).join("");
+  } catch (error) {
+    setStatus($("workerState"), "ERROR");
+    $("message").textContent = `读取状态失败：${error.message}`;
+  }
+}
+
+refresh();
+setInterval(refresh, 1500);
+</script>
+</body>
+</html>

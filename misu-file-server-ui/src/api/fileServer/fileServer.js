@@ -49,6 +49,19 @@ export function moveFile(originFilePath, newFilePath, openType) {
     })
 }
 
+// 将私人目录文件共享到公共目录
+export function sharePrivateFileToPublic(sourceFilePath, targetDirectoryPath) {
+    const data = {
+        sourceFilePath,
+        targetDirectoryPath
+    }
+    return request({
+        url: '/fileServer/file/sharePrivateFileToPublic',
+        method: 'post',
+        data: data
+    })
+}
+
 // 删除文件
 export function deleteFile(filePath, openType) {
     const data = {

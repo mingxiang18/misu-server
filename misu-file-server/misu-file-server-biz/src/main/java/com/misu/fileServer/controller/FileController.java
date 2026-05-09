@@ -5,6 +5,7 @@ import com.misu.fileServer.domain.dto.FileDownloadRequestDto;
 import com.misu.fileServer.domain.dto.FileRenameRequestDto;
 import com.misu.fileServer.domain.dto.FileRequestDto;
 import com.misu.fileServer.domain.dto.FileUploadRequest;
+import com.misu.fileServer.domain.dto.SharePrivateFileToPublicRequestDto;
 import com.misu.fileServer.service.FileService;
 import com.misu.security.annotation.Anonymous;
 import io.swagger.annotations.Api;
@@ -128,6 +129,16 @@ public class FileController {
     @ApiOperation(value="移动文件（包含重命名）")
     public AjaxResult moveFile(@Valid @RequestBody FileRenameRequestDto fileRenameRequestDto) {
         fileService.moveFile(fileRenameRequestDto);
+        return AjaxResult.success();
+    }
+
+    /**
+     * 将私人目录文件共享到公共目录
+     */
+    @PostMapping({"/sharePrivateFileToPublic"})
+    @ApiOperation(value="将私人目录文件共享到公共目录")
+    public AjaxResult sharePrivateFileToPublic(@Valid @RequestBody SharePrivateFileToPublicRequestDto requestDto) {
+        fileService.sharePrivateFileToPublic(requestDto);
         return AjaxResult.success();
     }
 

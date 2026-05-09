@@ -30,7 +30,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue']);  // 定义事件，用于更新外部绑定的值
 
 // 内部用于双向绑定的变量
-const selectedFilePathInternal = ref(props.modelValue);  // 内部绑定变量，初始化为外部传入的值
+const selectedFilePathInternal = ref(['/']);  // Cascader 需要路径数组
 const directoryOptions = ref([{
   value: '/',
   label: '根目录',
@@ -43,10 +43,10 @@ const cascaderProps = {
   checkStrictly: true,
   lazy: true,
   lazyLoad(node, resolve) {
-    queryFileDirectoryList(node.value).then(directories => {
+    queryFileDirectoryList(toDirectoryPath(node.value)).then(directories => {
       // 为当前目录添加子目录
       const children = directories.map((file) => ({
-        value: file.filePath + file.fileName,
+        value: joinNodeValue(file.filePath, file.fileName),
         label: file.fileName,
         children: []
       }));
@@ -58,7 +58,7 @@ const cascaderProps = {
 // 获取当前目录下的文件夹，子目录通过路径递归加载
 const queryFileDirectoryList = async (path) => {
   fileListLoading.value = true;
-  return await getFileListApi(path, props.openType)
+  return await getFileListApi(toDirectoryPath(path), props.openType)
       .then((response) => {
         fileListLoading.value = false;
         return response.data.filter((file) => file.fileType === "directory");
@@ -71,26 +71,63 @@ const queryFileDirectoryList = async (path) => {
 
 // 处理路径变化，加载选中目录的子目录
 const handleChange = (value) => {
-  // 获取路径数组的最后一个元素
-  const targetPath = value[value.length - 1];
-  // 更新外部传入的 selectedFilePath
-  emit('update:modelValue', targetPath);  // 更新外部绑定的值
+  const targetPath = Array.isArray(value) && value.length > 0 ? value[value.length - 1] : '/';
+  emit('update:modelValue', toDirectoryPath(targetPath));
 };
 
 // 在组件挂载时加载根目录
 onMounted(() => {
-  if (!props.modelValue) {
-    // 更新外部传入的 selectedFilePath
-    emit('update:modelValue', '/');
+  const normalizedPath = toDirectoryPath(props.modelValue);
+  selectedFilePathInternal.value = toPathNodes(normalizedPath);
+  if (normalizedPath !== props.modelValue) {
+    emit('update:modelValue', normalizedPath);
   }
 });
 
 // 监听外部传入的 modelValue（用于响应父组件的更新）
 watch(() => props.modelValue, (newValue) => {
-  if (newValue !== selectedFilePathInternal.value) {
-    selectedFilePathInternal.value = newValue;
+  const normalizedPath = toDirectoryPath(newValue);
+  const nextNodes = toPathNodes(normalizedPath);
+  const currentNodes = selectedFilePathInternal.value;
+  if (JSON.stringify(nextNodes) !== JSON.stringify(currentNodes)) {
+    selectedFilePathInternal.value = nextNodes;
   }
 });
+
+const toDirectoryPath = (path) => {
+  let normalized = String(path || '/').replace(/\\/g, '/').trim();
+  if (!normalized) {
+    return '/';
+  }
+  normalized = normalized.replace(/\/+/g, '/');
+  if (!normalized.startsWith('/')) {
+    normalized = `/${normalized}`;
+  }
+  if (normalized !== '/' && !normalized.endsWith('/')) {
+    normalized = `${normalized}/`;
+  }
+  return normalized;
+};
+
+const toPathNodes = (path) => {
+  const normalized = toDirectoryPath(path);
+  if (normalized === '/') {
+    return ['/'];
+  }
+  const parts = normalized.split('/').filter(Boolean);
+  const nodes = ['/'];
+  let current = '';
+  parts.forEach((part) => {
+    current = `${current}/${part}`;
+    nodes.push(current);
+  });
+  return nodes;
+};
+
+const joinNodeValue = (filePath, fileName) => {
+  const base = toDirectoryPath(filePath);
+  return `${base}${fileName}`.replace(/\/+/g, '/').replace(/\/$/, '');
+};
 </script>
 
 <style>

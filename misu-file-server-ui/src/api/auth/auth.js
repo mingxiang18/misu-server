@@ -1,7 +1,6 @@
 import request from '@/api/request'
 import {getRefreshToken, removeLoginTokens} from '@/api/auth/token'
 import {removeUserInfo} from '@/api/user/user'
-import {removeVideoRoomFromCookie} from '@/api/fileServer/videoRoom'
 
 // 登录方法
 export function login(userName, password, captchaCode) {
@@ -39,5 +38,4 @@ export function refreshToken() {
 export function logOut() {
     removeLoginTokens();
     removeUserInfo();
-    removeVideoRoomFromCookie();
 }

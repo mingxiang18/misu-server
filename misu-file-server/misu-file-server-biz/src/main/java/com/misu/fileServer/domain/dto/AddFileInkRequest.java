@@ -32,4 +32,5 @@ public class AddFileInkRequest {
     @ApiModelProperty("映射的原文件路径")
     @NotBlank(message = "映射的原文件路径不能为空")
     private String inkFilePath;
+
 }

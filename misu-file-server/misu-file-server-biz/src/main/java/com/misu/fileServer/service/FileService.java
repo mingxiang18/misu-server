@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 文件相关Service
@@ -33,6 +34,18 @@ public interface FileService {
      * 访问登录用户可见文件。
      */
     void accessUserFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response, boolean attachment);
+
+    /**
+     * 访问指定用户文件，用于放映室把房主文件共享给房间观众。
+     */
+    void accessUserFileAsUser(Integer openType, String userId, String filePath,
+                              HttpServletRequest request, HttpServletResponse response, boolean attachment);
+
+    /**
+     * 访问指定用户可见转码视频，用于放映室共享播放。
+     */
+    void transcodedVideoFileAsUser(Integer openType, String userId, String filePath,
+                                   HttpServletRequest request, HttpServletResponse response);
 
     /**
      * 访问登录用户可见图片缩略图。
@@ -70,7 +83,27 @@ public interface FileService {
     void moveFile(FileRenameRequestDto fileRenameRequestDto);
 
     /**
+     * 管理员将当前用户私人目录中的文件或文件夹复制到公共目录。
+     */
+    void sharePrivateFileToPublic(SharePrivateFileToPublicRequestDto requestDto);
+
+    /**
      * 删除文件
      */
     Boolean deleteFile(FileRequestDto fileRequestDto);
+
+    /**
+     * 管理员触发 file_mapping 回填任务（异步）。
+     */
+    void startFileMappingBackfill();
+
+    /**
+     * 获取 file_mapping 回填任务状态。
+     */
+    Map<String, Object> getFileMappingBackfillStatus();
+
+    /**
+     * 校验指定用户视角下的文件是否存在并可访问。
+     */
+    boolean existsUserFile(Integer openType, String userId, String filePath, boolean allowDirectory);
 }
