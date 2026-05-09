@@ -174,44 +174,49 @@ onUnmounted(() => {
   <div class="bot-chat">
     <!-- Messages -->
     <div ref="messagesContainer" class="bot-messages">
-      <div
-          v-for="(message, index) in messages"
-          :key="index"
-          class="bot-row"
-          :class="message.isSelf ? 'self' : 'bot'">
-        <div v-if="!message.isSelf" class="bot-avatar" aria-hidden="true">
-          <Service />
+      <!-- Inner uses margin-top:auto so content sticks to the bottom when
+           there are few messages, but still scrolls correctly once it
+           overflows the container. -->
+      <div class="bot-messages-inner">
+        <div
+            v-for="(message, index) in messages"
+            :key="index"
+            class="bot-row"
+            :class="message.isSelf ? 'self' : 'bot'">
+          <div v-if="!message.isSelf" class="bot-avatar" aria-hidden="true">
+            <Service />
+          </div>
+
+          <div class="bot-bubble" :class="{ self: message.isSelf }">
+            <template v-for="(content, ci) in message.content" :key="ci">
+              <span
+                  v-if="content.type === 'text'"
+                  class="bot-text"
+                  v-html="formatText(content.data)"></span>
+              <img
+                  v-else-if="content.type === 'localImage'"
+                  class="bot-image"
+                  :src="'data:image/png;base64,' + content.data"
+                  alt=""/>
+              <img
+                  v-else-if="content.type === 'netImage'"
+                  class="bot-image"
+                  :src="content.data"
+                  alt=""/>
+            </template>
+          </div>
         </div>
 
-        <div class="bot-bubble" :class="{ self: message.isSelf }">
-          <template v-for="(content, ci) in message.content" :key="ci">
-            <span
-                v-if="content.type === 'text'"
-                class="bot-text"
-                v-html="formatText(content.data)"></span>
-            <img
-                v-else-if="content.type === 'localImage'"
-                class="bot-image"
-                :src="'data:image/png;base64,' + content.data"
-                alt=""/>
-            <img
-                v-else-if="content.type === 'netImage'"
-                class="bot-image"
-                :src="content.data"
-                alt=""/>
-          </template>
+        <!-- Suggestions: only on first turn (when only greeting is present) -->
+        <div v-if="messages.length === 1" class="bot-suggestions">
+          <button
+              v-for="s in suggestions"
+              :key="s"
+              class="bot-chip"
+              @click="sendQuick(s)">
+            {{ s }}
+          </button>
         </div>
-      </div>
-
-      <!-- Suggestions: only show on first turn (when only the greeting is present) -->
-      <div v-if="messages.length === 1" class="bot-suggestions">
-        <button
-            v-for="s in suggestions"
-            :key="s"
-            class="bot-chip"
-            @click="sendQuick(s)">
-          {{ s }}
-        </button>
       </div>
     </div>
 
@@ -280,11 +285,24 @@ onUnmounted(() => {
 /* ---------- Messages ---------- */
 .bot-messages {
   flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: var(--space-4) var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+}
+
+/* margin-top:auto pushes the conversation to the bottom of the scroll
+   container when content is shorter than the viewport. When content is
+   taller, the auto margin collapses to 0 and the container scrolls
+   normally — this is the standard pattern for chat UIs and avoids the
+   browser bug with `justify-content: flex-end` + overflow that prevents
+   scrolling up to read older messages. */
+.bot-messages-inner {
+  margin-top: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  padding: var(--space-4) var(--space-4) var(--space-3);
 }
 
 .bot-row {
