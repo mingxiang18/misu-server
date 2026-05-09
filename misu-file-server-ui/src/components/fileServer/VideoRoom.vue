@@ -1,99 +1,120 @@
 <template>
   <div class="video-room">
-    <div class="video-top" style="display: inline;">
-      <el-carousel height="30px" direction="vertical" :autoplay="false">
+    <!-- Notice strip -->
+    <div class="video-notice">
+      <el-carousel
+          height="28px"
+          direction="vertical"
+          :autoplay="noticeList.length > 1"
+          :interval="5000"
+          arrow="never"
+          indicator-position="none">
         <el-carousel-item v-for="item in noticeList" :key="item">
-          <span class="notice-span">{{ item }}</span>
+          <span class="video-notice-text">{{ item }}</span>
         </el-carousel-item>
       </el-carousel>
     </div>
-    <div class="video-player-container">
-      <video :src="videoRoom.videoPath"
-             class="video-player"
-             ref="videoRef"
-             controls
-             @play="updateVideoProgress"
-             @pause="updateVideoProgress"
-             @seeked="updateVideoProgress"
-             preload="metadata"
-             webkit-playsinline='true'
-             playsinline='true'/>
-    </div>
-    <div class="video-room-action">
-      <div class="video-room-left">
-        <el-tag class="sync-mode-tag" :type="syncModeTagType" size="small">
-          同步：{{ syncModeText }}
-        </el-tag>
-        <el-button @click="openViewerVisible" style="width: 80px"
-            type="info"
-            text>
-          浏览人数：{{ roomViewerList.length }}
-        </el-button>
-        <el-button @click="openVideoListVisible()" style="width: 65px" type="info" text>
-          播放列表
-        </el-button>
-      </div>
-      <div class="video-room-right">
-        <el-button
-            v-if="videoRoom.creatorFlag === false"
-            @click="quitVideoRoom"
-            style="width: 65px"
-            type="info"
-            text>
-          退出放映室
-        </el-button>
-        <el-button
-            v-if="videoRoom.creatorFlag === true"
-            @click="closeVideoRoom"
-            style="width: 65px"
-            type="info"
-            text>
-          结束放映
-        </el-button>
 
-        <el-button @click="getRoomShareUrl"
-           type="info"
-           style="width: 65px"
-           :icon="Share"
-           text>
-          分享
-        </el-button>
+    <!-- Player -->
+    <div class="video-frame">
+      <video
+          ref="videoRef"
+          :src="videoRoom.videoPath"
+          class="video-player"
+          controls
+          preload="metadata"
+          webkit-playsinline="true"
+          playsinline="true"
+          @play="updateVideoProgress"
+          @pause="updateVideoProgress"
+          @seeked="updateVideoProgress"/>
+    </div>
+
+    <!-- Action row (horizontally scrollable on mobile) -->
+    <div class="video-actions">
+      <div class="video-actions-inner">
+        <span class="video-chip" :data-tone="syncModeTagType">同步：{{ syncModeText }}</span>
+        <button class="video-action" type="button" @click="openViewerVisible">
+          <el-icon><User /></el-icon>
+          <span>{{ roomViewerList.length }}</span>
+        </button>
+        <button class="video-action" type="button" @click="openVideoListVisible()">
+          <el-icon><List /></el-icon>
+          <span>播放列表</span>
+        </button>
+        <button class="video-action" type="button" @click="getRoomShareUrl">
+          <el-icon><Share /></el-icon>
+          <span>分享</span>
+        </button>
+        <button
+            v-if="videoRoom.creatorFlag === false"
+            class="video-action danger"
+            type="button"
+            @click="quitVideoRoom">
+          <el-icon><SwitchButton /></el-icon>
+          <span>退出</span>
+        </button>
+        <button
+            v-if="videoRoom.creatorFlag === true"
+            class="video-action danger"
+            type="button"
+            @click="closeVideoRoom">
+          <el-icon><SwitchButton /></el-icon>
+          <span>结束放映</span>
+        </button>
       </div>
     </div>
+
+    <!-- Comments -->
     <div class="video-comments">
-      <div class="comment-list" v-if="commentList.length > 0" ref="commentListRef">
-        <div class="comment-item" v-for="comment in commentList" :key="comment.createTime + comment.userName + comment.content">
-          <span class="comment-user">{{ comment.userName }}</span>
-          <span class="comment-content">{{ comment.content }}</span>
-          <span class="comment-time">{{ comment.createTime }}</span>
+      <div v-if="commentList.length > 0" ref="commentListRef" class="comment-list">
+        <div
+            v-for="comment in commentList"
+            :key="comment.createTime + comment.userName + comment.content"
+            class="comment-item">
+          <div class="comment-meta">
+            <span class="comment-user">{{ comment.userName }}</span>
+            <span class="comment-time">{{ comment.createTime }}</span>
+          </div>
+          <p class="comment-content">{{ comment.content }}</p>
         </div>
       </div>
-      <div class="comment-empty" v-else>暂无评论</div>
+      <div v-else class="comment-empty">
+        <el-icon class="comment-empty-icon"><ChatLineSquare /></el-icon>
+        <p>还没人开口…</p>
+      </div>
+
       <div class="comment-input-row">
         <el-input
-            placeholder="输入评论吧！"
             v-model="commentsInput"
+            placeholder="输入评论"
             maxlength="500"
             show-word-limit
-            @keyup.enter="sendRoomComment" />
-        <el-button type="primary" :loading="commentSending" @click="sendRoomComment">发送</el-button>
+            @keyup.enter="sendRoomComment"/>
+        <el-button
+            type="primary"
+            :loading="commentSending"
+            :disabled="!commentsInput || !commentsInput.trim()"
+            @click="sendRoomComment">
+          发送
+        </el-button>
       </div>
     </div>
 
     <el-dialog
         v-model="viewerVisible"
-        width="min(520px, 92vw)"
+        :width="dialogWidth"
         title="浏览者列表">
       <el-table :data="roomViewerList">
-        <el-table-column type="index" />
-        <el-table-column prop="userName" label="用户名" />
-        <el-table-column prop="syncTime" label="最后在线" min-width="160" />
+        <el-table-column type="index"/>
+        <el-table-column prop="userName" label="用户名"/>
+        <el-table-column prop="syncTime" label="最后在线" min-width="160"/>
       </el-table>
     </el-dialog>
 
     <el-dialog
         v-model="videoListVisible"
-        width="min(760px, 92vw)"
+        :width="wideDialogWidth"
         title="视频播放列表">
       <el-table :data="videoList" v-loading="videoListLoading" max-height="70svh">
         <el-table-column prop="fileName" label="视频名称">
@@ -106,8 +127,12 @@
         <el-table-column label="操作" width="80" fixed="right">
           <template #default="scope">
             <div class="table-option">
-              <div v-if="scope.row.fileName !== videoRoom.roomName"><el-button link type="primary" @click="playVideo(scope.row)">播放</el-button></div>
-              <div v-if="scope.row.fileName === videoRoom.roomName"><el-text type="info">当前播放</el-text></div>
+              <div v-if="scope.row.fileName !== videoRoom.roomName">
+                <el-button link type="primary" @click="playVideo(scope.row)">播放</el-button>
+              </div>
+              <div v-if="scope.row.fileName === videoRoom.roomName">
+                <el-text type="info">当前播放</el-text>
+              </div>
             </div>
           </template>
         </el-table-column>
@@ -117,8 +142,9 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute } from 'vue-router';
+import { useBreakpoint } from '@/composables/useBreakpoint';
 import {
   getVideoRoomFromId,
   getVideoState,
@@ -133,10 +159,15 @@ import {
   playMyVideo
 } from '@/api/fileServer/videoRoom';
 import { getFileList as getFileListApi} from '@/api/fileServer/fileServer';
-import { Share } from "@element-plus/icons-vue";
+import { Share, User, List, SwitchButton, ChatLineSquare } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox} from "element-plus";
 import router from "@/router";
 import { getToken } from "@/api/auth/token";
+
+// 响应式断点 + 弹层宽度
+const { isMobile } = useBreakpoint();
+const dialogWidth = computed(() => isMobile.value ? 'calc(100vw - 32px)' : '520px');
+const wideDialogWidth = computed(() => isMobile.value ? 'calc(100vw - 32px)' : '760px');
 
 // 引用 video 元素
 const videoRef = ref(null);
@@ -833,187 +864,268 @@ const quitVideoRoom = () => {
 </script>
 
 <style scoped>
+/* ============================================================
+   Video Room — warm-neutral, mobile-first, no dark scrim chrome.
+   Layout:
+     [notice]                <-- 28 high
+     [video frame] 16:9       <-- max 65vh
+     [actions row]            <-- horizontally scrollable on mobile
+     [comment list]           <-- grows to fill remaining height
+     [comment input]          <-- sticky bottom + safe-area
+   ============================================================ */
 
-.video-room{
-  min-width: 100%;
-  min-height: 100%;
-  background-image: url("/videoRoomBackground.jpg");
-  background-size: auto;  /* 图片保持原始大小 */
-  background-repeat: repeat;  /* 图片会在容器中重复 */
+.video-room {
   display: flex;
-  flex-wrap: wrap; /* 自动换行 */
-  align-content: flex-start;
-  justify-content: center;  /* 水平居中 */
-  gap: 10px;
+  flex-direction: column;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-5) 0;
+  gap: var(--space-3);
+  background: var(--color-bg-base);
 }
 
-.video-top {
-  width: 90%;
-  padding-top: 10px;
+@media (max-width: 640px) {
+  .video-room {
+    padding: var(--space-3) var(--space-3) 0;
+    gap: var(--space-2);
+  }
 }
 
-.video-player-container {
+/* ---------- Notice ---------- */
+.video-notice {
+  background: var(--color-bg-muted);
+  border-radius: var(--radius-md);
+  padding: 0 var(--space-3);
+  flex-shrink: 0;
+}
+
+.video-notice-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 28px;
+  word-break: break-all;
+}
+
+/* Element Plus carousel internals */
+:deep(.video-notice .el-carousel) {
+  width: 100%;
+}
+
+:deep(.video-notice .el-carousel__container) {
+  height: 28px !important;
+}
+
+/* ---------- Video frame ---------- */
+.video-frame {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 65vh;
+  background: #000;
+  border-radius: var(--radius-md);
+  overflow: hidden;
   display: flex;
-  justify-content: center; /* 水平居中 */
-  align-items: center; /* 垂直居中 */
-  width: 90%;
-  max-height: 65svh;
-  background-color: #000000;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .video-player {
-  max-width: 100%;
-  max-height: 100%
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #000;
 }
 
-.video-room-action {
-  width: 90%;
-  display: flex;
-  justify-content: space-between; /* 左侧是路径，右侧是按钮区域 */
-}
-
-.video-room-left {
-  display: flex;
-  align-items: center;
-  color: #b3b3b3;
-}
-
-.video-room-right {
-  display: flex;
-}
-
-.sync-mode-tag {
+/* ---------- Actions row ---------- */
+.video-actions {
   flex-shrink: 0;
-  margin-right: 8px;
+  /* On mobile, allow horizontal scroll without showing the bar */
+  overflow-x: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.video-actions::-webkit-scrollbar { display: none; }
+
+.video-actions-inner {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  width: max-content;
+  min-width: 100%;
+  padding: 2px 0;
 }
 
+.video-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-muted);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.video-chip[data-tone="success"] {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.video-chip[data-tone="warning"] {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.video-chip[data-tone="info"],
+.video-chip[data-tone=""],
+.video-chip[data-tone] {
+  /* default already handled above; left empty for explicitness */
+}
+
+.video-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+      background var(--duration-fast) var(--ease-standard),
+      color var(--duration-fast) var(--ease-standard);
+}
+
+.video-action:hover,
+.video-action:active {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.video-action.danger {
+  color: var(--color-danger);
+}
+
+.video-action.danger:hover,
+.video-action.danger:active {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.video-action :deep(svg) {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---------- Comments ---------- */
 .video-comments {
-  width: 90%;
-  color: white;
-  padding-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-bottom: var(--space-4);
 }
 
 .comment-list {
-  display: grid;
-  gap: 8px;
-  max-height: 18svh;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: 8px 0;
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
 .comment-item {
-  align-items: flex-start;
-  background-color: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  display: grid;
-  gap: 4px;
-  grid-template-columns: auto 1fr auto;
-  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-muted);
+  border-radius: var(--radius-md);
+}
+
+.comment-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
 }
 
 .comment-user {
-  color: #d8e6ff;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.comment-content {
-  color: #ffffff;
-  line-height: 1.4;
-  word-break: break-all;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
 }
 
 .comment-time {
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 12px;
-  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.comment-content {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  line-height: var(--line-height-normal);
+  word-break: break-word;
 }
 
 .comment-empty {
-  color: rgba(255, 255, 255, 0.65);
-  font-size: 13px;
-  padding: 8px 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.comment-empty p {
+  margin: 0;
+}
+
+.comment-empty-icon {
+  font-size: 28px;
+  color: var(--color-border-strong);
+}
+
+.comment-empty-icon :deep(svg) {
+  width: 28px;
+  height: 28px;
 }
 
 .comment-input-row {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 1fr auto;
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-3) max(var(--space-3), env(safe-area-inset-bottom));
+  background: var(--color-bg-surface);
+  border-top: 1px solid var(--color-border-subtle);
+  position: sticky;
+  bottom: 0;
 }
 
-.notice-span {
-  color: gray;
-  padding-left: 10px;
-  word-break: break-all;
+.comment-input-row :deep(.el-input) {
+  flex: 1 1 auto;
 }
 
-/** el-input disabled时的背景和边框*/
-:deep(.el-input__wrapper){
-  background-color:rgba(0,0,0,0.3);
+.comment-input-row :deep(.el-input__inner) {
+  font-size: var(--font-size-md);
 }
-
-:deep(.el-input__inner) {
-  background-color: rgba(0, 0, 0, 0);
-}
-
-@media (max-width: 760px) {
-  .video-room {
-    gap: 8px;
-  }
-
-  .video-top,
-  .video-player-container,
-  .video-room-action,
-  .video-comments {
-    width: 94%;
-  }
-
-  .video-player-container {
-    max-height: 52svh;
-  }
-
-  .video-room-action {
-    align-items: stretch;
-    display: grid;
-    gap: 8px;
-  }
-
-  .video-room-left,
-  .video-room-right {
-    align-items: center;
-    display: grid;
-    gap: 6px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .video-room-left .el-button,
-  .video-room-right .el-button {
-    margin-left: 0;
-    width: auto !important;
-  }
-
-  .sync-mode-tag {
-    justify-content: center;
-    margin-right: 0;
-    width: 100%;
-  }
-
-  .comment-list {
-    max-height: 24svh;
-  }
-
-  .comment-item {
-    grid-template-columns: 1fr;
-  }
-
-  .comment-time {
-    white-space: normal;
-  }
-
-  .comment-input-row {
-    grid-template-columns: 1fr;
-  }
-}
-
 </style>
