@@ -101,3 +101,14 @@ textarea:-webkit-autofill:active {
   caret-color: var(--color-text-primary);
   transition: background-color 5000s ease-in-out 0s;
 }
+
+/* iOS Safari < 15.4 不支持 100dvh，会被解析为无效值并 fallback 到 0。
+   下面这一段在浏览器不支持 dvh 时把全屏页面回退到 100vh，避免布局塌缩。 */
+@supports not (height: 100dvh) {
+  .login-page,
+  .bot-chat,
+  .video-room,
+  .app-shell {
+    min-height: 100vh;
+  }
+}
