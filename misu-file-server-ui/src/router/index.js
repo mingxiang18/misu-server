@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { getRefreshToken, getToken } from '@/api/auth/token'
 import Index from '@/components/Index.vue';
-import HelloWorld from '@/components/HelloWorld.vue';
+import Home from '@/components/Home.vue';
 import Login from '@/components/login/Login.vue';
 import UserTest from '@/components/user/UserManagement.vue';
 import PublicFileServer from '@/components/fileServer/PublicFileServer.vue';
@@ -18,7 +18,7 @@ const routes = [
         path: '/',
         component: Index,
         children: [
-            { path: '', component: HelloWorld, name: 'home' },
+            { path: '', component: Home, name: 'home' },
             { path: 'userManagement', component: UserTest, name: 'userTest' },
             { path: 'languageLearn', component: LanguageLearn, name: 'LanguageLearn' },
             { path: 'fileServer/publicDirectory/:path*', component: PublicFileServer, name: 'PublicFileServer' },

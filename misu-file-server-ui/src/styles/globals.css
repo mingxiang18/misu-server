@@ -1,0 +1,35 @@
+/* ============================================================
+   misu UI · Global entry
+   导入顺序：tokens → reset → element-overrides
+   tokens 在最前以确保后续文件都能引用 CSS 变量。
+   element-overrides 必须在 element-plus/dist/index.css 之后由 main.js 控制顺序。
+   ============================================================ */
+
+@import './tokens.css';
+@import './reset.css';
+@import './element-overrides.css';
+
+/* ---------- App-level layout helpers ---------- */
+#app {
+  min-height: 100svh;
+  background: var(--color-bg-base);
+}
+
+/* 全屏居中容器（Login / 错误页用） */
+.app-centered {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  min-height: 100svh;
+}
+
+/* 隐藏滚动条但保留滚动能力（横向工具栏用） */
+.scroll-x-hidden {
+  overflow-x: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scroll-x-hidden::-webkit-scrollbar {
+  display: none;
+}
