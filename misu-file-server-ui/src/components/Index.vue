@@ -61,9 +61,16 @@ onMounted(() => {
 
 .app-content {
   flex: 1 1 auto;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
+  overflow-y: auto;
 }
+
+/* Direct children that don't opt into full-height fill (e.g. Home)
+   keep their natural flow; ones that want to fill the viewport
+   (BotChat, future VideoRoom / FileExplorer) set flex: 1 1 auto on
+   their root. */
 
 .app-shell-mobile .app-content {
   padding-bottom: calc(var(--layout-tab-bar-height) + env(safe-area-inset-bottom));

@@ -270,7 +270,9 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100%;
+  /* Fill the flex parent (.app-content) instead of relying on height:100%,
+     which doesn't propagate cleanly through .app-content's overflow-y:auto. */
+  flex: 1 1 auto;
   min-height: 0;
   background: var(--color-bg-base);
 }
