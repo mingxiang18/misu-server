@@ -4,11 +4,11 @@ import { useRouter, useRoute } from 'vue-router'
 import {
   House,
   Folder,
+  FolderOpened,
   VideoCamera,
   VideoCameraFilled,
   ChatDotRound,
   Memo,
-  FolderOpened,
   Download,
   User,
   Menu as IconMenu,
@@ -22,29 +22,44 @@ const route = useRoute()
 const userInfo = inject('userInfo', { value: {} })
 const isAdmin = computed(() => (userInfo.value.authorities || []).includes('ADMIN'))
 
+const filesOpen = ref(false)
 const moreOpen = ref(false)
 
-const tabs = [
-  { key: 'home',      label: '首页',     icon: House,        to: '/' },
-  { key: 'files',     label: '文件',     icon: Folder,       to: '/fileServer/privateDirectory', match: ['privateDirectory', 'publicDirectory'] },
-  { key: 'videoRoom', label: '放映室',   icon: VideoCamera,  to: '/fileServer/videoRoom',        match: ['videoRoom'] },
-  { key: 'bot',       label: '机器人',   icon: ChatDotRound, to: '/bot' }
-]
+const filesItems = computed(() => {
+  const base = [
+    { key: 'private', label: '私人目录', icon: Folder,            to: '/fileServer/privateDirectory' },
+    { key: 'public',  label: '公共目录', icon: FolderOpened,      to: '/fileServer/publicDirectory' },
+    { key: 'torrent', label: '磁力下载', icon: Download,          to: '/fileServer/torrentManagement' }
+  ]
+  if (isAdmin.value) {
+    base.push({ key: 'transcode', label: '转码管理', icon: VideoCameraFilled, to: '/fileServer/videoTranscodeManagement' })
+  }
+  return base
+})
 
 const moreItems = computed(() => {
   const base = [
-    { key: 'learn',  label: '语言学习', icon: Memo,         to: '/languageLearn' },
-    { key: 'public', label: '公共目录', icon: FolderOpened, to: '/fileServer/publicDirectory' }
+    { key: 'learn', label: '语言学习', icon: Memo, to: '/languageLearn' }
   ]
-  const adminOnly = [
-    { key: 'torrent',   label: '磁力下载', icon: Download,          to: '/fileServer/torrentManagement' },
-    { key: 'transcode', label: '转码管理', icon: VideoCameraFilled, to: '/fileServer/videoTranscodeManagement' },
-    { key: 'users',     label: '用户管理', icon: User,              to: '/userManagement' }
-  ]
-  return isAdmin.value ? [...base, ...adminOnly] : base
+  if (isAdmin.value) {
+    base.push({ key: 'users', label: '用户管理', icon: User, to: '/userManagement' })
+  }
+  return base
 })
 
-const isActive = (tab) => {
+const filesActive = computed(() => {
+  const p = route.path
+  return ['privateDirectory', 'publicDirectory', 'torrentManagement', 'videoTranscodeManagement']
+      .some(m => p.includes(m))
+})
+
+const tabs = [
+  { key: 'home',      label: '首页',     icon: House,        to: '/' },
+  { key: 'videoRoom', label: '放映室',   icon: VideoCamera,  to: '/fileServer/videoRoom',  match: ['videoRoom'] },
+  { key: 'bot',       label: '机器人',   icon: ChatDotRound, to: '/bot' }
+]
+
+const isLeafActive = (tab) => {
   const p = route.path
   if (tab.to === '/') return p === '/'
   if (tab.match) return tab.match.some(m => p.includes(m))
@@ -53,10 +68,12 @@ const isActive = (tab) => {
 
 const goTo = (to) => {
   router.push(to)
+  filesOpen.value = false
   moreOpen.value = false
 }
 
 const handleLogout = () => {
+  filesOpen.value = false
   moreOpen.value = false
   logOut()
   router.push('/login')
@@ -66,14 +83,38 @@ const handleLogout = () => {
 <template>
   <nav class="tab-bar" aria-label="底部导航">
     <button
-        v-for="tab in tabs"
-        :key="tab.key"
         class="tab-bar-item"
-        :class="{ active: isActive(tab) }"
-        @click="goTo(tab.to)">
-      <component :is="tab.icon" class="tab-bar-icon" />
-      <span class="tab-bar-label">{{ tab.label }}</span>
+        :class="{ active: isLeafActive(tabs[0]) }"
+        @click="goTo(tabs[0].to)">
+      <House class="tab-bar-icon" />
+      <span class="tab-bar-label">{{ tabs[0].label }}</span>
     </button>
+
+    <!-- 文件 = 二级 sheet 触发 -->
+    <button
+        class="tab-bar-item"
+        :class="{ active: filesActive || filesOpen }"
+        @click="filesOpen = true">
+      <Folder class="tab-bar-icon" />
+      <span class="tab-bar-label">文件</span>
+    </button>
+
+    <button
+        class="tab-bar-item"
+        :class="{ active: isLeafActive(tabs[1]) }"
+        @click="goTo(tabs[1].to)">
+      <VideoCamera class="tab-bar-icon" />
+      <span class="tab-bar-label">{{ tabs[1].label }}</span>
+    </button>
+
+    <button
+        class="tab-bar-item"
+        :class="{ active: isLeafActive(tabs[2]) }"
+        @click="goTo(tabs[2].to)">
+      <ChatDotRound class="tab-bar-icon" />
+      <span class="tab-bar-label">{{ tabs[2].label }}</span>
+    </button>
+
     <button
         class="tab-bar-item"
         :class="{ active: moreOpen }"
@@ -83,33 +124,57 @@ const handleLogout = () => {
     </button>
   </nav>
 
+  <!-- 文件管理 sheet -->
+  <el-drawer
+      v-model="filesOpen"
+      direction="btt"
+      size="auto"
+      :with-header="false"
+      class="bottom-sheet">
+    <div class="sheet">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <h3 class="sheet-title">文件管理</h3>
+      <div class="sheet-grid">
+        <button
+            v-for="m in filesItems"
+            :key="m.key"
+            class="sheet-grid-item"
+            @click="goTo(m.to)">
+          <span class="sheet-grid-icon">
+            <component :is="m.icon" />
+          </span>
+          <span class="sheet-grid-label">{{ m.label }}</span>
+        </button>
+      </div>
+    </div>
+  </el-drawer>
+
+  <!-- 更多 sheet -->
   <el-drawer
       v-model="moreOpen"
       direction="btt"
       size="auto"
       :with-header="false"
-      class="more-drawer">
-    <div class="more-sheet">
-      <div class="more-sheet-handle" aria-hidden="true"></div>
-      <h3 class="more-sheet-title">更多功能</h3>
-
-      <div class="more-grid">
+      class="bottom-sheet">
+    <div class="sheet">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <h3 class="sheet-title">更多功能</h3>
+      <div class="sheet-grid">
         <button
             v-for="m in moreItems"
             :key="m.key"
-            class="more-grid-item"
+            class="sheet-grid-item"
             @click="goTo(m.to)">
-          <span class="more-grid-icon">
+          <span class="sheet-grid-icon">
             <component :is="m.icon" />
           </span>
-          <span class="more-grid-label">{{ m.label }}</span>
+          <span class="sheet-grid-label">{{ m.label }}</span>
         </button>
       </div>
 
-      <div class="more-divider"></div>
-
-      <button class="more-row danger" @click="handleLogout">
-        <span class="more-row-icon">
+      <div class="sheet-divider"></div>
+      <button class="sheet-row danger" @click="handleLogout">
+        <span class="sheet-row-icon">
           <SwitchButton />
         </span>
         <span>退出登录</span>
@@ -164,25 +229,25 @@ const handleLogout = () => {
   line-height: 1;
 }
 
-/* ---------- Drawer "更多" sheet ---------- */
-:deep(.more-drawer) {
+/* ---------- Bottom sheet (shared) ---------- */
+:deep(.bottom-sheet) {
   border-top-left-radius: var(--radius-lg);
   border-top-right-radius: var(--radius-lg);
   background: var(--color-bg-surface);
 }
 
-:deep(.more-drawer .el-drawer__body) {
+:deep(.bottom-sheet .el-drawer__body) {
   padding: 0;
 }
 
-.more-sheet {
+.sheet {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom));
 }
 
-.more-sheet-handle {
+.sheet-handle {
   width: 40px;
   height: 4px;
   margin: var(--space-1) auto var(--space-2);
@@ -190,20 +255,20 @@ const handleLogout = () => {
   background: var(--color-border-default);
 }
 
-.more-sheet-title {
+.sheet-title {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-secondary);
   padding: 0 var(--space-2);
 }
 
-.more-grid {
+.sheet-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--space-2);
 }
 
-.more-grid-item {
+.sheet-grid-item {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -216,11 +281,11 @@ const handleLogout = () => {
   transition: background var(--duration-fast) var(--ease-standard);
 }
 
-.more-grid-item:active {
+.sheet-grid-item:active {
   background: var(--color-bg-hover);
 }
 
-.more-grid-icon {
+.sheet-grid-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -231,23 +296,23 @@ const handleLogout = () => {
   border-radius: var(--radius-md);
 }
 
-.more-grid-icon :deep(svg) {
+.sheet-grid-icon :deep(svg) {
   width: 20px;
   height: 20px;
 }
 
-.more-grid-label {
+.sheet-grid-label {
   text-align: center;
   line-height: var(--line-height-tight);
 }
 
-.more-divider {
+.sheet-divider {
   height: 1px;
   background: var(--color-border-subtle);
   margin: var(--space-1) 0;
 }
 
-.more-row {
+.sheet-row {
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -260,15 +325,15 @@ const handleLogout = () => {
   transition: background var(--duration-fast) var(--ease-standard);
 }
 
-.more-row:active {
+.sheet-row:active {
   background: var(--color-bg-hover);
 }
 
-.more-row.danger {
+.sheet-row.danger {
   color: var(--color-danger);
 }
 
-.more-row-icon {
+.sheet-row-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -279,7 +344,7 @@ const handleLogout = () => {
   color: var(--color-danger);
 }
 
-.more-row-icon :deep(svg) {
+.sheet-row-icon :deep(svg) {
   width: 18px;
   height: 18px;
 }
