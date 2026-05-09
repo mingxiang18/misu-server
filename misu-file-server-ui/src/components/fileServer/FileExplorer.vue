@@ -31,10 +31,10 @@
                     @touchend="fileTouchEnd($event, file)"
                     @touchcancel="fileTouchCancel">
         <el-main class="file-card-main" @click="openFile(file)">
-          <Folder v-if="file.fileType === 'directory'" class="file-show"/>
-          <el-image v-if="file.fileType === 'image' && !!file.previewLink" class="file-show"
+          <Folder v-if="file.fileType === 'directory'" class="file-show file-show-folder"/>
+          <el-image v-if="file.fileType === 'image' && !!file.previewLink" class="file-preview"
                     :src="downloadBaseUrl + file.previewLink"
-                    fit="contain"
+                    fit="cover"
                     loading="lazy" />
           <Picture v-if="file.fileType === 'image' && !file.previewLink" class="file-show"/>
           <Document v-if="file.fileType === 'other'" class="file-show"/>
@@ -1110,10 +1110,30 @@ queryFileList();
   background: var(--color-bg-surface);
 }
 
+/* Element Plus 图标是线条风格，原 80% 大小在大卡片里显得空洞细弱。
+   固定到 48px（移动 40px），让图标视觉更聚焦。
+   颜色：文件夹用 accent（导航主体），其他类型用 text-secondary 中性色。 */
 .file-show {
-  max-width: 80%;
-  max-height: 100%;
+  width: 48px;
+  height: 48px;
   color: var(--color-text-secondary);
+}
+
+@media (max-width: 640px) {
+  .file-show {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+.file-show-folder {
+  color: var(--accent);
+}
+
+/* el-image 预览缩略图：填满整个 card-main，不受 file-show 48px 限制 */
+.file-preview {
+  width: 100%;
+  height: 100%;
 }
 
 /* ---------- Video preview tile ---------- */

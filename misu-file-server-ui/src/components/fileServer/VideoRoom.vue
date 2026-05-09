@@ -142,7 +142,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from 'vue-router';
 import { useBreakpoint } from '@/composables/useBreakpoint';
 import {
@@ -301,13 +301,24 @@ const refreshComments = () => {
 };
 
 const scrollCommentToBottom = () => {
+  // 用 nextTick + requestAnimationFrame 双保险：
+  // - nextTick 等 Vue 完成本次 DOM patch（v-for 新增节点）
+  // - rAF 再让浏览器跑一帧 layout，scrollHeight 才是真实高度
   nextTick(() => {
-    const listEl = commentListRef.value;
-    if (listEl) {
-      listEl.scrollTop = listEl.scrollHeight;
-    }
+    requestAnimationFrame(() => {
+      const listEl = commentListRef.value;
+      if (listEl) {
+        listEl.scrollTop = listEl.scrollHeight;
+      }
+    });
   });
 };
+
+// 任意路径新增评论（HTTP / WS / 自己发送）都会改变 commentList 长度，
+// 在这里统一触发滚到底，避免漏点。
+watch(() => commentList.value.length, () => {
+  scrollCommentToBottom();
+});
 
 const sendRoomComment = () => {
   const content = commentsInput.value.trim();
@@ -1040,14 +1051,25 @@ const quitVideoRoom = () => {
   margin-bottom: var(--space-4);
 }
 
+/* 关键：给评论列表显式封顶，避免在某些 flex 嵌套下不收敛（视频帧
+   16:9 + 多评论时整页会撑高，外层 .app-content 反而代为滚动）。
+   用 vh 而不是 % 是因为父链一旦没 clamp 住，% 就失效。 */
 .comment-list {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 80px;
+  max-height: 35vh;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+@media (min-width: 641px) {
+  .comment-list {
+    max-height: 45vh;
+  }
 }
 
 .comment-item {
