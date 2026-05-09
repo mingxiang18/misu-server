@@ -1,354 +1,518 @@
-<template>
-  <div class="chat-container">
-    <!-- 聊天记录 -->
-    <div class="messages"  ref="messagesContainer">
-      <div
-          v-for="(message, index) in messages"
-          :key="index"
-          :class="['message', message.isSelf ? 'right' : 'left']"
-      >
-        <!-- 机器人头像 -->
-        <div class="avatar" v-if="!message.isSelf">
-          <el-icon size="20px"><Service /></el-icon>
-        </div>
-
-        <div class="message-content">
-          <!-- 遍历所有消息 -->
-          <div v-for="(content, index) in message.content" :key="index">
-            <!-- 处理 @ 用户类型的消息 -->
-<!--            <span v-if="content.type === 'at'" class="at-message">@{{ content.data }}</span>-->
-
-            <!-- 处理普通文本消息 -->
-            <span v-if="content.type === 'text'" class="text-message" v-html="formatText(content.data)"></span>
-
-            <!-- 处理图片（Base64编码）消息 -->
-            <img v-if="content.type === 'localImage'" :src="'data:image/png;base64,' + content.data" alt="Image" class="image-message" />
-
-            <!-- 处理网络图片消息 -->
-            <img v-if="content.type === 'netImage'" :src="content.data" alt="Image" class="image-message" />
-          </div>
-        </div>
-
-        <!-- 用户头像 -->
-        <div class="avatar" v-if="message.isSelf">
-          <el-icon size="20px"><User /></el-icon>
-        </div>
-      </div>
-    </div>
-
-    <!-- 输入框 -->
-    <div class="input-container">
-      <div class="input-action">
-        <!-- 图片上传按钮 -->
-        <el-upload action="#"
-                   v-model:file-list="imageList"
-                   ref="imageUpload"
-                   list-type="picture-card"
-                   :auto-upload="false"
-                   :on-exceed="handleImageExceed"
-                   :limit="1">
-          <el-icon size="25px"><Picture /></el-icon>
-
-          <template #file="{ file }">
-            <div>
-              <img class="el-upload-list__item-thumbnail" :src="file.url" alt="" />
-              <span class="el-upload-list__item-actions">
-          <span class="el-upload-list__item-delete"
-              @click="handleImageRemove(file)"
-          >
-            <el-icon><Delete /></el-icon>
-          </span>
-        </span>
-            </div>
-          </template>
-        </el-upload>
-      </div>
-
-      <el-input
-          v-model="newMessage"
-          :autosize="{ minRows: 1 }"
-          type="textarea"
-          placeholder="请输入消息"
-          @keyup.enter="sendSocketMessage"
-      ></el-input>
-    </div>
-  </div>
-</template>
-
 <script setup>
-import {onMounted, onUnmounted, ref} from "vue";
-import {Service, User, Delete, Picture} from "@element-plus/icons-vue";
-import {getBotAccessToken, getServerWebSocketUrl} from "@/api/bot/bot";
-import {ElMessage} from "element-plus";
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { Service, Picture, Close, Promotion } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { getBotAccessToken, getServerWebSocketUrl } from '@/api/bot/bot'
 
-const imageUpload = ref([])
+/* ------------------ State ------------------ */
+const messages = ref([
+  { content: [{ data: '这里是冥想bb哟，有什么可以帮你的吗？', type: 'text' }], isSelf: false }
+])
+
+const messagesContainer = ref(null)
+const newMessage = ref('')
+
+const imageUpload = ref(null)
 const imageList = ref([])
 
-const messages = ref([
-  { content: [{data: "这里是冥想bb哟，有什么可以帮你的吗？", type: "text"}], isSelf: false },
-]);
+const botAccessToken = ref(null)
+let socket = null
 
-const messagesContainer = ref();
-const botAccessToken = ref(null);
-const newMessage = ref("");
+const suggestions = [
+  '推荐一段冥想',
+  '怎样放松心情',
+  '你能做什么'
+]
 
-// WebSocket 实例
-let socket = null;
+const canSend = computed(() => {
+  return (newMessage.value && newMessage.value.trim().length > 0) || imageList.value.length > 0
+})
 
-// 执行图片移除
-const handleImageRemove = (file) => {
-  imageUpload.value.clearFiles();
+/* ------------------ Helpers ------------------ */
+const formatText = (text) => (text || '').replace(/\n/g, '<br>')
+
+const scrollToBottom = () => {
+  nextTick(() => {
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTo({
+        top: messagesContainer.value.scrollHeight,
+        behavior: 'smooth'
+      })
+    }
+  })
 }
 
-// 执行图片选择
-const handleImageExceed = (files) => {
-  imageUpload.value.clearFiles();
-  const file = files[0];
+/* ------------------ Image upload ------------------ */
+const handleImageRemove = () => {
+  imageList.value = []
+  if (imageUpload.value && imageUpload.value.clearFiles) {
+    imageUpload.value.clearFiles()
+  }
+}
 
-  if (file.type !== 'image/jpeg' || file.type !== 'image/png') {
-    ElMessage.error('图片格式不正确! 支持格式: JPEG, PNG')
-    return;
-  } else if (file.size / 1024 / 1024 > 20) {
-    ElMessage.error('图片大小不能超过20MB!')
-    return;
+const handleImageExceed = (files) => {
+  if (imageUpload.value && imageUpload.value.clearFiles) {
+    imageUpload.value.clearFiles()
+  }
+  const file = files[0]
+
+  if (!/^image\/(jpeg|png)$/.test(file.type)) {
+    ElMessage.error('图片格式不正确！仅支持 JPEG / PNG')
+    return
+  }
+  if (file.size / 1024 / 1024 > 20) {
+    ElMessage.error('图片大小不能超过 20MB')
+    return
   }
 
   imageUpload.value.handleStart(file)
 }
 
-const scrollToBottom = () => {
-  messagesContainer.value.scrollTo({ top: messagesContainer.value.scrollHeight, behavior: 'smooth' });
+/* ------------------ Send ------------------ */
+const sendQuick = (text) => {
+  newMessage.value = text
+  sendSocketMessage()
 }
 
-//发送socket消息
 const sendSocketMessage = () => {
-  //如果输入框没有消息则不发送
-  if (!newMessage.value || !newMessage.value.trim()) {
-    return
-  }
+  if (!canSend.value) return
 
   const message = {
     messageId: crypto.randomUUID(),
-    messageContentList: [],
-  };
-  //添加文字消息
-  message.messageContentList.push(
-      {
-        type: "text",
-        data: newMessage.value,
-      },
-  )
-  //如果图片消息不为空，添加图片消息
-  if (imageList.value.length > 0) {
-    // 创建 FileReader 实例
-    const reader = new FileReader();
+    messageContentList: []
+  }
 
-    // 当文件读取完成后，转换成 Base64 编码
+  if (newMessage.value && newMessage.value.trim()) {
+    message.messageContentList.push({ type: 'text', data: newMessage.value })
+  }
+
+  if (imageList.value.length > 0) {
+    const reader = new FileReader()
     reader.onloadend = () => {
-      // 将读取到的 Base64 数据存储到 message.messageContentList 中
       message.messageContentList.push({
         type: 'localImage',
-        data: reader.result.split(',')[1], // 去掉 "data:image/png;base64," 前缀，只保留 Base64 字符串
-      });
-      sendMessage(message);
-    };
-
-    // 读取文件并转换为 Base64
-    reader.readAsDataURL(imageList.value[0].raw);
-  }else {
-    sendMessage(message);
+        data: reader.result.split(',')[1]
+      })
+      sendMessage(message)
+    }
+    reader.readAsDataURL(imageList.value[0].raw)
+  } else {
+    sendMessage(message)
   }
 }
 
-//发送消息
 const sendMessage = (message) => {
-  // 添加到聊天列表
-  const sendMessage = {
+  messages.value.push({
     content: message.messageContentList,
     isSelf: true
-  };
-  messages.value.push(sendMessage);
-  setTimeout(() => scrollToBottom(), 100);
+  })
+  scrollToBottom()
 
-  if (!!socket) {
-    console.log("发送消息", message)
-    // 向socket发送消息
-    socket.send(JSON.stringify(message));
+  if (socket) {
+    socket.send(JSON.stringify(message))
   } else {
-    closeSocket();
-    initSocket();
-    const message = {
-      content: [{data: "冥想bb已离线，正在重连中", type: "text"}],
+    closeSocket()
+    initSocket()
+    messages.value.push({
+      content: [{ data: '冥想bb已离线，正在重连中', type: 'text' }],
       isSelf: false
-    };
-    messages.value.push(message);
-
-    setTimeout(() => scrollToBottom(), 100);
+    })
+    scrollToBottom()
   }
 
-  //清空消息内容
-  newMessage.value = null;
-  imageList.value = [];
+  newMessage.value = ''
+  imageList.value = []
 }
 
-//初始化socket连接
+/* ------------------ Socket ------------------ */
 const initSocket = () => {
   getServerWebSocketUrl().then((response) => {
-    //获取服务端socket连接地址
-    const socketUrl = response.data;
-    //连接socket
-    socket = new WebSocket(socketUrl); // 替换为实际 WebSocket 服务器地址
+    const socketUrl = response.data
+    socket = new WebSocket(socketUrl)
 
-    // 监听 WebSocket 打开连接
     socket.onopen = () => {
-      console.log("bot的WebSocket 连接已打开");
-      //获取bot连接用的token
+      console.log('bot WebSocket connected')
       getBotAccessToken().then((response) => {
-        botAccessToken.value = response.data;
-        //发送认证消息
-        socket.send(JSON.stringify({ type: "auth", token: botAccessToken.value }));
-      });
-    };
-
-    // 监听 WebSocket 消息
-    socket.onmessage = handleIncomingMessage;
-
-    // 监听 WebSocket 错误
-    socket.onerror = (error) => {
-      console.error("bot的WebSocket 错误:", error);
-    };
-
-    // 监听 WebSocket 关闭连接
+        botAccessToken.value = response.data
+        socket.send(JSON.stringify({ type: 'auth', token: botAccessToken.value }))
+      })
+    }
+    socket.onmessage = handleIncomingMessage
+    socket.onerror = (err) => console.error('bot WebSocket error:', err)
     socket.onclose = () => {
-      console.log("bot的WebSocket 连接已关闭");
-      closeSocket();
-    };
-  });
+      console.log('bot WebSocket closed')
+      closeSocket()
+    }
+  })
 }
 
-//处理socket收到的消息
 const handleIncomingMessage = (event) => {
-  console.log("bot的WebSocket收到消息:", event.data)
   const message = {
     content: JSON.parse(event.data).messageList,
     isSelf: false
-  };
-  messages.value.push(message);
-
-  setTimeout(() => scrollToBottom(), 100);
-}
-
-// 将消息中的换行符 \n 替换为 <br>
-const formatText = (text) => {
-  return text.replace(/\n/g, '<br>');
-}
-
-//关闭socket连接
-const closeSocket = () => {
-  if (!!socket) {
-    socket.close();
   }
-  socket = null;
+  messages.value.push(message)
+  scrollToBottom()
+}
+
+const closeSocket = () => {
+  if (socket) socket.close()
+  socket = null
 }
 
 onMounted(() => {
-  initSocket();
+  initSocket()
+  scrollToBottom()
 })
 
 onUnmounted(() => {
-  closeSocket();
+  closeSocket()
 })
-
 </script>
 
+<template>
+  <div class="bot-chat">
+    <!-- Messages -->
+    <div ref="messagesContainer" class="bot-messages">
+      <div
+          v-for="(message, index) in messages"
+          :key="index"
+          class="bot-row"
+          :class="message.isSelf ? 'self' : 'bot'">
+        <div v-if="!message.isSelf" class="bot-avatar" aria-hidden="true">
+          <Service />
+        </div>
+
+        <div class="bot-bubble" :class="{ self: message.isSelf }">
+          <template v-for="(content, ci) in message.content" :key="ci">
+            <span
+                v-if="content.type === 'text'"
+                class="bot-text"
+                v-html="formatText(content.data)"></span>
+            <img
+                v-else-if="content.type === 'localImage'"
+                class="bot-image"
+                :src="'data:image/png;base64,' + content.data"
+                alt=""/>
+            <img
+                v-else-if="content.type === 'netImage'"
+                class="bot-image"
+                :src="content.data"
+                alt=""/>
+          </template>
+        </div>
+      </div>
+
+      <!-- Suggestions: only show on first turn (when only the greeting is present) -->
+      <div v-if="messages.length === 1" class="bot-suggestions">
+        <button
+            v-for="s in suggestions"
+            :key="s"
+            class="bot-chip"
+            @click="sendQuick(s)">
+          {{ s }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div class="bot-input-wrap">
+      <!-- Image preview chip -->
+      <div v-if="imageList.length > 0" class="bot-image-preview">
+        <div class="bot-image-thumb">
+          <img :src="imageList[0].url" alt=""/>
+          <button class="bot-image-remove" type="button" @click="handleImageRemove" aria-label="移除图片">
+            <Close/>
+          </button>
+        </div>
+      </div>
+
+      <div class="bot-input-row">
+        <el-upload
+            ref="imageUpload"
+            v-model:file-list="imageList"
+            class="bot-upload"
+            action="#"
+            :auto-upload="false"
+            :show-file-list="false"
+            :on-exceed="handleImageExceed"
+            :limit="1"
+            accept="image/png,image/jpeg">
+          <button class="bot-input-btn" type="button" aria-label="上传图片">
+            <Picture/>
+          </button>
+        </el-upload>
+
+        <el-input
+            v-model="newMessage"
+            type="textarea"
+            :autosize="{ minRows: 1, maxRows: 4 }"
+            placeholder="请输入消息"
+            class="bot-input-text"
+            resize="none"
+            @keydown.enter.exact.prevent="sendSocketMessage"/>
+
+        <button
+            class="bot-input-send"
+            type="button"
+            :disabled="!canSend"
+            aria-label="发送"
+            @click="sendSocketMessage">
+          <Promotion/>
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
 <style scoped>
-.chat-container {
+.bot-chat {
   display: flex;
   flex-direction: column;
+  width: 100%;
   height: 100%;
-  margin: 0 auto;
-  border: 1px solid #ddd;
-  border-radius: 10px;
-  padding: 10px;
+  min-height: 0;
+  background: var(--color-bg-base);
 }
 
-.messages {
-  flex-grow: 1;
+/* ---------- Messages ---------- */
+.bot-messages {
+  flex: 1 1 auto;
   overflow-y: auto;
-}
-
-.message {
+  padding: var(--space-4) var(--space-4) var(--space-3);
   display: flex;
-  align-items: flex-start;
-  margin: 10px 0;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
-.message.left {
+.bot-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-width: 100%;
+}
+
+.bot-row.self {
+  justify-content: flex-end;
+}
+
+.bot-row.bot {
   justify-content: flex-start;
 }
 
-.message.right {
-  justify-content: flex-end;
+.bot-avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.avatar {
-  margin-right: 10px;
-  margin-left: 10px;
-  margin-top: 10px;
+.bot-avatar :deep(svg) {
+  width: 16px;
+  height: 16px;
 }
 
-.message-content {
-  max-width: 80%;
-  padding: 10px;
-  border-radius: 10px;
-  background-color: #f1f1f1;
-  word-break: break-all;
+.bot-bubble {
+  max-width: 75%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-muted);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
-.message.right .message-content {
-  background-color: #3b8bfe;
-  color: white;
+.bot-bubble.self {
+  background: var(--accent-soft);
+  color: var(--color-text-primary);
 }
 
-.at-message {
-  font-weight: bold;
-  color: #007bff;
+.bot-text {
+  white-space: pre-wrap;
 }
 
-.image-message {
+.bot-image {
   max-width: 100%;
   height: auto;
+  border-radius: var(--radius-md);
   display: block;
-  margin-top: 5px;
+  margin-top: var(--space-1);
 }
 
-.input-container {
+/* ---------- Suggestions ---------- */
+.bot-suggestions {
   display: flex;
-  padding-top: 10px;
-  padding-left: 10px;
-  padding-right: 10px;
-  flex-wrap: wrap; /* 自动换行 */
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-left: calc(32px + var(--space-2));
+  margin-top: calc(-1 * var(--space-2));
 }
 
-.input-action {
+.bot-chip {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  transition:
+      background var(--duration-fast) var(--ease-standard),
+      color var(--duration-fast) var(--ease-standard),
+      border-color var(--duration-fast) var(--ease-standard);
+}
+
+.bot-chip:hover,
+.bot-chip:active {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+
+/* ---------- Input ---------- */
+.bot-input-wrap {
+  flex-shrink: 0;
+  background: var(--color-bg-surface);
+  border-top: 1px solid var(--color-border-subtle);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.bot-image-preview {
   display: flex;
-  justify-content: flex-end;
+  padding: var(--space-3) var(--space-3) 0;
+}
+
+.bot-image-thumb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border-default);
+}
+
+.bot-image-thumb img {
   width: 100%;
-  padding-top: 5px
+  height: 100%;
+  object-fit: cover;
 }
 
-input {
-  flex-grow: 1;
-  padding: 10px;
-  border-radius: 5px;
-  border: 1px solid #ddd;
+.bot-image-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(31, 27, 22, 0.6);
+  color: #fff;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
 }
 
-:deep(.el-upload) {
-  width: 30px;
-  height: 30px;
+.bot-image-remove :deep(svg) {
+  width: 12px;
+  height: 12px;
 }
-:deep(.el-upload-list--picture-card) {
-  --el-upload-list-picture-card-size: 40px;
+
+.bot-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.bot-input-btn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  background: transparent;
+  transition: background var(--duration-fast) var(--ease-standard),
+              color var(--duration-fast) var(--ease-standard);
+}
+
+.bot-input-btn:hover,
+.bot-input-btn:active {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.bot-input-btn :deep(svg) {
+  width: 20px;
+  height: 20px;
+}
+
+.bot-input-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bot-input-text :deep(.el-textarea__inner) {
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-muted);
+  border-color: transparent;
+  font-size: var(--font-size-md);
+  padding: 10px var(--space-3);
+  box-shadow: none;
+  resize: none;
+  line-height: var(--line-height-normal);
+}
+
+.bot-input-text :deep(.el-textarea__inner:focus) {
+  background: var(--color-bg-surface);
+  border-color: var(--color-border-strong);
+}
+
+.bot-input-send {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--color-text-on-accent);
+  transition:
+      background var(--duration-fast) var(--ease-standard),
+      opacity var(--duration-fast) var(--ease-standard);
+}
+
+.bot-input-send:disabled {
+  background: var(--color-border-default);
+  color: var(--color-text-on-accent);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.bot-input-send:not(:disabled):hover,
+.bot-input-send:not(:disabled):active {
+  background: var(--accent-strong);
+}
+
+.bot-input-send :deep(svg) {
+  width: 18px;
+  height: 18px;
+}
+
+/* Hide el-upload's default trigger styling so our button is the only visible UI */
+:deep(.bot-upload .el-upload) {
+  width: auto;
+  height: auto;
+  border: none;
+  background: transparent;
 }
 </style>
