@@ -10,7 +10,7 @@
           </span>
         </div>
       </div>
-      <div class="file-actions">
+      <div v-if="isDesktop" class="file-actions">
         <el-button type="primary" @click="createDirectory">新建目录</el-button>
         <el-upload
             ref="fileUploadComponent"
@@ -78,9 +78,9 @@
                      @switch="switchImageViewer"
                      @close="closeImageViewer"/>
 
-    <!-- 拖拽区域 -->
+    <!-- 拖拽区域 (移动端无拖拽场景，仅桌面渲染) -->
     <div class="fullscreen-overlay"
-         v-if="pageDragging || dropAreaDragging"
+         v-if="isDesktop && (pageDragging || dropAreaDragging)"
          @dragover.prevent="handleDropAreaDragOver"
          @dragleave="handleDropAreaDragLeave"
          @drop="handleDrop">
@@ -91,10 +91,47 @@
       </div>
     </div>
 
+    <!-- 移动端浮动按钮：新建目录 / 上传文件 -->
+    <template v-if="isMobile">
+      <!-- 隐藏的上传组件，由 FAB 程序触发 -->
+      <el-upload
+          ref="fileUploadComponentMobile"
+          class="file-upload-hidden"
+          :on-change="fileUploadChange"
+          :auto-upload="false"
+          :show-file-list="false"
+          multiple
+          :limit="100">
+        <button ref="mobileUploadTrigger"
+                class="file-upload-hidden-btn"
+                type="button"
+                aria-hidden="true"
+                tabindex="-1"></button>
+      </el-upload>
+
+      <el-dropdown class="file-fab-wrap" trigger="click" placement="top-end">
+        <button class="file-fab" type="button" aria-label="新建或上传">
+          <el-icon><Plus/></el-icon>
+        </button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item @click="createDirectory">
+              <el-icon><FolderAdd/></el-icon>
+              <span>新建目录</span>
+            </el-dropdown-item>
+            <el-dropdown-item @click="triggerMobileUpload">
+              <el-icon><Upload/></el-icon>
+              <span>上传文件</span>
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </template>
+
     <el-dialog
         v-model="fileUploading"
         title="文件上传列表"
-        style="width: 80%;"
+        :width="dialogWidth"
         :before-close="fileUploadClose">
       <file-upload
           v-if="fileUploading"
@@ -107,7 +144,7 @@
     <el-dialog
         v-model="moveFileDialogVisible"
         title="移动文件"
-        style="width: 90%;"
+        :width="dialogWidth"
         @close="closeMoveFileDialog()">
       <div v-loading="moveFileLoading">
         <el-form :model="moveFileInfo"
@@ -131,7 +168,7 @@
     <el-dialog
         v-model="shareToPublicDialogVisible"
         title="共享到公共目录"
-        style="width: min(520px, 92vw);"
+        :width="dialogWidth"
         @close="closeShareToPublicDialog()">
       <div v-loading="shareToPublicLoading">
         <el-form :model="shareToPublicInfo"
@@ -171,8 +208,9 @@
 </template>
 
 <script setup>
-import {Document, Film, Folder, Picture} from "@element-plus/icons-vue";
+import {Document, Film, Folder, Picture, Plus, FolderAdd, Upload} from "@element-plus/icons-vue";
 import {computed, defineProps, onBeforeUnmount, onMounted, ref, watch} from "vue";
+import { useBreakpoint } from '@/composables/useBreakpoint';
 import VideoViewer from '@/components/fileServer/VideoViewer.vue'
 import FileUpload from '@/components/fileServer/FileUpload.vue'
 import {ElMessage, ElMessageBox} from "element-plus";
@@ -198,6 +236,11 @@ const props = defineProps({
   }
 });
 
+// 响应式断点
+const { isMobile, isDesktop } = useBreakpoint();
+// 弹层宽度（移动端 calc(100vw - 32px)，桌面端 480 固定）
+const dialogWidth = computed(() => isMobile.value ? 'calc(100vw - 32px)' : '480px');
+
 //当前文件路径
 const filePath = ref("/");
 //当前目录的文件列表
@@ -221,6 +264,22 @@ const dropAreaDragging = ref(false);
 
 // 上传文件列表
 const fileUploadComponent = ref();
+// 移动端上传组件 ref（FAB 用）
+const fileUploadComponentMobile = ref();
+const mobileUploadTrigger = ref();
+const triggerMobileUpload = () => {
+  if (mobileUploadTrigger.value) {
+    mobileUploadTrigger.value.click();
+  }
+};
+const clearAllUploadComponents = () => {
+  if (fileUploadComponent.value && fileUploadComponent.value.clearFiles) {
+    fileUploadComponent.value.clearFiles();
+  }
+  if (fileUploadComponentMobile.value && fileUploadComponentMobile.value.clearFiles) {
+    fileUploadComponentMobile.value.clearFiles();
+  }
+};
 // 文件是否正在上传标识
 const fileUploading = ref(false);
 // 上传文件列表
@@ -237,7 +296,7 @@ const menuStyles = ref({ top: 0, left: 0 });
 // 菜单选择的文件
 const menuChooseFile = ref(null);
 // 移动端菜单长按时间阈值（单位：毫秒）
-const LONG_PRESS_TIME = 600;
+const LONG_PRESS_TIME = 350;
 let menuPressTimer = null;  // 用于存储定时器ID
 let isFileLongPress = false;  // 是否长按文件
 
@@ -860,7 +919,7 @@ const fileUploadChange = (file, fileList) => {
 // 关闭文件上传
 const fileUploadClose = (done) => {
   if (uploadAllComplete.value === true) {
-    fileUploadComponent.value.clearFiles();
+    clearAllUploadComponents();
     fileUploading.value = false;
     return done(true);
   }else {
@@ -873,7 +932,7 @@ const fileUploadClose = (done) => {
           type: 'warning',
         }
     ).then(() => {
-      fileUploadComponent.value.clearFiles();
+      clearAllUploadComponents();
       fileUploading.value = false;
       return done(true);
     }).catch(() => {
@@ -912,46 +971,152 @@ queryFileList();
 </script>
 
 <style scoped>
+/* ---------- Header ---------- */
 .file-header {
-  display: flex; /* 使用 flexbox 排列子元素 */
-  justify-content: space-between; /* 左侧是路径，右侧是按钮区域 */
-  align-items: center; /* 垂直居中 */
-}
-
-.file-path-choose {
   display: flex;
-  padding-left: 20px;
+  justify-content: space-between;
   align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-bg-base);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
-.file-actions {
-  display: flex; /* 用 flex 布局让按钮排成一行 */
-  gap: 10px; /* 按钮之间的间距 */
-  padding-left: 30px;
-  padding-right: 20px;
-  padding-top: 10px;
+@media (max-width: 640px) {
+  .file-header {
+    padding: var(--space-3) var(--space-4);
+  }
+}
+
+/* ---------- Path breadcrumb ---------- */
+.file-path-choose {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.file-path-choose::-webkit-scrollbar {
+  display: none;
 }
 
 .choose-text {
-  color: var(--el-color-primary);
-  cursor: pointer; /* 鼠标悬停时变为手型 */
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: color var(--duration-fast) var(--ease-standard),
+              background var(--duration-fast) var(--ease-standard);
 }
 
-.file-container {
-  padding-top: 20px;
-  padding-left: 20px;
-  padding-bottom: 20px;
+.choose-text:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+/* Last segment (current directory) gets accent.
+   Two cases:
+   - At root: the only span is `<span class="choose-text">根目录</span>`,
+     so target it directly.
+   - Deeper: the last span is a wrapper that contains the choose-text
+     inside (`<span>/<span class="choose-text">name</span></span>`). */
+.file-path-choose > div > span.choose-text:last-of-type,
+.file-path-choose > div > span:last-of-type .choose-text {
+  color: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+/* ---------- Action buttons (desktop only) ---------- */
+.file-actions {
   display: flex;
-  flex-wrap: wrap; /* 自动换行 */
-  gap: 15px; /* 卡片之间的间距 */
-  justify-content: flex-start; /* 让最后一行的卡片左对齐 */
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* ---------- Grid container ---------- */
+.file-container {
+  padding: var(--space-4) var(--space-5) var(--space-6);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-3);
+  align-content: start;
+}
+
+@media (max-width: 640px) {
+  .file-container {
+    padding: var(--space-3) var(--space-4) var(--space-12);
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: var(--space-3);
+  }
+}
+
+/* ---------- File card ---------- */
+.file-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  /* Card aspect ratio close to original 108x130 (~ 4:5) */
+  aspect-ratio: 4 / 5;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+  -webkit-touch-callout: none;
+  transition:
+      border-color var(--duration-fast) var(--ease-standard),
+      background var(--duration-fast) var(--ease-standard),
+      transform var(--duration-fast) var(--ease-standard);
+}
+
+.file-card:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-default);
+  transform: translateY(-1px);
+}
+
+.file-card:active {
+  transform: translateY(0);
+}
+
+.file-card-main {
+  flex: 0 0 65%;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  /* Override Element Plus el-main defaults: 20px padding + box-shadow */
+  padding: 0 !important;
+  background: var(--color-bg-muted);
+  box-shadow: none !important;
+}
+
+.file-card-footer {
+  flex: 0 0 35%;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Override Element Plus el-footer default 0 60px padding + height */
+  padding: var(--space-2) var(--space-3) !important;
+  height: auto !important;
+  background: var(--color-bg-surface);
 }
 
 .file-show {
-  max-width: 80%;
-  max-height: 100%;
+  max-width: 50%;
+  max-height: 70%;
+  color: var(--color-text-secondary);
 }
 
+/* ---------- Video preview tile ---------- */
 .video-file-show {
   position: relative;
   width: 100%;
@@ -964,6 +1129,7 @@ queryFileList();
 .video-preview {
   width: 100%;
   height: 100%;
+  object-fit: cover;
 }
 
 .video-status-mask {
@@ -973,16 +1139,16 @@ queryFileList();
   flex-direction: column;
   justify-content: center;
   gap: 6px;
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.56);
+  padding: var(--space-2);
+  background: rgba(31, 27, 22, 0.55);
   box-sizing: border-box;
 }
 
 .video-status-text {
   color: #fff;
   text-align: center;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-tight);
   word-break: break-word;
 }
 
@@ -990,91 +1156,63 @@ queryFileList();
   width: 100%;
 }
 
-.file-card {
-  min-width: 108px;
-  max-width: 108px;
-  height: 130px;
-  box-sizing: border-box; /* 确保宽高不受内边距影响 */
-  box-shadow: var(--el-box-shadow-lighter);
-  cursor: pointer; /* 鼠标悬停时变为手型 */
-
-  -webkit-touch-callout:none;
-  -webkit-user-select:none;
-  -khtml-user-select:none;
-  -moz-user-select:none;
-  -ms-user-select:none;
-  user-select:none;
-
-}
-
-.file-card-main {
-  width: 100%;
-  height: 65%;
-  box-shadow: var(--el-box-shadow-lighter);
-  display: grid;
-  place-items: center; /* 水平和垂直居中 */
-}
-
-.file-card-footer {
-  width: 100%;
-  height: 35%;
-}
-
+/* ---------- File name (footer) ---------- */
 .wrap-and-ellipsis {
-  padding-top: 5px;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2; /* 控制最多显示的行数 */
+  -webkit-line-clamp: 2;
   overflow: hidden;
   text-overflow: ellipsis;
   word-wrap: break-word;
+  word-break: break-all;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-tight);
+  color: var(--color-text-primary);
 }
 
+/* ---------- Fullscreen drag overlay (desktop only) ---------- */
 .fullscreen-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
+  inset: 0;
+  background: rgba(31, 27, 22, 0.45);
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 9999; /* 保证它在最上层 */
+  z-index: var(--z-overlay);
 }
 
-/* 基本样式 */
 .drop-area {
-  width: 95%;
-  height: 95%;
-  border: 2px dashed #ccc;
-  transition: background-color 0.3s;
-  text-align: center;
-  line-height: 200px;
-  position: relative;
-  top: 0;
-  left: 0;
+  width: calc(100% - var(--space-12));
+  height: calc(100% - var(--space-12));
+  border: 2px dashed rgba(255, 255, 255, 0.5);
+  border-radius: var(--radius-lg);
   display: flex;
   justify-content: center;
   align-items: center;
-  color: white;
-  font-size: 18px;
-  pointer-events: auto;
+  color: #fff;
+  font-size: var(--font-size-lg);
+  background: transparent;
+  transition: background var(--duration-base) var(--ease-standard),
+              border-color var(--duration-base) var(--ease-standard);
 }
 
-.dragging {
-  background-color: rgba(0, 0, 0, 0.1); /* 拖拽时背景颜色 */
+.drop-area.dragging {
+  background: rgba(194, 65, 12, 0.16);
+  border-color: var(--accent);
 }
 
+/* ---------- Custom right-click menu ---------- */
 .context-menu {
   position: fixed;
-  z-index: 1000; /* 确保菜单在最上层 */
-  background-color: white;
-  border: 1px solid #ccc;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  width: 120px; /* 固定宽度 */
+  z-index: var(--z-dialog);
+  width: 160px;
+  padding: var(--space-1) 0;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
 }
 
 .context-menu ul {
@@ -1084,12 +1222,69 @@ queryFileList();
 }
 
 .context-menu li {
-  padding: 8px 16px;
+  padding: var(--space-2) var(--space-4);
   cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  transition: background var(--duration-fast) var(--ease-standard),
+              color var(--duration-fast) var(--ease-standard);
 }
 
 .context-menu li:hover {
-  background-color: #f0f0f0;
+  background: var(--color-bg-hover);
+}
+
+/* ---------- Mobile FAB ---------- */
+.file-fab-wrap {
+  position: fixed;
+  right: var(--space-4);
+  /* Lift above the tab bar + safe area */
+  bottom: calc(var(--layout-tab-bar-height) + var(--space-4) + env(safe-area-inset-bottom));
+  z-index: var(--z-sticky);
+}
+
+.file-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--color-text-on-accent);
+  box-shadow: var(--shadow-lg);
+  transition: background var(--duration-fast) var(--ease-standard),
+              transform var(--duration-fast) var(--ease-standard);
+}
+
+.file-fab:active {
+  background: var(--accent-strong);
+  transform: scale(0.96);
+}
+
+.file-fab :deep(svg) {
+  width: 22px;
+  height: 22px;
+}
+
+/* Hidden el-upload trigger (for FAB-driven upload) */
+.file-upload-hidden {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.file-upload-hidden-btn {
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+/* ---------- Loading mask uses surface, not a hard white ---------- */
+:deep(.el-loading-mask) {
+  background-color: rgba(250, 248, 245, 0.7);
 }
 
 </style>
