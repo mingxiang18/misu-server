@@ -1111,8 +1111,8 @@ queryFileList();
 }
 
 .file-show {
-  max-width: 50%;
-  max-height: 70%;
+  max-width: 80%;
+  max-height: 100%;
   color: var(--color-text-secondary);
 }
 
