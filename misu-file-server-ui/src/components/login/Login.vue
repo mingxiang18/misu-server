@@ -85,7 +85,7 @@ const handleLogin = () => {
             size="large"
             :loading="loading"
             @click="handleLogin">
-          登 录
+          登录
         </el-button>
       </form>
     </div>
@@ -205,9 +205,6 @@ const handleLogin = () => {
 .login-submit {
   width: 100%;
   margin-top: var(--space-2);
-  /* 字距让"登 录"两字看起来不挤 */
-  letter-spacing: 0.4em;
-  padding-left: 0.4em;
 }
 
 /* 让 Element Plus input 的字号在移动端保持 16px 防 iOS 缩放 */
