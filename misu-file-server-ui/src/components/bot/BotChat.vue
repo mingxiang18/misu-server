@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Service, Picture, Close, Promotion } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { getBotAccessToken, getServerWebSocketUrl } from '@/api/bot/bot'
@@ -32,15 +32,23 @@ const canSend = computed(() => {
 const formatText = (text) => (text || '').replace(/\n/g, '<br>')
 
 const scrollToBottom = () => {
+  // nextTick 等 Vue 完成 DOM patch；rAF 再让浏览器跑一帧 layout，
+  // scrollHeight 才是新加消息后的真实值。
   nextTick(() => {
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTo({
-        top: messagesContainer.value.scrollHeight,
-        behavior: 'smooth'
-      })
-    }
+    requestAnimationFrame(() => {
+      const el = messagesContainer.value
+      if (el) {
+        el.scrollTop = el.scrollHeight
+      }
+    })
   })
 }
+
+// 任意路径新增/重置消息（首次加载、自己发、bot 回、离线占位）都通过
+// length 变化统一触发滚到底，避免漏点。
+watch(() => messages.value.length, () => {
+  scrollToBottom()
+})
 
 /* ------------------ Image upload ------------------ */
 const handleImageRemove = () => {
@@ -275,9 +283,13 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  /* Fill the flex parent (.app-content) instead of relying on height:100%,
-     which doesn't propagate cleanly through .app-content's overflow-y:auto. */
-  flex: 1 1 auto;
+  /* flex-basis: 0 instead of auto — so the chat container's intrinsic
+     content height (which can be large with many messages) does NOT
+     contribute to the flex parent's scroll height. The chat fills
+     exactly the available .app-content slot, and overflow stays
+     internal in .bot-messages. Without basis:0 the page would
+     scroll instead of the messages list when the conversation grew. */
+  flex: 1 1 0;
   min-height: 0;
   background: var(--color-bg-base);
 }
