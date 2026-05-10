@@ -12,8 +12,10 @@ import VideoTranscodeManagement from '@/components/fileServer/VideoTranscodeMana
 import TrashView from '@/components/fileServer/TrashView.vue';
 import SharesView from '@/components/fileServer/SharesView.vue';
 import SharedDownload from '@/components/fileServer/SharedDownload.vue';
+import AuditLogView from '@/components/fileServer/AuditLogView.vue';
 import BotChat from '@/components/bot/BotChat.vue';
 import EpubViewer from '@/components/utils/EpubViewer.vue';
+import PdfViewer from '@/components/utils/PdfViewer.vue';
 import LanguageLearn from "@/components/languageLearn/LanguageLearn.vue";
 
 const routes = [
@@ -32,7 +34,9 @@ const routes = [
             { path: 'fileServer/videoTranscodeManagement', component: VideoTranscodeManagement, name: 'VideoTranscodeManagement' },
             { path: 'fileServer/trash', component: TrashView, name: 'TrashView' },
             { path: 'fileServer/shares', component: SharesView, name: 'SharesView' },
+            { path: 'fileServer/audit', component: AuditLogView, name: 'AuditLogView' },
             { path: 'fileServer/epubViewer', component: EpubViewer, name: 'EpubViewer' },
+            { path: 'fileServer/pdfViewer', component: PdfViewer, name: 'PdfViewer' },
             { path: 'bot', component: BotChat, name: 'BotChat' },
         ],
     },

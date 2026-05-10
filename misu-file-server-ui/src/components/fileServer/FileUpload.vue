@@ -29,7 +29,7 @@
 import { ref } from 'vue';
 import SparkMD5 from 'spark-md5';
 import { uploadFile } from '@/api/fileServer/fileServer';
-import { checkUploadByHash } from '@/api/fileServer/fileServerMvp';
+import { checkUploadByHash, getUploadStatus } from '@/api/fileServer/fileServerMvp';
 import {ElMessageBox} from "element-plus";
 
 // 声明自定义事件
@@ -166,8 +166,35 @@ const uploadFileAndUpdateState = async (fileUploadState, form) => {
     }
   }
 
+  // F8 续传探测：先查后端已落盘的分片索引，跳过已传部分
+  let alreadyUploaded = new Set();
+  try {
+    const statusResp = await getUploadStatus({
+      openType: Number(form.get('openType')),
+      fileName: form.get('fileName'),
+      filePath: String(form.get('filePath') || '/').replace(/^\/+|\/+$/g, ''),
+      totalChunks
+    });
+    alreadyUploaded = new Set(statusResp.data?.uploadedChunks || []);
+    if (alreadyUploaded.size > 0) {
+      // 进度条立刻反映已传部分
+      fileUploadState.progress = Math.round((alreadyUploaded.size / totalChunks) * 100);
+      fileUploadState.failMessage = `从第 ${alreadyUploaded.size} / ${totalChunks} 片继续`;
+    }
+    // 边界：所有分片都在但合并没完成（进程崩溃 / 网络中断在合并阶段）→ 重传最后一片触发后端合并
+    if (alreadyUploaded.size >= totalChunks) {
+      alreadyUploaded.delete(totalChunks - 1);
+    }
+  } catch (e) {
+    // 探测失败不阻断，回落到从 0 开始重传
+    alreadyUploaded = new Set();
+  }
+
   // 上传每个分片
   for (let i = 0; i < totalChunks; i++) {
+    if (alreadyUploaded.has(i)) {
+      continue; // 已传过的分片直接跳过
+    }
     //计算分片的开始和结束位置，切割出分片
     const start = i * chunkSize;
     const end = Math.min(start + chunkSize, file.size);

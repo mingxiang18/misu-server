@@ -12,6 +12,7 @@ import {
   Download,
   Delete,
   Share,
+  Histogram,
   User,
   ArrowRight,
   SwitchButton
@@ -35,6 +36,9 @@ const nav = computed(() => {
   if (isAdmin.value) {
     filesChildren.push({
       key: 'transcode', label: '转码管理', icon: VideoCameraFilled, to: '/fileServer/videoTranscodeManagement', match: ['videoTranscodeManagement']
+    })
+    filesChildren.push({
+      key: 'audit', label: '审计日志', icon: Histogram, to: '/fileServer/audit', match: ['fileServer/audit']
     })
   }
 

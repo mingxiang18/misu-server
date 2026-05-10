@@ -109,6 +109,7 @@
                     loading="lazy" />
           <Picture v-if="file.fileType === 'image' && !file.previewLink" class="file-show"/>
           <Document v-if="file.fileType === 'other'" class="file-show"/>
+          <Document v-if="file.fileType === 'document'" class="file-show file-show-document"/>
           <div v-if="file.fileType === 'video'" class="video-file-show">
             <el-image v-if="!!file.videoPreviewLink" class="video-preview"
                       :src="downloadBaseUrl + file.videoPreviewLink"
@@ -1119,6 +1120,9 @@ const openFile = (file) => {
     switchImageViewer(imageIndex.value);
   }else if (file.fileType === 'video') {
     openVideoFile(file);
+  }else if (file.fileType === 'document' || (!!extName && extName.toLowerCase() === 'pdf')) {
+    // F9：PDF 走浏览器原生 iframe 渲染（支持打印/缩放/搜索）
+    router.push({ path: '/fileServer/pdfViewer', query: { url: downloadBaseUrl + file.streamLink, name: file.fileName }});
   }else if (!!extName && extName === 'epub'){
     //跳转到epub浏览目录
     router.push({path: '/fileServer/epubViewer', query: { url: downloadBaseUrl + file.streamLink}});

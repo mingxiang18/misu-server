@@ -91,6 +91,17 @@ export function checkUploadByHash(payload) {
 }
 
 /**
+ * 续传探测：传入目标 (openType, filePath, fileName, totalChunks)，返回已传分片索引。
+ */
+export function getUploadStatus({ openType, fileName, filePath, totalChunks }) {
+    return request({
+        url: '/fileServer/file/getUploadStatus',
+        method: 'get',
+        params: { openType, fileName, filePath, totalChunks }
+    })
+}
+
+/**
  * 文件夹流式 ZIP 下载链接（直接拼好的 URL，前端用 a.href 触发即可）
  */
 export function buildDirectoryDownloadUrl(filePath, openType, baseApi) {
