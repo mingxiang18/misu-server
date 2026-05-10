@@ -9,6 +9,7 @@ import PrivateFileServer from '@/components/fileServer/PrivateFileServer.vue';
 import VideoRoom from '@/components/fileServer/VideoRoom.vue';
 import TorrentManagement from '@/components/fileServer/TorrentManagement.vue';
 import VideoTranscodeManagement from '@/components/fileServer/VideoTranscodeManagement.vue';
+import TrashView from '@/components/fileServer/TrashView.vue';
 import BotChat from '@/components/bot/BotChat.vue';
 import EpubViewer from '@/components/utils/EpubViewer.vue';
 import LanguageLearn from "@/components/languageLearn/LanguageLearn.vue";
@@ -27,6 +28,7 @@ const routes = [
             { path: 'fileServer/videoRoom', component: VideoRoom, name: 'VideoRoomFromHistory' },
             { path: 'fileServer/torrentManagement', component: TorrentManagement, name: 'TorrentManagement' },
             { path: 'fileServer/videoTranscodeManagement', component: VideoTranscodeManagement, name: 'VideoTranscodeManagement' },
+            { path: 'fileServer/trash', component: TrashView, name: 'TrashView' },
             { path: 'fileServer/epubViewer', component: EpubViewer, name: 'EpubViewer' },
             { path: 'bot', component: BotChat, name: 'BotChat' },
         ],

@@ -10,6 +10,7 @@ import {
   ChatDotRound,
   Memo,
   Download,
+  Delete,
   User,
   ArrowRight,
   SwitchButton
@@ -26,6 +27,7 @@ const nav = computed(() => {
   const filesChildren = [
     { key: 'private',  label: '私人目录', icon: Folder,            to: '/fileServer/privateDirectory',         match: ['privateDirectory'] },
     { key: 'public',   label: '公共目录', icon: FolderOpened,      to: '/fileServer/publicDirectory',          match: ['publicDirectory'] },
+    { key: 'trash',    label: '回收站',   icon: Delete,            to: '/fileServer/trash',                    match: ['fileServer/trash'] },
     { key: 'torrent',  label: '磁力下载', icon: Download,          to: '/fileServer/torrentManagement',        match: ['torrentManagement'] }
   ]
   if (isAdmin.value) {
