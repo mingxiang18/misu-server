@@ -1,9 +1,10 @@
 <script setup>
-
+import NetworkBanner from '@/components/layout/NetworkBanner.vue'
 </script>
 
 <template>
   <main>
+    <NetworkBanner />
     <div class="main-view">
       <router-view></router-view>
     </div>

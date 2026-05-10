@@ -2,6 +2,8 @@ import axios from 'axios'
 import { getToken, getRefreshToken, removeLoginTokens, setLoginTokens } from '@/api/auth/token'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import errorCode from '@/api/errorCode'
+import { markBackendDown, markBackendUp } from '@/composables/useNetwork'
+import logger from '@/utils/logger'
 
 // 是否显示重新登录
 export let isRelogin = { show: false };
@@ -93,7 +95,7 @@ instance.interceptors.request.use(
       return config;
     },
     error => {
-      console.log(error)
+      logger.error(error)
       return Promise.reject(error);
     }
 );
@@ -101,6 +103,7 @@ instance.interceptors.request.use(
 // 响应拦截器
 instance.interceptors.response.use(
     response => {
+        markBackendUp()
         // 未设置状态码则默认成功状态
         const code = response.data.code || 200;
         // 获取错误信息
@@ -126,16 +129,20 @@ instance.interceptors.response.use(
         }
     },
     error => {
-        console.log('err' + error)
+        logger.error('err' + error)
         let { message } = error;
+        const status = error?.response?.status
         if (message === "Network Error") {
             message = "后端接口连接异常";
+            markBackendDown()
         } else if (message.includes("401") || message.includes("403")) {
             return handleAuthExpired(error.config)
         } else if (message.includes("timeout")) {
             message = "系统接口请求超时";
+            markBackendDown()
         } else if (message.includes("Request failed with status code")) {
             message = "系统接口" + message.substr(message.length - 3) + "异常";
+            if (status >= 500 && status < 600) markBackendDown()
         }
         ElMessage({ message: message, type: 'error', duration: 5 * 1000 })
         return Promise.reject(error)
