@@ -1680,17 +1680,41 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public void downloadDirectoryAsZip(FileRequestDto fileRequestDto, HttpServletResponse response) {
-        File directory = resolveUserRequestFile(fileRequestDto).toFile();
-        if (!directory.exists()) {
-            throw new ServiceException(HttpStatus.BAD_REQUEST, "目录不存在或已被删除");
-        }
-        if (!directory.isDirectory()) {
+        // 本项目用 file_mapping 维护虚拟目录树，物理文件并不真的住在虚拟目录的 placeholder 下，
+        // 因此 ZIP 必须按 mapping 子树驱动而不是 Files.walk(物理目录)。
+        LoginUser loginUser = LoginMessageUtil.getLoginUser()
+                .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
+        String mappingUserId = getMappingUserId(fileRequestDto.getOpenType(), loginUser.getUserId().toString());
+        String relativePath = FilePathGuard.normalizeRelativePath(fileRequestDto.getFilePath());
+
+        FileMapping rootMapping = fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(
+                        fileRequestDto.getOpenType(), mappingUserId, relativePath)
+                .orElseThrow(() -> new ServiceException(HttpStatus.BAD_REQUEST, "目录不存在或已被删除"));
+        if (!FileType.DIRECTORY_FILE.equals(rootMapping.getFileType())) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "当前路径不是目录");
         }
-        // 复用既有的体积/文件数限制
-        checkDirectoryDownloadLimit(directory);
 
-        String zipBaseName = directory.getName();
+        List<FileMapping> subtree = fileMappingRepository.findActiveSubtree(
+                fileRequestDto.getOpenType(), mappingUserId, relativePath, relativePath + "/%");
+        // 体积/文件数限制（不计目录占位）
+        long totalBytes = 0L;
+        long fileCount = 0L;
+        for (FileMapping m : subtree) {
+            if (FileType.DIRECTORY_FILE.equals(m.getFileType())) {
+                continue;
+            }
+            fileCount++;
+            totalBytes += m.getFileSize() == null ? 0L : m.getFileSize();
+        }
+        if (fileCount > directoryDownloadMaxFiles) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "目录文件数量过多，请选择较小目录或单文件下载");
+        }
+        if (totalBytes > directoryDownloadMaxBytes) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "目录体积过大，请选择较小目录或单文件下载");
+        }
+
+        String zipBaseName = rootMapping.getFileName();
         if (StringUtils.isBlank(zipBaseName) || ".".equals(zipBaseName) || "..".equals(zipBaseName)) {
             zipBaseName = "download";
         }
@@ -1699,32 +1723,40 @@ public class FileServiceImpl implements FileService {
 
         response.setContentType("application/zip");
         response.setCharacterEncoding("utf-8");
-        response.setHeader("Content-Disposition", "attachment; filename=\"download.zip\"; filename*=UTF-8''" + encodedName);
+        response.setHeader("Content-Disposition",
+                "attachment; filename=\"download.zip\"; filename*=UTF-8''" + encodedName);
         response.setHeader("Cache-Control", "no-store");
 
+        String rootPrefix = relativePath.endsWith("/") ? relativePath : relativePath + "/";
         try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(response.getOutputStream())) {
-            Path rootPath = directory.toPath();
-            // 用 try-with-resources 包住 Files.walk，确保流释放
-            try (Stream<Path> walk = Files.walk(rootPath)) {
-                Iterator<Path> it = walk.iterator();
-                while (it.hasNext()) {
-                    Path path = it.next();
-                    if (path.equals(rootPath)) {
-                        continue;
-                    }
-                    String entryName = rootPath.relativize(path).toString().replace('\\', '/');
-                    try {
-                        if (Files.isDirectory(path)) {
-                            zos.putNextEntry(new java.util.zip.ZipEntry(entryName + "/"));
-                            zos.closeEntry();
-                        } else {
-                            zos.putNextEntry(new java.util.zip.ZipEntry(entryName));
-                            Files.copy(path, zos);
-                            zos.closeEntry();
+            for (FileMapping m : subtree) {
+                if (m.getId().equals(rootMapping.getId())) {
+                    continue;
+                }
+                String virtual = m.getVirtualPath();
+                String entryName = virtual.startsWith(rootPrefix)
+                        ? virtual.substring(rootPrefix.length())
+                        : virtual;
+                if (StringUtils.isBlank(entryName)) {
+                    continue;
+                }
+                try {
+                    if (FileType.DIRECTORY_FILE.equals(m.getFileType())) {
+                        zos.putNextEntry(new java.util.zip.ZipEntry(entryName + "/"));
+                        zos.closeEntry();
+                    } else {
+                        File physical = StringUtils.isBlank(m.getTargetPath())
+                                ? null : Path.of(m.getTargetPath()).toFile();
+                        if (physical == null || !physical.exists() || !physical.isFile()) {
+                            log.warn("ZIP 跳过缺失文件 mappingId={} target={}", m.getId(), m.getTargetPath());
+                            continue;
                         }
-                    } catch (IOException ioe) {
-                        log.warn("ZIP 单项失败，跳过：{}", path, ioe);
+                        zos.putNextEntry(new java.util.zip.ZipEntry(entryName));
+                        Files.copy(physical.toPath(), zos);
+                        zos.closeEntry();
                     }
+                } catch (IOException ioe) {
+                    log.warn("ZIP 单项失败，跳过：{}", virtual, ioe);
                 }
             }
         } catch (IOException e) {

@@ -173,9 +173,9 @@ public class FileController {
      */
     @GetMapping({"/listTrash"})
     @ApiOperation(value="回收站列表")
-    public AjaxResult listTrash(@NotNull(message = "文件公开类型不能为空") Integer openType,
-                                Integer pageNumber,
-                                Integer pageSize) {
+    public AjaxResult listTrash(@RequestParam("openType") @NotNull(message = "文件公开类型不能为空") Integer openType,
+                                @RequestParam(value = "pageNumber", required = false) Integer pageNumber,
+                                @RequestParam(value = "pageSize", required = false) Integer pageSize) {
         return AjaxResult.success(fileService.listTrash(openType, pageNumber, pageSize));
     }
 
@@ -249,7 +249,7 @@ public class FileController {
      */
     @GetMapping({"/getStorageUsage"})
     @ApiOperation(value="存储用量")
-    public AjaxResult getStorageUsage(@NotNull(message = "文件公开类型不能为空") Integer openType) {
+    public AjaxResult getStorageUsage(@RequestParam("openType") @NotNull(message = "文件公开类型不能为空") Integer openType) {
         return AjaxResult.success(fileService.getStorageUsage(openType));
     }
 
