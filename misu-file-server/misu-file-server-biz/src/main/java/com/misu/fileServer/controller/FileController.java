@@ -6,6 +6,7 @@ import com.misu.fileServer.domain.dto.FileDownloadRequestDto;
 import com.misu.fileServer.domain.dto.FileRenameRequestDto;
 import com.misu.fileServer.domain.dto.FileRequestDto;
 import com.misu.fileServer.domain.dto.FileUploadRequest;
+import com.misu.fileServer.domain.dto.HashUploadCheckRequestDto;
 import com.misu.fileServer.domain.dto.SearchFileRequestDto;
 import com.misu.fileServer.domain.dto.SharePrivateFileToPublicRequestDto;
 import com.misu.fileServer.service.FileService;
@@ -239,5 +240,25 @@ public class FileController {
     @ApiOperation(value="流式 ZIP 下载文件夹")
     public void downloadDirectory(@Valid FileRequestDto fileRequestDto, HttpServletResponse response) {
         fileService.downloadDirectoryAsZip(fileRequestDto, response);
+    }
+
+    // ===================== M5：配额 + 哈希秒传 =====================
+
+    /**
+     * 当前用户存储用量
+     */
+    @GetMapping({"/getStorageUsage"})
+    @ApiOperation(value="存储用量")
+    public AjaxResult getStorageUsage(@NotNull(message = "文件公开类型不能为空") Integer openType) {
+        return AjaxResult.success(fileService.getStorageUsage(openType));
+    }
+
+    /**
+     * 哈希秒传校验。命中即秒传，不命中前端再走原本的 /uploadFile 分片上传。
+     */
+    @PostMapping({"/checkUploadByHash"})
+    @ApiOperation(value="哈希秒传校验")
+    public AjaxResult checkUploadByHash(@Valid @RequestBody HashUploadCheckRequestDto request) {
+        return AjaxResult.success(fileService.checkUploadByHash(request));
     }
 }

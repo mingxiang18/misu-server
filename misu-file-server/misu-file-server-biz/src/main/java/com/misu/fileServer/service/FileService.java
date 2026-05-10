@@ -141,4 +141,14 @@ public interface FileService {
      * 流式打包下载文件夹为 ZIP（不落临时文件，不支持 Range，使用分块编码）。
      */
     void downloadDirectoryAsZip(FileRequestDto fileRequestDto, HttpServletResponse response);
+
+    /**
+     * 当前用户存储用量。openType=0 私人，1 公共。
+     */
+    StorageUsageResponseDto getStorageUsage(Integer openType);
+
+    /**
+     * 哈希秒传校验：命中则直接落 mapping 复用底层物理文件，不命中再走完整分片上传。
+     */
+    HashUploadCheckResponseDto checkUploadByHash(HashUploadCheckRequestDto request);
 }

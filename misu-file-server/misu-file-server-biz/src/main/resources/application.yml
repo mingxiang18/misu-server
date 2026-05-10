@@ -29,6 +29,9 @@ file:
       cron: 0 0 4 * * ?
       # 逻辑删除后的保留天数，避免误删
       retentionDays: 7
+  # M5：私人空间每用户配额（字节），<= 0 表示不限制；本期仅做展示，不做硬性拦截
+  quota:
+    privateBytesPerUser: -1
 
 video:
   transcode:

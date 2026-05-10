@@ -47,6 +47,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -92,6 +94,9 @@ public class FileServiceImpl implements FileService {
 
     @Value("${file.upload.lock.expireMillis:1800000}")
     private long uploadLockExpireMillis;
+
+    @Value("${file.quota.privateBytesPerUser:-1}")
+    private long privateQuotaBytesPerUser;
 
     @Resource
     private TokenService tokenService;
@@ -417,7 +422,7 @@ public class FileServiceImpl implements FileService {
 
                 // 如果所有分片都上传完成，则合并文件；支持乱序上传。
                 if (allChunksUploaded(fileMD5, fileUploadRequest.getTotalChunks())) {
-                    mergeChunks(file, fileMD5, fileUploadRequest.getTotalChunks());
+                    String contentMd5 = mergeChunks(file, fileMD5, fileUploadRequest.getTotalChunks());
                     //上传完成后执行后置操作
                     fileAddAfter(file);
                     saveOrUpdateFileMapping(fileUploadRequest.getOpenType(),
@@ -425,7 +430,8 @@ public class FileServiceImpl implements FileService {
                             virtualPath,
                             relativePath,
                             fileName,
-                            file);
+                            file,
+                            contentMd5);
                     mergeCompleted = true;
                 }
             }
@@ -477,20 +483,38 @@ public class FileServiceImpl implements FileService {
 
     // 合并所有分片
     // Q2：分片输入流改 try-with-resources，避免循环中途异常导致 N-1 个分片句柄泄漏。
-    private void mergeChunks(File file, String fileMD5, int totalChunks) throws IOException {
+    // M5：合并的同时增量算 MD5，省一次全文件重读。
+    private String mergeChunks(File file, String fileMD5, int totalChunks) throws IOException {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("MD5");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IOException("MD5 algorithm not available", e);
+        }
         try (FileOutputStream fileOutputStream = new FileOutputStream(file)) {
             for (int i = 0; i < totalChunks; i++) {
                 File chunkFile = new File(fileServerPath + TMP_DIRECTORY + fileMD5 + ".part" + i);
                 try (FileInputStream chunkInputStream = new FileInputStream(chunkFile)) {
-                    byte[] buffer = new byte[4096];
+                    byte[] buffer = new byte[8192];
                     int bytesRead;
                     while ((bytesRead = chunkInputStream.read(buffer)) != -1) {
                         fileOutputStream.write(buffer, 0, bytesRead);
+                        digest.update(buffer, 0, bytesRead);
                     }
                 }
                 chunkFile.delete();
             }
         }
+        return bytesToHex(digest.digest());
+    }
+
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
     }
 
     @Override
@@ -1083,6 +1107,11 @@ public class FileServiceImpl implements FileService {
 
     private void saveOrUpdateFileMapping(Integer openType, String mappingUserId, String virtualPath,
                                          String parentPath, String fileName, File file) {
+        saveOrUpdateFileMapping(openType, mappingUserId, virtualPath, parentPath, fileName, file, null);
+    }
+
+    private void saveOrUpdateFileMapping(Integer openType, String mappingUserId, String virtualPath,
+                                         String parentPath, String fileName, File file, String fileMd5) {
         FileMapping mapping = fileMappingRepository
                 .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(openType, mappingUserId, virtualPath)
                 .orElseGet(FileMapping::new);
@@ -1094,6 +1123,9 @@ public class FileServiceImpl implements FileService {
         mapping.setFileType(FileTypeUtils.getFileType(file));
         mapping.setFileSize(file.length());
         mapping.setTargetPath(file.toPath().toAbsolutePath().normalize().toString());
+        if (StringUtils.isNotBlank(fileMd5)) {
+            mapping.setFileMd5(fileMd5);
+        }
         mapping.setDeleted(false);
         if (mapping.getCreateTime() == null) {
             mapping.setCreateTime(LocalDateTime.now());
@@ -1699,5 +1731,85 @@ public class FileServiceImpl implements FileService {
             // tomcat 原话：客户端断连导致的 IO 异常吃掉，仅记日志
             log.warn("流式 ZIP 下载中断", e);
         }
+    }
+
+    // =====================================================================
+    // M5：配额展示 + 哈希秒传
+    // =====================================================================
+
+    @Override
+    public StorageUsageResponseDto getStorageUsage(Integer openType) {
+        if (openType == null) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不能为空");
+        }
+        LoginUser loginUser = LoginMessageUtil.getLoginUser()
+                .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
+        String mappingUserId = getMappingUserId(openType, loginUser.getUserId().toString());
+        StorageUsageResponseDto dto = new StorageUsageResponseDto();
+        dto.setOpenType(openType);
+        dto.setUsedBytes(fileMappingRepository.sumUsedBytes(openType, mappingUserId));
+        dto.setFileCount(fileMappingRepository.countUsedFiles(openType, mappingUserId));
+        // 仅私人空间显示配额；公共空间无需配额（且需要 ADMIN 才能写）
+        if (openType == 0 && privateQuotaBytesPerUser > 0) {
+            dto.setQuotaBytes(privateQuotaBytesPerUser);
+        }
+        return dto;
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public HashUploadCheckResponseDto checkUploadByHash(HashUploadCheckRequestDto request) {
+        checkPublicWriteAuthority(request.getOpenType());
+        LoginUser loginUser = LoginMessageUtil.getLoginUser()
+                .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
+        String fileName = FilePathGuard.normalizeFileName(request.getFileName());
+        uploadExtensionGuard.requireSafeForUpload(fileName);
+        String relativePath = FilePathGuard.normalizeRelativePath(
+                StringUtils.defaultString(request.getFilePath()), true);
+        String virtualPath = StringUtils.isBlank(relativePath) ? fileName : relativePath + "/" + fileName;
+        String mappingUserId = getMappingUserId(request.getOpenType(), loginUser.getUserId().toString());
+        String md5 = request.getFileMd5().toLowerCase(Locale.ROOT);
+
+        Optional<FileMapping> existingAtSamePath = fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(
+                        request.getOpenType(), mappingUserId, virtualPath);
+        if (!Boolean.TRUE.equals(request.getCoverFlag()) && existingAtSamePath.isPresent()) {
+            return new HashUploadCheckResponseDto(2, "文件已存在");
+        }
+
+        // 哈希查重：取最近 5 条 md5+size 全匹配的 active mapping，挑物理文件存在的一条复用
+        List<FileMapping> hits = fileMappingRepository
+                .findFirst5ByFileMd5AndFileSizeAndDeletedFalse(md5, request.getFileSize());
+        Optional<FileMapping> hit = hits.stream()
+                .filter(m -> StringUtils.isNotBlank(m.getTargetPath())
+                        && Path.of(m.getTargetPath()).toFile().exists())
+                .findFirst();
+        if (hit.isEmpty()) {
+            return new HashUploadCheckResponseDto(0, "未命中秒传，请走完整上传");
+        }
+
+        FileMapping reuse = existingAtSamePath.orElseGet(FileMapping::new);
+        reuse.setOpenType(request.getOpenType());
+        reuse.setUserId(mappingUserId);
+        reuse.setVirtualPath(virtualPath);
+        reuse.setParentPath(StringUtils.defaultString(getParentPath(virtualPath)));
+        reuse.setFileName(fileName);
+        reuse.setFileType(hit.get().getFileType());
+        reuse.setFileSize(hit.get().getFileSize());
+        reuse.setTargetPath(hit.get().getTargetPath());
+        reuse.setFileMd5(md5);
+        reuse.setDeleted(false);
+        if (reuse.getCreateTime() == null) {
+            reuse.setCreateTime(LocalDateTime.now());
+        }
+        reuse.setUpdateTime(LocalDateTime.now());
+        fileMappingRepository.save(reuse);
+
+        // 触发 idempotent 后置（图片预览生成 / 视频转码状态）。
+        File reusedFile = Path.of(hit.get().getTargetPath()).toFile();
+        if (reusedFile.exists() && reusedFile.isFile()) {
+            fileAddAfter(reusedFile);
+        }
+        return new HashUploadCheckResponseDto(1, "秒传成功");
     }
 }
