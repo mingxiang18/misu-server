@@ -367,25 +367,26 @@ onMounted(() => {
 
 <style scoped>
 .rss-detail-tabs {
-  min-height: 66svh;
+  min-height: 60vh;
+  min-height: 60dvh;
 }
 
 .rss-toolbar {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
 .rss-toolbar-filters {
   display: grid;
   grid-template-columns: minmax(180px, 260px) 140px 140px;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .rss-toolbar-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .rss-mobile-list {
@@ -405,10 +406,10 @@ onMounted(() => {
 .rss-table-tail {
   display: flex;
   justify-content: flex-end;
-  padding-top: 12px;
+  padding-top: var(--space-3);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .rss-toolbar {
     flex-direction: column;
   }
@@ -432,50 +433,56 @@ onMounted(() => {
 
   .rss-mobile-list {
     display: grid;
-    gap: 10px;
+    gap: var(--space-3);
   }
 
   .rss-mobile-card {
-    border: 1px solid var(--el-border-color-light);
-    border-radius: 8px;
-    padding: 12px;
-    background: var(--el-bg-color);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    background: var(--color-bg-surface);
   }
 
   .mobile-card-title {
-    font-weight: 600;
-    line-height: 1.4;
+    font-weight: var(--font-weight-medium);
+    line-height: var(--line-height-tight);
     word-break: break-all;
+    color: var(--color-text-primary);
+    font-size: var(--font-size-sm);
   }
 
   .mobile-card-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    padding-top: 8px;
+    gap: var(--space-1);
+    padding-top: var(--space-2);
   }
 
   .mobile-card-time,
   .mobile-card-field {
-    color: var(--el-text-color-secondary);
-    font-size: 12px;
-    padding-top: 8px;
+    color: var(--color-text-tertiary);
+    font-size: var(--font-size-xs);
+    padding-top: var(--space-2);
     word-break: break-all;
   }
 
   .mobile-card-url {
-    color: var(--el-text-color-secondary);
-    font-size: 12px;
-    padding-top: 8px;
+    color: var(--color-text-tertiary);
+    font-size: var(--font-size-xs);
+    padding-top: var(--space-2);
     word-break: break-all;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .mobile-card-actions {
     align-items: center;
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    padding-top: 10px;
+    gap: var(--space-2);
+    padding-top: var(--space-3);
   }
 
   .mobile-card-actions .el-button {

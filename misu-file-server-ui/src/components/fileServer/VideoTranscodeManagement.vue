@@ -40,7 +40,7 @@
         </div>
       </div>
 
-      <el-table :data="tasks" v-loading="loading" class="task-table" height="calc(100vh - 260px)" empty-text="暂无转码任务">
+      <el-table :data="tasks" v-loading="loading" class="task-table" :max-height="tableMaxHeight" empty-text="暂无转码任务">
         <el-table-column prop="taskId" label="任务ID" width="250" show-overflow-tooltip />
         <el-table-column label="队列" width="110">
           <template #default="{ row }">
@@ -122,7 +122,10 @@ import {
   retryFailedTask
 } from '@/api/fileServer/videoTranscodeAdmin'
 import {getFileMappingBackfillStatus, startFileMappingBackfill} from '@/api/fileServer/fileAdmin'
+import { useBreakpoint } from '@/composables/useBreakpoint'
 
+const { isMobile } = useBreakpoint()
+const tableMaxHeight = computed(() => (isMobile.value ? '50vh' : '60vh'))
 const currentUserInfo = ref(getUserInfo())
 const isAdmin = computed(() => (currentUserInfo.value.authorities || []).includes('ADMIN'))
 const loading = ref(false)
@@ -245,31 +248,40 @@ const progressStatus = (row) => {
 
 <style scoped>
 .transcode-page {
-  padding: 20px;
+  padding: var(--space-5);
+}
+
+@media (max-width: 640px) {
+  .transcode-page {
+    padding: var(--space-3);
+  }
 }
 
 .toolbar {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
 h2 {
   margin: 0;
-  font-size: 22px;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  line-height: var(--line-height-tight);
 }
 
 .subtitle,
 .muted {
-  color: #6b7280;
-  font-size: 13px;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
 }
 
 .actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -277,35 +289,37 @@ h2 {
 .summary {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .summary-item {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 12px;
-  background: #fff;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--color-bg-surface);
 }
 
 .summary-item span {
   display: block;
-  color: #6b7280;
-  font-size: 13px;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
 }
 
 .summary-item strong {
   display: block;
-  margin-top: 4px;
-  font-size: 24px;
+  margin-top: var(--space-1);
+  font-size: var(--font-size-2xl);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
 }
 
 .summary-item.danger strong {
-  color: #d93026;
+  color: var(--color-danger);
 }
 
 .summary-item.skipped strong {
-  color: #b7791f;
+  color: var(--color-warning);
 }
 
 .task-table {
@@ -313,40 +327,42 @@ h2 {
 }
 
 .backfill-card {
-  margin-bottom: 16px;
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
 .backfill-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .backfill-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .backfill-meta {
-  margin-top: 10px;
-  font-size: 13px;
-  color: #6b7280;
-  line-height: 1.8;
+  margin-top: var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  line-height: var(--line-height-relaxed);
 }
 
 .error-text {
-  color: #d93026;
+  color: var(--color-danger);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .toolbar {
     display: block;
   }
 
   .actions {
-    margin-top: 12px;
+    margin-top: var(--space-3);
     justify-content: flex-start;
   }
 

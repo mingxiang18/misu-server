@@ -112,3 +112,15 @@ textarea:-webkit-autofill:active {
     min-height: 100vh;
   }
 }
+
+/* 尊重系统的「减少动效」偏好（macOS 系统设置 / iOS 辅助功能 / Windows 动画）。
+   只关 transition + animation，不关 scroll-behavior（用户主动滚动不算"动效"）。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -16,7 +16,8 @@
   <!-- 目录对话框 -->
   <el-dialog
       v-model="tocVisible"
-      style="width: 80%;"
+      :width="isMobile ? undefined : 'min(640px, 80vw)'"
+      :fullscreen="isMobile"
       title="目录">
 
     <!-- 目录展示 -->
@@ -43,6 +44,10 @@ import {ref, onMounted} from 'vue';
 import Epub from 'epubjs';
 import {ElMessage} from "element-plus";
 import { useRoute } from 'vue-router';
+import { useBreakpoint } from '@/composables/useBreakpoint';
+import logger from '@/utils/logger';
+
+const { isMobile } = useBreakpoint();
 
 // 接收外部传入的接口函数
 const route = useRoute();
@@ -82,7 +87,7 @@ const onFileSelected = () => {
         loadEpub(file);
       })
       .catch(error => {
-        console.error('Error fetching file:', error);
+        logger.error('Error fetching file:', error);
         ElMessage.error("epub载入失败");
       });
 };
@@ -100,7 +105,7 @@ const loadEpub = (file) => {
 
   // 获取书籍的元数据（如作者、标题等）
   book.loaded.metadata.then((metadata) => {
-    console.log('Metadata:', metadata);
+    logger.debug('Metadata:', metadata);
   });
 
   // 获取目录并存储到 toc 中
@@ -154,30 +159,53 @@ onMounted(() => {
 .epub-reader {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: 5px;
+  align-items: stretch;
+  padding: var(--space-2);
   height: 100%;
+  /* 全屏阅读时铺满容器，避免父级滚动条 */
+  min-height: 100%;
+  gap: var(--space-2);
+}
+
+@media (max-width: 640px) {
+  .epub-reader {
+    padding: var(--space-1);
+  }
 }
 
 .reader-container {
-  border: 1px solid #ccc;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
   width: 100%;
-  height: 92%;
+  /* 用 flex 占据剩余空间，避免 92% 在 dvh 不可计算时塌掉 */
+  flex: 1 1 0;
+  min-height: 0;
   overflow: hidden;
 }
 
 .toc-container {
   width: 100%;
+  max-height: min(70vh, 480px);
+  overflow-y: auto;
 }
 
 .controls {
   display: flex;
-  justify-content: space-between; /* 平均分配每个项目的空间 */
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   width: 100%;
-  padding-top: 10px;
+  padding-top: var(--space-2);
+}
+
+.controls .el-button {
+  flex: 1 1 auto;
+  min-height: 44px;
 }
 
 .selected-node {
-  color: #3498db;
+  color: var(--accent);
+  font-weight: var(--font-weight-medium);
 }
 </style>

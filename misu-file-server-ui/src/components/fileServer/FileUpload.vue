@@ -1,21 +1,21 @@
 <template>
-  <div>
-    <div class="upload-container" style="max-height: 100%;overflow-y: auto">
+  <div class="upload-host">
+    <div class="upload-container">
       <div class="upload-card" v-for="(fileUploadState, index) in fileUploadStateList" :key="index">
         <div class="upload-content">
-          <div>{{ fileUploadState.name }}</div>
-          <el-progress style="padding-top: 5px"
+          <div class="upload-name">{{ fileUploadState.name }}</div>
+          <el-progress class="upload-progress"
                        :percentage="fileUploadState.progress"
                        :status="getProgressStatusFromUploadState(fileUploadState.uploadState)">
             {{ getUploadStateShowFromUploadState(fileUploadState) }}
           </el-progress>
-          <div style="padding-top: 10px;" v-if="fileUploadState.uploadState === 4">
+          <div class="upload-actions" v-if="fileUploadState.uploadState === 4">
             <span class="re-upload-action"
                   @click="coverUpload(fileUploadState)">覆盖</span>
-            <span class="re-upload-action" style="padding-left: 10px;"
+            <span class="re-upload-action"
                   @click="renameAndUpload(fileUploadState)">重命名</span>
           </div>
-          <div style="padding-top: 10px;" v-if="fileUploadState.uploadState === 3">
+          <div class="upload-actions" v-if="fileUploadState.uploadState === 3">
             <span class="re-upload-action"
                   @click="uploadFileAndUpdateState(fileUploadState, fileUploadState.form)">重试</span>
           </div>
@@ -208,30 +208,59 @@ startUploadFile();
 </script>
 
 <style scoped>
+.upload-host {
+  /* 把列表限定在弹窗或宿主容器内的可见高度，列表过长不撑大父级 */
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+}
+
 .upload-container {
   display: flex;
-  gap: 1px;
-  flex-wrap: wrap; /* 自动换行 */
-  justify-content: flex-start; /* 让最后一行的卡片左对齐 */
-  width: 100%; /* 父容器宽度为 100% */
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
 }
 
 .upload-card {
-  flex: 0 0 calc(100% - 10px); /* 每个卡片占据一行，但确保有间隙 */
-  box-sizing: border-box; /* 确保宽高不受内边距影响 */
-  box-shadow: var(--el-box-shadow-lighter);
-  max-width: 95%;
-  margin: 5px; /* 每个卡片的外边距，给左右和上下加点空隙 */
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
 }
 
 .upload-content {
-  padding: 10px;
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.upload-name {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  word-break: break-all;
+  font-weight: var(--font-weight-medium);
+}
+
+.upload-progress {
+  margin-top: var(--space-1);
+}
+
+.upload-actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
 }
 
 .re-upload-action {
-  color: var(--el-color-danger);
+  color: var(--color-danger);
   cursor: pointer;
   text-decoration-line: underline;
+  font-size: var(--font-size-sm);
+  /* 移动端命中区域 */
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
 }
-
 </style>

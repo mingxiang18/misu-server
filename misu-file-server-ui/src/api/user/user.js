@@ -1,5 +1,6 @@
 import request from '@/api/request'
 import Cookies from 'js-cookie'
+import logger from '@/utils/logger'
 
 const UserKey = 'User-Info';
 
@@ -18,7 +19,7 @@ export function getUserInfo() {
         try {
             return JSON.parse(userInfoStr);
         }catch (e) {
-            console.log(e);
+            logger.error(e);
             return {}
         }
     }

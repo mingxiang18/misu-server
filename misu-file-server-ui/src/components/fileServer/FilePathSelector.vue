@@ -13,6 +13,7 @@
 <script setup>
 import {defineEmits, defineProps, onMounted, ref, watch} from "vue";
 import {getFileList as getFileListApi} from '@/api/fileServer/fileServer';
+import logger from '@/utils/logger';
 
 // 接收外部传入的接口函数
 const props = defineProps({
@@ -65,7 +66,7 @@ const queryFileDirectoryList = async (path) => {
       })
       .catch((error) => {
         fileListLoading.value = false;
-        console.error(error)
+        logger.error(error)
       });
 };
 
@@ -131,9 +132,31 @@ const joinNodeValue = (filePath, fileName) => {
 </script>
 
 <style>
-/* 使用 !important 强制覆盖样式 */
+/* el-cascader-panel 是 teleport 渲染的全局节点，需要 unscoped 覆盖 */
 .el-cascader-panel {
-  max-width: 80vw !important;
-  overflow-x: auto !important;
+  /* 移动端窄屏避免溢出，桌面端给足展开列空间 */
+  max-width: min(560px, calc(100vw - var(--space-8)));
+  max-height: min(60vh, 480px);
+  overflow: auto;
+}
+
+@media (max-width: 640px) {
+  .el-cascader-panel {
+    max-width: calc(100vw - var(--space-8));
+  }
+
+  .el-cascader-menu {
+    min-width: 160px;
+  }
+}
+</style>
+
+<style scoped>
+.custom-cascader {
+  width: 100%;
+}
+
+.custom-cascader :deep(.el-input__inner) {
+  font-size: var(--font-size-md);
 }
 </style>

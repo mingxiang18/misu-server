@@ -2,7 +2,7 @@
   <el-tabs
       v-model="tagActiveName"
       type="card"
-      style="padding: 10px">
+      class="torrent-tabs">
     <el-tab-pane label="磁力下载管理" name="torrentDownload">
       <torrent-download v-if="tagActiveName === 'torrentDownload'"/>
     </el-tab-pane>
@@ -13,16 +13,35 @@
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from "vue";
-import {ElMessage, ElMessageBox} from "element-plus";
-import TorrentDownload from "@/components/fileServer/TorrentDownload.vue";
-import RssManagement from "@/components/fileServer/RssManagement.vue";
+import { ref } from 'vue'
+import TorrentDownload from '@/components/fileServer/TorrentDownload.vue'
+import RssManagement from '@/components/fileServer/RssManagement.vue'
 
-const tagActiveName = ref("torrentDownload");
+const tagActiveName = ref('torrentDownload')
 </script>
 
 <style scoped>
+.torrent-tabs {
+  padding: var(--space-3) var(--space-4);
+}
 
+@media (max-width: 640px) {
+  .torrent-tabs {
+    padding: var(--space-2) var(--space-3);
+  }
+}
+
+/* el-tabs 自身的 header 在 640px 下会有横向溢出风险，让 nav 横向可滚 */
+.torrent-tabs :deep(.el-tabs__nav-wrap) {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.torrent-tabs :deep(.el-tabs__nav-wrap::-webkit-scrollbar) {
+  display: none;
+}
+
+.torrent-tabs :deep(.el-tabs__item) {
+  font-size: var(--font-size-md);
+}
 </style>
-<script setup lang="ts">
-</script>
