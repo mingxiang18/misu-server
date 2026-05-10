@@ -27,7 +27,9 @@
 
 <script setup>
 import { ref } from 'vue';
+import SparkMD5 from 'spark-md5';
 import { uploadFile } from '@/api/fileServer/fileServer';
+import { checkUploadByHash } from '@/api/fileServer/fileServerMvp';
 import {ElMessageBox} from "element-plus";
 
 // 声明自定义事件
@@ -101,6 +103,20 @@ const coverUpload = (fileUploadState) => {
   uploadFileAndUpdateState(fileUploadState, clonedFormData)
 }
 
+// M12：分片增量算 MD5（spark-md5），10MB 一片，控制单次同步耗时
+const HASH_CHUNK_SIZE = 10 * 1024 * 1024;
+const computeFileMd5 = async (file) => {
+  const spark = new SparkMD5.ArrayBuffer();
+  const totalChunks = Math.ceil(file.size / HASH_CHUNK_SIZE);
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * HASH_CHUNK_SIZE;
+    const end = Math.min(start + HASH_CHUNK_SIZE, file.size);
+    const buf = await file.slice(start, end).arrayBuffer();
+    spark.append(buf);
+  }
+  return spark.end();
+};
+
 //上传文件并更新状态
 const uploadFileAndUpdateState = async (fileUploadState, form) => {
   //将文件设置为正在上传状态
@@ -109,6 +125,46 @@ const uploadFileAndUpdateState = async (fileUploadState, form) => {
   // 获取文件和分片大小
   const file = form.get("file");
   const totalChunks = Math.ceil(file.size / chunkSize);
+
+  // M12：上传前先做哈希秒传探测；命中 → 跳过分片上传
+  if (file.size > 0 && fileUploadState._md5Tried !== true) {
+    fileUploadState._md5Tried = true;
+    try {
+      fileUploadState.failMessage = '正在校验秒传...';
+      const md5 = await computeFileMd5(file);
+      const filePathRaw = String(form.get('filePath') || '/').replace(/^\/+|\/+$/g, '');
+      const checkResp = await checkUploadByHash({
+        openType: Number(form.get('openType')),
+        fileName: form.get('fileName'),
+        filePath: filePathRaw,
+        fileMd5: md5,
+        fileSize: file.size,
+        coverFlag: form.get('coverFlag') === 'true' || form.get('coverFlag') === true
+      });
+      const state = checkResp.data?.state;
+      if (state === 1) {
+        // 秒传成功 — 用 5 区分原本的 2（完整上传成功）
+        fileUploadState.progress = 100;
+        fileUploadState.uploadState = 5;
+        fileUploadState.failMessage = '';
+        emit('uploadSuccess');
+        // 整体收尾判断（2 / 5 都算完成）
+        let allDone = fileUploadStateList.value.every(s => s.uploadState === 2 || s.uploadState === 5);
+        if (allDone) emit('uploadAllComplete');
+        return;
+      } else if (state === 2) {
+        // 同名冲突，等用户选覆盖/重命名
+        fileUploadState.uploadState = 4;
+        fileUploadState.failMessage = '文件已存在';
+        return;
+      }
+      // state === 0 → 未命中，落后续分片上传逻辑
+      fileUploadState.failMessage = '';
+    } catch (err) {
+      // hash check 异常不阻塞上传，按原流程继续
+      fileUploadState.failMessage = '';
+    }
+  }
 
   // 上传每个分片
   for (let i = 0; i < totalChunks; i++) {
@@ -158,9 +214,9 @@ const uploadFileAndUpdateState = async (fileUploadState, form) => {
   }
 
   let uploadAllComplete = true;
-  //判断是否存在未完成上传的文件
+  //判断是否存在未完成上传的文件（2 = 普通上传成功；5 = 秒传成功）
   for (const fileUploadState of fileUploadStateList.value) {
-    if (fileUploadState.uploadState !== 2) {
+    if (fileUploadState.uploadState !== 2 && fileUploadState.uploadState !== 5) {
       uploadAllComplete = false;
     }
   }
@@ -174,9 +230,11 @@ const getUploadStateShowFromUploadState = (fileUploadState) => {
   if (fileUploadState.uploadState === 0) {
     return '等待上传';
   }else if (fileUploadState.uploadState === 1) {
-    return '正在上传';
+    return fileUploadState.failMessage || '正在上传';
   }else if (fileUploadState.uploadState === 2) {
     return '上传成功';
+  }else if (fileUploadState.uploadState === 5) {
+    return '⚡ 秒传成功';
   }else {
     return '上传失败，' + fileUploadState.failMessage;
   }
@@ -188,7 +246,7 @@ const getProgressStatusFromUploadState = (uploadState) => {
     return '';
   }else if (uploadState === 1) {
     return '';
-  }else if (uploadState === 2) {
+  }else if (uploadState === 2 || uploadState === 5) {
     return 'success';
   }else {
     return 'exception';
