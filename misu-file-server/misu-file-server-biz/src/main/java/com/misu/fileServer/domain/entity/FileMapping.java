@@ -11,7 +11,20 @@ import java.time.LocalDateTime;
 @Getter
 @Setter
 @Entity
-@Table(name = "file_mapping", schema = "misu_file_server")
+@Table(
+        name = "file_mapping",
+        schema = "misu_file_server",
+        indexes = {
+                // 列表 / 搜索：按 open_type + user_id + deleted 过滤后再按 file_type / file_name 排序
+                @Index(name = "idx_fm_owner_deleted_type_name",
+                        columnList = "open_type,user_id,deleted,file_type,file_name"),
+                // 回收站列表：按 update_time 倒序展示最近删除项
+                @Index(name = "idx_fm_owner_deleted_update",
+                        columnList = "open_type,user_id,deleted,update_time"),
+                // 哈希秒传去重查找
+                @Index(name = "idx_fm_md5", columnList = "file_md5")
+        }
+)
 public class FileMapping {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -55,6 +68,9 @@ public class FileMapping {
     @NotNull
     @Column(name = "target_path", nullable = false, length = 2000)
     private String targetPath;
+
+    @Column(name = "file_md5", length = 32)
+    private String fileMd5;
 
     @NotNull
     @ColumnDefault("0")

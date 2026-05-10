@@ -149,6 +149,12 @@
 
     <build>
         <plugins>
+            <!-- Surefire 3.x：JUnit Jupiter 5 需要 ≥ 3.0；继承默认的 2.12.4 跑不了 JUnit 5 用例 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
             <plugin>
                 <groupId>com.mysema.maven</groupId>
                 <artifactId>apt-maven-plugin</artifactId>
