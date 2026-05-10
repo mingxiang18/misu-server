@@ -21,7 +21,10 @@ spring:
     account:
       type: com.zaxxer.hikari.HikariDataSource
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://127.0.0.1:3316/misu_account?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowMultiQueries=true&useSSL=false
+      # sessionVariables=sql_mode=NO_ENGINE_SUBSTITUTION 关掉 MySQL 8 的严格模式，
+      # 否则 Hibernate 生成的 `datetime(6) default CURRENT_TIMESTAMP` 会被拒绝
+      # （MySQL 8 默认开启 STRICT_TRANS_TABLES + NO_ZERO_DATE）。
+      url: jdbc:mysql://127.0.0.1:3316/misu_account?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowMultiQueries=true&useSSL=false&sessionVariables=sql_mode%3DNO_ENGINE_SUBSTITUTION
       username: root
       password: root
       hikari:
