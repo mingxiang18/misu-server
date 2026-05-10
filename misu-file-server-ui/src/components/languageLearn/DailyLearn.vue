@@ -6,40 +6,57 @@
           v-model="searchQuery"
           placeholder="搜索单词或释义"
           clearable
-          style="margin-bottom: 20px;"
+          class="search-input"
       >
         <template #append>
           <el-button :icon="Search" />
         </template>
       </el-input>
 
-      <!-- 表格 -->
+      <!-- 桌面表格 -->
       <el-table
+          v-if="isDesktop"
           :data="paginatedWords"
-          style="width: 100%"
+          class="word-table"
           stripe
           v-loading="loading"
           :empty-text="'暂时没有记录学习单词'"
       >
         <el-table-column prop="it" label="意大利语"/>
         <el-table-column prop="cn" label="中文翻译" min-width="180"/>
-        <el-table-column label="操作" min-width="60">
+        <el-table-column label="操作" min-width="120">
           <template #default="scope">
             <div class="table-option">
-              <div><el-button link type="primary" @click="playAudio(scope.row.it)">发音</el-button></div>
-              <div><el-button link type="primary" @click="showDetail(scope.row)">详情</el-button></div>
+              <el-button link type="primary" @click="playAudio(scope.row.it)">发音</el-button>
+              <el-button link type="primary" @click="showDetail(scope.row)">详情</el-button>
             </div>
           </template>
         </el-table-column>
       </el-table>
 
+      <!-- 移动卡片 -->
+      <div v-else class="word-cards" v-loading="loading">
+        <div v-if="!loading && paginatedWords.length === 0" class="word-empty">
+          暂时没有记录学习单词
+        </div>
+        <article v-for="(word, idx) in paginatedWords" :key="`${word.it}-${idx}`" class="word-card">
+          <div class="word-card-it">{{ word.it }}</div>
+          <div class="word-card-cn">{{ word.cn }}</div>
+          <div class="word-card-actions">
+            <el-button size="small" type="primary" plain @click="playAudio(word.it)">发音</el-button>
+            <el-button size="small" type="primary" plain @click="showDetail(word)">详情</el-button>
+          </div>
+        </article>
+      </div>
+
       <!-- 分页 -->
       <div class="pagination">
         <el-pagination
             background
+            :small="isMobile"
             layout="prev, pager, next"
             :page-size="pageSize"
-            :pager-count=5
+            :pager-count="5"
             :total="filteredWords.length"
             v-model:current-page="currentPage"
         />
@@ -49,13 +66,13 @@
     <!-- 单词详情对话框 -->
     <el-dialog
         v-model="dialogVisible"
-        style="width: 80%;"
+        :width="isMobile ? undefined : 'min(640px, 80vw)'"
         title="单词详情"
     >
       <el-descriptions column="1" border>
         <el-descriptions-item label="意大利语">{{ selectedWord.it }}</el-descriptions-item>
         <el-descriptions-item label="详细释义">
-          <div v-html="formattedDescription"></div>  <!-- 使用 v-html 渲染 -->
+          <div v-html="formattedDescription"></div>
         </el-descriptions-item>
       </el-descriptions>
     </el-dialog>
@@ -65,6 +82,9 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { Search } from "@element-plus/icons-vue";
+import { useBreakpoint } from '@/composables/useBreakpoint';
+
+const { isMobile, isDesktop } = useBreakpoint();
 
 // 通过 props 接收父组件传入的词汇列表
 const props = defineProps({
@@ -150,16 +170,74 @@ watch(() => props.wordList, () => {
 
 <style scoped>
 .word-list-container {
-  padding-top: 10px;
+  padding-top: var(--space-3);
 }
+
+.search-input {
+  margin-bottom: var(--space-4);
+}
+
+.word-table {
+  width: 100%;
+}
+
 .pagination {
-  margin-top: 20px;
-  text-align: right;
+  margin-top: var(--space-4);
+  display: flex;
+  justify-content: flex-end;
 }
+
 .table-option {
-  display: flex; /* 启用flex布局 */
-  flex-wrap: wrap; /* 启用自动换行 */
-  justify-content: flex-start; /* 子项水平对齐方式 */
-  align-items: flex-start; /* 子项垂直对齐方式 */
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+/* ---------- Mobile cards ---------- */
+.word-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.word-empty {
+  padding: var(--space-12) var(--space-4);
+  text-align: center;
+  color: var(--color-text-tertiary);
+}
+
+.word-card {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.word-card-it {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  word-break: break-word;
+}
+
+.word-card-cn {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+
+.word-card-actions {
+  margin-top: var(--space-2);
+  display: flex;
+  gap: var(--space-2);
+}
+
+@media (max-width: 640px) {
+  .pagination {
+    justify-content: center;
+  }
 }
 </style>

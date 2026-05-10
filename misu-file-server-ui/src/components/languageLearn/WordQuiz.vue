@@ -41,7 +41,7 @@
     <!-- 单词详情对话框 -->
     <el-dialog
         v-model="dialogVisible"
-        style="width: 80%;"
+        :width="isMobile ? undefined : 'min(640px, 80vw)'"
         title="单词详情"
     >
       <el-descriptions column="1" border>
@@ -56,6 +56,9 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { useBreakpoint } from '@/composables/useBreakpoint'
+
+const { isMobile } = useBreakpoint()
 
 // 接收父组件传入的词库
 const props = defineProps({
@@ -133,51 +136,85 @@ const formattedDescription = computed(() => {
 
 <style scoped>
 .quiz-container {
-  padding-top: 10px;
+  padding-top: var(--space-3);
 }
 
 .card {
-  padding: 20px;
+  padding: var(--space-5);
   text-align: center;
 }
 
+@media (max-width: 640px) {
+  .card {
+    padding: var(--space-4) var(--space-3);
+  }
+}
+
 .word-display {
-  font-size: 26px;
-  margin: 20px 0;
-  font-weight: bold;
-  cursor: pointer; /* 鼠标悬停时变为手型 */
+  font-size: var(--font-size-2xl);
+  margin: var(--space-5) 0;
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  word-break: break-word;
 }
 
 .prompt-word {
-  color: #409eff;
+  color: var(--accent);
 }
 
 .action-buttons {
-  margin-top: 16px;
+  margin-top: var(--space-4);
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 10px;
+  gap: var(--space-2);
+}
+
+.action-buttons .el-button {
+  min-height: 44px;
+}
+
+@media (max-width: 640px) {
+  .action-buttons {
+    /* 三个按钮在 360 不挤压：等宽自适应 */
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-2);
+  }
+
+  .action-buttons .el-button {
+    margin-left: 0;
+    width: 100%;
+  }
 }
 
 .feedback {
-  margin-top: 20px;
-  font-size: 18px;
-  font-weight: bold;
+  margin-top: var(--space-5);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
 }
+
 .correct {
-  color: #67C23A;
+  color: var(--color-success);
 }
+
 .wrong {
-  color: #F56C6C;
+  color: var(--color-danger);
 }
+
 .mode-switch {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 .empty-message {
-  color: #f56c6c;
-  font-size: 18px;
-  font-weight: bold;
-  margin-top: 20px;
+  color: var(--color-danger);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  margin-top: var(--space-5);
+}
+
+/* 防 iOS 输入框缩放 */
+.quiz-container :deep(.el-input__inner) {
+  font-size: var(--font-size-md);
 }
 </style>
