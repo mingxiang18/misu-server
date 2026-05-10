@@ -76,6 +76,10 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
     @Value("${video.transcode.profile-version:hevc-aac-mp4-1080p-v1}")
     private String profileVersion;
 
+    /** Q8：转码队列总长上限（waiting + running）。新任务超限时返回 OVERLOADED 提示，不再 enqueue。 */
+    @Value("${video.transcode.maxQueueLength:50}")
+    private int maxQueueLength;
+
     @Override
     public VideoTranscodeStatusDto getOrCreateTranscodeStatus(File sourceFile) {
         VideoTranscodeStatusDto status = new VideoTranscodeStatusDto();
@@ -116,12 +120,45 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
             return status;
         }
 
+        // Q8：转码队列总长上限保护，超限不再 enqueue，避免被恶意用户灌满磁盘 / 长时间排队
+        if (transcodeQueueOverloaded()) {
+            status.setState(VideoTranscodeState.NONE);
+            status.setMessage("当前转码队列已满，请稍后再试");
+            fillDefaultPaths(sourceFile, status);
+            return status;
+        }
+
         enqueueTask(sourceFile);
         status.setState(VideoTranscodeState.WAITING);
         status.setMessage("等待转码");
         fillDefaultPaths(sourceFile, status);
         writeStatus(sourceFile, status);
         return status;
+    }
+
+    /**
+     * 判断 queue-dir（顶层 .task） + queue-dir/running 中文件总数是否触达上限。
+     */
+    private boolean transcodeQueueOverloaded() {
+        if (maxQueueLength <= 0) {
+            return false;
+        }
+        Path queueDirectory = getQueueDirectory();
+        long pending = countTaskFiles(queueDirectory);
+        long running = countTaskFiles(queueDirectory.resolve("running"));
+        return (pending + running) >= maxQueueLength;
+    }
+
+    private long countTaskFiles(Path directory) {
+        if (!Files.exists(directory) || !Files.isDirectory(directory)) {
+            return 0L;
+        }
+        try (Stream<Path> stream = Files.list(directory)) {
+            return stream.filter(p -> Files.isRegularFile(p) && p.getFileName().toString().endsWith(".task")).count();
+        } catch (IOException e) {
+            log.warn("统计转码队列长度失败，directory={}", directory, e);
+            return 0L;
+        }
     }
 
     @Override

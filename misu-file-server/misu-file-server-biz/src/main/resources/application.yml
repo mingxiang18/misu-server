@@ -18,6 +18,11 @@ file:
       # 每 10 分钟清理一次超时锁
       clean:
         cron: 0 */10 * * * ?
+    # Q3：扩展名黑名单，命中即拒绝；防止上传可执行 / 脚本类作 XSS / 分发跳板
+    blockedExtensions: exe,bat,cmd,com,scr,msi,sh,ps1,vbs,vbe,jse,wsf,wsh,hta,jar,reg
+    # Q8：单用户上传并发上限（permit 数）；抢不到 acquireTimeoutMillis 即报错
+    maxConcurrentPerUser: 8
+    acquireTimeoutMillis: 3000
   mapping:
     gc:
       # 每天 04:00 清理已逻辑删除且无有效映射引用的物理文件
@@ -40,6 +45,8 @@ video:
     preset: medium
     audio-bitrate: 128k
     profile-version: hevc-aac-mp4-1080p-v1
+    # Q8：转码队列总长（waiting + running）上限，超过则不再排队新任务
+    maxQueueLength: 50
 
 # Spring
 spring:

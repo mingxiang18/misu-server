@@ -76,8 +76,16 @@ public interface FileMappingRepository extends JpaRepository<FileMapping, Long> 
     long countUsedFiles(@Param("openType") Integer openType, @Param("userId") String userId);
 
     /**
-     * GC 流式扫描：仅处理已逻辑删除且过保留期的 mapping，避免一次性载入全表。
+     * GC 流式扫描：仅处理已逻辑删除且过保留期的 mapping（含 updateTime 为空时回落到 createTime），避免一次性载入全表。
      */
-    @Query("SELECT fm FROM FileMapping fm WHERE fm.deleted = true AND fm.updateTime <= :threshold")
+    @Query("SELECT fm FROM FileMapping fm "
+            + "WHERE fm.deleted = true "
+            + "AND COALESCE(fm.updateTime, fm.createTime) <= :threshold")
     Stream<FileMapping> streamDeletedBefore(@Param("threshold") LocalDateTime threshold);
+
+    /**
+     * GC 辅助：取所有未删除 mapping 的不重复 targetPath，避免遍历全表去过滤 active 引用集合。
+     */
+    @Query("SELECT DISTINCT fm.targetPath FROM FileMapping fm WHERE fm.deleted = false AND fm.targetPath <> ''")
+    List<String> findDistinctActiveTargetPaths();
 }

@@ -11,9 +11,11 @@ import com.misu.fileServer.domain.entity.FileMapping;
 import com.misu.fileServer.repository.FileMappingRepository;
 import com.misu.fileServer.service.FileService;
 import com.misu.fileServer.service.PreviewService;
+import com.misu.fileServer.service.UploadConcurrencyGuard;
 import com.misu.fileServer.service.VideoTranscodeService;
 import com.misu.fileServer.util.FilePathGuard;
 import com.misu.fileServer.util.FileTypeUtils;
+import com.misu.fileServer.util.UploadExtensionGuard;
 import com.misu.security.constant.UserRole;
 import com.misu.security.utils.AuthorityUtil;
 import com.misu.security.dto.LoginUser;
@@ -102,6 +104,12 @@ public class FileServiceImpl implements FileService {
 
     @Resource
     private ThreadPoolTaskExecutor fileExecutor;
+
+    @Resource
+    private UploadExtensionGuard uploadExtensionGuard;
+
+    @Resource
+    private UploadConcurrencyGuard uploadConcurrencyGuard;
 
     private final AtomicBoolean backfillRunning = new AtomicBoolean(false);
     private volatile LocalDateTime backfillStartTime;
@@ -369,6 +377,8 @@ public class FileServiceImpl implements FileService {
         checkUploadChunk(fileUploadRequest);
         LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
         String fileName = FilePathGuard.normalizeFileName(fileUploadRequest.getFileName());
+        // Q3：上传扩展名黑名单校验，拒绝可执行 / 脚本类危险类型
+        uploadExtensionGuard.requireSafeForUpload(fileName);
         String relativePath = FilePathGuard.normalizeRelativePath(fileUploadRequest.getFilePath(), true);
         String virtualPath = StringUtils.isBlank(relativePath) ? fileName : relativePath + "/" + fileName;
         String mappingUserId = getMappingUserId(fileUploadRequest.getOpenType(), loginUser.getUserId().toString());
@@ -387,6 +397,8 @@ public class FileServiceImpl implements FileService {
         String fileMD5 = DigestUtils.md5Hex(fileUploadRequest.getOpenType() + ":" + mappingUserId + ":" + virtualPath);
         //上传文件
         boolean mergeCompleted = false;
+        // Q8：单用户上传并发限流，防止恶意并发耗尽 IO / 文件句柄
+        try (UploadConcurrencyGuard.Releaser ignored = uploadConcurrencyGuard.acquire(mappingUserId)) {
         try {
             Object lock = uploadMergeLocks.computeIfAbsent(fileMD5, k -> new Object());
             uploadMergeLockAccessTime.put(fileMD5, System.currentTimeMillis());
@@ -414,6 +426,8 @@ public class FileServiceImpl implements FileService {
                     mergeCompleted = true;
                 }
             }
+        }catch (ServiceException se) {
+            throw se;
         }catch (Exception e) {
             log.error("上传文件异常", e);
             //遍历删除分片
@@ -434,6 +448,7 @@ public class FileServiceImpl implements FileService {
                 uploadMergeLockAccessTime.remove(fileMD5);
             }
         }
+        } // end uploadConcurrencyGuard try-with-resources
 
         return new FileUploadResponse(1, "上传成功");
     }
@@ -458,21 +473,19 @@ public class FileServiceImpl implements FileService {
     }
 
     // 合并所有分片
+    // Q2：分片输入流改 try-with-resources，避免循环中途异常导致 N-1 个分片句柄泄漏。
     private void mergeChunks(File file, String fileMD5, int totalChunks) throws IOException {
-        try (FileOutputStream fileOutputStream = new FileOutputStream(file);) {
+        try (FileOutputStream fileOutputStream = new FileOutputStream(file)) {
             for (int i = 0; i < totalChunks; i++) {
-                // 分片文件
                 File chunkFile = new File(fileServerPath + TMP_DIRECTORY + fileMD5 + ".part" + i);
-                FileInputStream chunkInputStream = new FileInputStream(chunkFile);
-
-                byte[] buffer = new byte[4096];
-                int bytesRead;
-                while ((bytesRead = chunkInputStream.read(buffer)) != -1) {
-                    fileOutputStream.write(buffer, 0, bytesRead);
+                try (FileInputStream chunkInputStream = new FileInputStream(chunkFile)) {
+                    byte[] buffer = new byte[4096];
+                    int bytesRead;
+                    while ((bytesRead = chunkInputStream.read(buffer)) != -1) {
+                        fileOutputStream.write(buffer, 0, bytesRead);
+                    }
                 }
-
-                chunkInputStream.close();
-                chunkFile.delete();  // 删除分片文件
+                chunkFile.delete();
             }
         }
     }
@@ -1191,40 +1204,30 @@ public class FileServiceImpl implements FileService {
 
     /**
      * 清理已逻辑删除且无有效映射引用的物理文件。
+     *
+     * <p>Q1：原实现 findAll() 一次性把全表载入堆，规模上来后 GC 抖动 / OOM 风险高。
+     * 改为：(a) 仅取所有 active mapping 的不重复 targetPath（按引用集合）；
+     * (b) 用 streamDeletedBefore 流式扫描"已删 + 过保留期"候选，逐条处理。
+     * 仅遍历真正需要 GC 的子集，并保留原本的"被 active 引用就跳过"语义。</p>
      */
     @Scheduled(cron = "${file.mapping.gc.cron:0 0 4 * * ?}")
     @Transactional("fileServerTransactionManager")
     public void cleanDeletedFileMappings() {
         LocalDateTime threshold = LocalDateTime.now().minusDays(Math.max(0, fileMappingGcRetentionDays));
-        List<FileMapping> allMappings = fileMappingRepository.findAll();
-        Set<String> activeTargetPaths = allMappings.stream()
-                .filter(one -> !Boolean.TRUE.equals(one.getDeleted()))
-                .map(FileMapping::getTargetPath)
-                .filter(StringUtils::isNotBlank)
-                .collect(Collectors.toSet());
-
-        for (FileMapping mapping : allMappings) {
-            if (!Boolean.TRUE.equals(mapping.getDeleted())) {
-                continue;
-            }
-            LocalDateTime updateTime = mapping.getUpdateTime() != null ? mapping.getUpdateTime() : mapping.getCreateTime();
-            if (updateTime != null && updateTime.isAfter(threshold)) {
-                continue;
-            }
-            String targetPath = mapping.getTargetPath();
-            if (StringUtils.isBlank(targetPath) || activeTargetPaths.contains(targetPath)) {
-                continue;
-            }
-
-            File target = Path.of(targetPath).toFile();
-            if (target.exists()) {
-                boolean deleted = deletePhysicalRecursively(target);
-                if (!deleted) {
-                    log.warn("物理文件清理失败，id={}, targetPath={}", mapping.getId(), targetPath);
-                    continue;
+        Set<String> activeTargetPaths = new HashSet<>(fileMappingRepository.findDistinctActiveTargetPaths());
+        try (Stream<FileMapping> deletedStream = fileMappingRepository.streamDeletedBefore(threshold)) {
+            deletedStream.forEach(mapping -> {
+                String targetPath = mapping.getTargetPath();
+                if (StringUtils.isBlank(targetPath) || activeTargetPaths.contains(targetPath)) {
+                    return;
                 }
-            }
-            fileMappingRepository.delete(mapping);
+                File target = Path.of(targetPath).toFile();
+                if (target.exists() && !deletePhysicalRecursively(target)) {
+                    log.warn("物理文件清理失败，id={}, targetPath={}", mapping.getId(), targetPath);
+                    return;
+                }
+                fileMappingRepository.delete(mapping);
+            });
         }
     }
 
