@@ -1790,6 +1790,53 @@ public class FileServiceImpl implements FileService {
     }
 
     @Override
+    public UploadStatusResponseDto getUploadStatus(Integer openType, String fileName, String filePath, Integer totalChunks) {
+        if (openType == null) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不能为空");
+        }
+        LoginUser loginUser = LoginMessageUtil.getLoginUser()
+                .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
+        String normalizedName = FilePathGuard.normalizeFileName(fileName);
+        String relativePath = FilePathGuard.normalizeRelativePath(StringUtils.defaultString(filePath), true);
+        String virtualPath = StringUtils.isBlank(relativePath) ? normalizedName : relativePath + "/" + normalizedName;
+        String mappingUserId = getMappingUserId(openType, loginUser.getUserId().toString());
+        String fileMD5 = DigestUtils.md5Hex(openType + ":" + mappingUserId + ":" + virtualPath);
+
+        File tmpDir = new File(fileServerPath + TMP_DIRECTORY);
+        List<Integer> uploaded = new ArrayList<>();
+        if (tmpDir.exists() && tmpDir.isDirectory()) {
+            File[] parts = tmpDir.listFiles((dir, name) -> name.startsWith(fileMD5 + ".part"));
+            if (parts != null) {
+                String prefix = fileMD5 + ".part";
+                for (File p : parts) {
+                    String tail = p.getName().substring(prefix.length());
+                    try {
+                        uploaded.add(Integer.parseInt(tail));
+                    } catch (NumberFormatException ignored) {
+                        // 不是合法分片名，跳过
+                    }
+                }
+            }
+        }
+        Collections.sort(uploaded);
+
+        UploadStatusResponseDto dto = new UploadStatusResponseDto();
+        dto.setUploadedChunks(uploaded);
+        dto.setVirtualPath(virtualPath);
+        if (totalChunks != null && totalChunks > 0 && uploaded.size() >= totalChunks) {
+            // 校验是否每一片都齐全
+            boolean allHere = true;
+            for (int i = 0; i < totalChunks; i++) {
+                if (!uploaded.contains(i)) { allHere = false; break; }
+            }
+            dto.setAllUploaded(allHere);
+        } else {
+            dto.setAllUploaded(false);
+        }
+        return dto;
+    }
+
+    @Override
     @Transactional("fileServerTransactionManager")
     public HashUploadCheckResponseDto checkUploadByHash(HashUploadCheckRequestDto request) {
         checkPublicWriteAuthority(request.getOpenType());

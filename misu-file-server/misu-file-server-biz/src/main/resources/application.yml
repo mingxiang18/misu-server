@@ -59,3 +59,21 @@ spring:
   profiles:
     # 环境配置
     active: local
+
+# Q5 可观测：暴露 actuator + Prometheus 抓取端点
+# actuator 跑在独立端口（30362）避免与 misu-security PermitAllUrlProperties
+# 拿 RequestMappingHandlerMapping 时和业务 servlet context 的 mapping 冲突。
+management:
+  server:
+    port: 30362
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}

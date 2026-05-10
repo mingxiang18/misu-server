@@ -54,6 +54,8 @@ public class SecurityConfiguration {
                 // 设置auth的url为放行白名单
                 permitAllUrl.getUrls().forEach(url -> auth.requestMatchers(url).permitAll());
                 auth.requestMatchers("/videoRoom/ws/**").permitAll();
+                // Q5：放开 Spring Boot Actuator 健康检查 / Prometheus 指标抓取（生产由网络层做内网限制）
+                auth.requestMatchers("/actuator/**").permitAll();
                 auth.anyRequest().authenticated();
             })
             // 使用无状态session，即不使用session缓存数据

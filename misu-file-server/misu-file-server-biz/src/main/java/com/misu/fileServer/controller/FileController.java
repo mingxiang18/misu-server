@@ -1,6 +1,8 @@
 package com.misu.fileServer.controller;
 
 import com.misu.common.domain.AjaxResult;
+import com.misu.fileServer.audit.AuditAction;
+import com.misu.fileServer.audit.Audited;
 import com.misu.fileServer.domain.dto.BatchFileRequestDto;
 import com.misu.fileServer.domain.dto.FileDownloadRequestDto;
 import com.misu.fileServer.domain.dto.FileRenameRequestDto;
@@ -115,6 +117,7 @@ public class FileController {
      */
     @PostMapping({"/uploadFile"})
     @ApiOperation(value="上传文件")
+    @Audited(AuditAction.UPLOAD_FILE)
     public AjaxResult uploadFile(@Valid FileUploadRequest fileUploadRequest) {
         return AjaxResult.success(fileService.uploadFile(fileUploadRequest));
     }
@@ -124,6 +127,7 @@ public class FileController {
      */
     @PostMapping({"/createDirectory"})
     @ApiOperation(value="创建文件目录")
+    @Audited(AuditAction.CREATE_DIR)
     public AjaxResult createDirectory(@Valid @RequestBody FileRequestDto fileRequestDto) {
         return AjaxResult.success(fileService.createDirectory(fileRequestDto));
     }
@@ -133,6 +137,9 @@ public class FileController {
      */
     @PostMapping({"/moveFile"})
     @ApiOperation(value="移动文件（包含重命名）")
+    @Audited(value = AuditAction.MOVE_FILE,
+            openTypeExpr = "#fileRenameRequestDto.openType",
+            virtualPathExpr = "#fileRenameRequestDto.originFilePath")
     public AjaxResult moveFile(@Valid @RequestBody FileRenameRequestDto fileRenameRequestDto) {
         fileService.moveFile(fileRenameRequestDto);
         return AjaxResult.success();
@@ -143,6 +150,8 @@ public class FileController {
      */
     @PostMapping({"/sharePrivateFileToPublic"})
     @ApiOperation(value="将私人目录文件共享到公共目录")
+    @Audited(value = AuditAction.SHARE_TO_PUBLIC,
+            virtualPathExpr = "#requestDto.sourceFilePath")
     public AjaxResult sharePrivateFileToPublic(@Valid @RequestBody SharePrivateFileToPublicRequestDto requestDto) {
         fileService.sharePrivateFileToPublic(requestDto);
         return AjaxResult.success();
@@ -153,6 +162,7 @@ public class FileController {
      */
     @PostMapping({"/deleteFile"})
     @ApiOperation(value="删除文件")
+    @Audited(AuditAction.DELETE_FILE)
     public AjaxResult deleteFile(@Valid @RequestBody FileRequestDto fileRequestDto) {
         return AjaxResult.success(fileService.deleteFile(fileRequestDto));
     }
@@ -184,6 +194,7 @@ public class FileController {
      */
     @PostMapping({"/restoreTrash"})
     @ApiOperation(value="从回收站还原")
+    @Audited(AuditAction.RESTORE_TRASH)
     public AjaxResult restoreTrash(@RequestBody Map<String, Object> body) {
         Object idValue = body == null ? null : body.get("id");
         Long id = parseLongOrThrow(idValue);
@@ -196,6 +207,7 @@ public class FileController {
      */
     @PostMapping({"/purgeTrash"})
     @ApiOperation(value="永久删除回收站中的某项")
+    @Audited(AuditAction.PURGE_TRASH)
     public AjaxResult purgeTrash(@RequestBody Map<String, Object> body) {
         Object idValue = body == null ? null : body.get("id");
         Long id = parseLongOrThrow(idValue);
@@ -220,6 +232,7 @@ public class FileController {
      */
     @PostMapping({"/batchDelete"})
     @ApiOperation(value="批量删除")
+    @Audited(value = AuditAction.BATCH_DELETE, openTypeExpr = "#request.openType")
     public AjaxResult batchDelete(@Valid @RequestBody BatchFileRequestDto request) {
         return AjaxResult.success(fileService.batchDelete(request));
     }
@@ -229,6 +242,8 @@ public class FileController {
      */
     @PostMapping({"/batchMove"})
     @ApiOperation(value="批量移动")
+    @Audited(value = AuditAction.BATCH_MOVE, openTypeExpr = "#request.openType",
+            virtualPathExpr = "#request.targetParentPath")
     public AjaxResult batchMove(@Valid @RequestBody BatchFileRequestDto request) {
         return AjaxResult.success(fileService.batchMove(request));
     }
@@ -258,7 +273,23 @@ public class FileController {
      */
     @PostMapping({"/checkUploadByHash"})
     @ApiOperation(value="哈希秒传校验")
+    @Audited(value = AuditAction.HASH_INSTANT_UPLOAD,
+            openTypeExpr = "#request.openType",
+            virtualPathExpr = "#request.filePath + '/' + #request.fileName")
     public AjaxResult checkUploadByHash(@Valid @RequestBody HashUploadCheckRequestDto request) {
         return AjaxResult.success(fileService.checkUploadByHash(request));
+    }
+
+    /**
+     * 续传探测：返回已经落盘的分片索引；前端可据此跳过已传分片。
+     */
+    @GetMapping({"/getUploadStatus"})
+    @ApiOperation(value="续传探测")
+    public AjaxResult getUploadStatus(
+            @RequestParam("openType") @NotNull(message = "文件公开类型不能为空") Integer openType,
+            @RequestParam("fileName") @jakarta.validation.constraints.NotBlank(message = "文件名不能为空") String fileName,
+            @RequestParam(value = "filePath", required = false) String filePath,
+            @RequestParam(value = "totalChunks", required = false) Integer totalChunks) {
+        return AjaxResult.success(fileService.getUploadStatus(openType, fileName, filePath, totalChunks));
     }
 }

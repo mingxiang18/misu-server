@@ -27,6 +27,8 @@ public class FileTypeUtils {
                 return FileType.IMAGE_FILE;
             }else if (mimeType.startsWith("video/")) {
                 return FileType.VIDEO_FILE;
+            }else if ("application/pdf".equals(mimeType)) {
+                return FileType.DOCUMENT_FILE;
             }else {
                 return FileType.OTHER_FILE;
             }

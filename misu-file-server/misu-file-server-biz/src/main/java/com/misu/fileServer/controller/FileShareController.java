@@ -1,6 +1,8 @@
 package com.misu.fileServer.controller;
 
 import com.misu.common.domain.AjaxResult;
+import com.misu.fileServer.audit.AuditAction;
+import com.misu.fileServer.audit.Audited;
 import com.misu.fileServer.domain.dto.CreateShareRequestDto;
 import com.misu.fileServer.service.FileShareService;
 import com.misu.security.annotation.Anonymous;
@@ -32,6 +34,9 @@ public class FileShareController {
 
     @PostMapping({"/create"})
     @ApiOperation(value="创建外链分享")
+    @Audited(value = AuditAction.SHARE_CREATE,
+            openTypeExpr = "#request.openType",
+            virtualPathExpr = "#request.filePath")
     public AjaxResult create(@Valid @RequestBody CreateShareRequestDto request) {
         return AjaxResult.success(fileShareService.createShare(request));
     }
@@ -45,6 +50,7 @@ public class FileShareController {
 
     @PostMapping({"/revoke"})
     @ApiOperation(value="撤销分享")
+    @Audited(AuditAction.SHARE_REVOKE)
     public AjaxResult revoke(@RequestBody Map<String, Object> body) {
         Object idValue = body == null ? null : body.get("id");
         if (idValue == null) {

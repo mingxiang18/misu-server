@@ -151,4 +151,9 @@ public interface FileService {
      * 哈希秒传校验：命中则直接落 mapping 复用底层物理文件，不命中再走完整分片上传。
      */
     HashUploadCheckResponseDto checkUploadByHash(HashUploadCheckRequestDto request);
+
+    /**
+     * 续传探测：返回已经落盘的分片索引；前端可据此跳过已传分片。
+     */
+    UploadStatusResponseDto getUploadStatus(Integer openType, String fileName, String filePath, Integer totalChunks);
 }
