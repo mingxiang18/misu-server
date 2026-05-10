@@ -16,6 +16,7 @@
 <script setup>
 import { onMounted, onBeforeUnmount, ref } from "vue";
 import flvjs from "flv.js";
+import logger from '@/utils/logger';
 
 // 接收外部传入的接口函数
 const props = defineProps({
@@ -49,10 +50,10 @@ onMounted(() => {
       flvPlayer.attachMediaElement(videoRef.value);
       flvPlayer.load();
       flvPlayer.play().catch((error) => {
-        console.error("Error playing FLV stream:", error);
+        logger.error("Error playing FLV stream:", error);
       });
     } else {
-      console.error("FLV.js is not supported in this browser.");
+      logger.error("FLV.js is not supported in this browser.");
     }
   }
 });
@@ -94,20 +95,35 @@ defineExpose({
 <style scoped>
 .fullscreen-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
+  inset: 0;
   width: 100vw;
   height: 100svh;
+  height: 100dvh;
+  padding: var(--space-4);
+  padding-top: max(var(--space-4), env(safe-area-inset-top));
+  padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
   background-color: rgba(0, 0, 0, 0.7);
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 9999; /* 保证它在最上层 */
+  z-index: var(--z-overlay);
 }
 
 .fullscreen-content {
-  max-width: 90%; /* 限制内容宽度 */
-  max-height: 90%; /* 限制内容高度 */
+  width: 100%;
+  max-width: min(90vw, 1200px);
+  max-height: 90vh;
+  max-height: 90dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
+.fullscreen-content video {
+  width: 100%;
+  height: auto;
+  max-height: 90vh;
+  max-height: 90dvh;
+  border-radius: var(--radius-md);
+}
 </style>

@@ -25,6 +25,29 @@
     </div>
 
     <div class="file-container" v-loading="fileListLoading">
+      <div
+          v-if="!fileListLoading && fileList.length === 0"
+          class="file-empty">
+        <el-icon class="file-empty-icon"><Folder /></el-icon>
+        <p class="file-empty-title">这个目录还是空的</p>
+        <p class="file-empty-hint">把文件拖到这里，或点击右下角按钮上传</p>
+        <el-button
+            v-if="isMobile"
+            type="primary"
+            size="large"
+            class="file-empty-cta"
+            @click="triggerMobileUpload">
+          上传文件
+        </el-button>
+        <el-button
+            v-else
+            type="primary"
+            size="default"
+            class="file-empty-cta"
+            @click="triggerDesktopUpload">
+          上传文件
+        </el-button>
+      </div>
       <el-container class="file-card" v-for="file in fileList" :key="file.filePath"
                     @contextmenu.prevent="showContextMenu($event, file)"
                     @touchstart="fileTouchStart($event, file)"
@@ -214,6 +237,7 @@ import { useBreakpoint } from '@/composables/useBreakpoint';
 import VideoViewer from '@/components/fileServer/VideoViewer.vue'
 import FileUpload from '@/components/fileServer/FileUpload.vue'
 import {ElMessage, ElMessageBox} from "element-plus";
+import logger from '@/utils/logger';
 import {
   getFileList,
   moveFile as moveFileApi,
@@ -271,6 +295,12 @@ const triggerMobileUpload = () => {
   if (mobileUploadTrigger.value) {
     mobileUploadTrigger.value.click();
   }
+};
+const triggerDesktopUpload = () => {
+  // el-upload 内部按钮的真实 input 在 .el-upload__input 上；用直接 click 即可触发文件选择
+  const root = fileUploadComponent.value?.$el || fileUploadComponent.value;
+  const input = root && root.querySelector ? root.querySelector('input[type="file"]') : null;
+  if (input) input.click();
 };
 const clearAllUploadComponents = () => {
   if (fileUploadComponent.value && fileUploadComponent.value.clearFiles) {
@@ -851,7 +881,7 @@ const handleDrop = (event) => {
   const files = event.dataTransfer.files;
   // 获取所有拖拽项
   const items = event.dataTransfer.items;
-  console.log("Dropped files:", files);
+  logger.debug("Dropped files:", files);
 
   if (files.length === 0) {
     ElMessage({ message: '不存在可上传的文件', type: 'warning' })
@@ -1037,6 +1067,45 @@ queryFileList();
   display: flex;
   gap: var(--space-2);
   flex-shrink: 0;
+}
+
+/* ---------- Empty state ---------- */
+.file-empty {
+  /* 让空态独占整个 grid，居中对齐 */
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-12) var(--space-4);
+  min-height: 320px;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.file-empty-icon {
+  font-size: 64px;
+  color: var(--color-border-strong);
+  margin-bottom: var(--space-2);
+}
+
+.file-empty-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.file-empty-hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.file-empty-cta {
+  margin-top: var(--space-4);
+  min-width: 160px;
 }
 
 /* ---------- Grid container ---------- */
