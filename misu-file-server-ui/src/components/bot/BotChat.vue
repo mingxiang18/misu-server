@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Service, Picture, Close, Promotion } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { getBotAccessToken, getServerWebSocketUrl } from '@/api/bot/bot'
+import logger from '@/utils/logger'
 
 /* ------------------ State ------------------ */
 const messages = ref([
@@ -116,11 +117,11 @@ const sendMessage = (message) => {
   })
   scrollToBottom()
 
-  if (socket) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message))
   } else {
-    closeSocket()
-    initSocket()
+    // 主动重连，告知用户
+    if (!reconnectAt.value) initSocket()
     messages.value.push({
       content: [{ data: '冥想bb已离线，正在重连中', type: 'text' }],
       isSelf: false
@@ -132,26 +133,69 @@ const sendMessage = (message) => {
   imageList.value = []
 }
 
-/* ------------------ Socket ------------------ */
+/* ------------------ Socket with exponential backoff ------------------ */
+const MAX_RECONNECT_ATTEMPTS = 5
+const RECONNECT_BASE_MS = 1000
+const reconnectAttempts = ref(0)
+const reconnectAt = ref(null) // 当前 setTimeout id（非 0 表示退避中）
+const reconnectExhausted = ref(false)
+let intentionalClose = false
+
 const initSocket = () => {
+  intentionalClose = false
   getServerWebSocketUrl().then((response) => {
     const socketUrl = response.data
     socket = new WebSocket(socketUrl)
 
     socket.onopen = () => {
-      console.log('bot WebSocket connected')
+      logger.info('bot WebSocket connected')
+      reconnectAttempts.value = 0
+      reconnectExhausted.value = false
       getBotAccessToken().then((response) => {
         botAccessToken.value = response.data
         socket.send(JSON.stringify({ type: 'auth', token: botAccessToken.value }))
       })
     }
     socket.onmessage = handleIncomingMessage
-    socket.onerror = (err) => console.error('bot WebSocket error:', err)
+    socket.onerror = (err) => logger.error('bot WebSocket error:', err)
     socket.onclose = () => {
-      console.log('bot WebSocket closed')
-      closeSocket()
+      logger.info('bot WebSocket closed')
+      socket = null
+      if (!intentionalClose) scheduleReconnect()
     }
+  }).catch((err) => {
+    logger.error('Failed to fetch bot WS url:', err)
+    if (!intentionalClose) scheduleReconnect()
   })
+}
+
+const scheduleReconnect = () => {
+  if (reconnectAttempts.value >= MAX_RECONNECT_ATTEMPTS) {
+    reconnectExhausted.value = true
+    messages.value.push({
+      content: [{ data: '多次重连失败，请点击下方"重新连接"再试一次', type: 'text' }],
+      isSelf: false
+    })
+    scrollToBottom()
+    return
+  }
+  // 1s, 2s, 4s, 8s, 16s
+  const delay = RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts.value)
+  reconnectAttempts.value += 1
+  reconnectAt.value = setTimeout(() => {
+    reconnectAt.value = null
+    initSocket()
+  }, delay)
+}
+
+const manualReconnect = () => {
+  reconnectAttempts.value = 0
+  reconnectExhausted.value = false
+  if (reconnectAt.value) {
+    clearTimeout(reconnectAt.value)
+    reconnectAt.value = null
+  }
+  initSocket()
 }
 
 const handleIncomingMessage = (event) => {
@@ -164,6 +208,11 @@ const handleIncomingMessage = (event) => {
 }
 
 const closeSocket = () => {
+  intentionalClose = true
+  if (reconnectAt.value) {
+    clearTimeout(reconnectAt.value)
+    reconnectAt.value = null
+  }
   if (socket) socket.close()
   socket = null
 }
@@ -224,6 +273,11 @@ onUnmounted(() => {
               @click="sendQuick(s)">
             {{ s }}
           </button>
+        </div>
+
+        <!-- 重连耗尽时的手动重试 -->
+        <div v-if="reconnectExhausted" class="bot-reconnect">
+          <button class="bot-chip bot-chip-warn" type="button" @click="manualReconnect">重新连接</button>
         </div>
       </div>
     </div>
@@ -405,6 +459,17 @@ onUnmounted(() => {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
   border-color: var(--color-border-strong);
+}
+
+.bot-chip-warn {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.bot-reconnect {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-3);
 }
 
 /* ---------- Input ---------- */
