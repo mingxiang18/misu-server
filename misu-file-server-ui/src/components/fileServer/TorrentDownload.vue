@@ -4,7 +4,7 @@
       <el-select
           v-model="torrentQueryParam.completeState"
           placeholder="完成状态"
-          style="width: 110px"
+          class="torrent-state-select"
           placement="bottom"
           clearable
           @change="getTorrentList()"
@@ -24,7 +24,7 @@
     </div>
   </div>
 
-  <div style="width: 100%; padding-top: 10px">
+  <div class="torrent-search">
     <el-input v-model="torrentQueryParam.keyword" @change="getTorrentList" placeholder="筛选关键字" clearable>
       <template #append>
         <el-button @click="getTorrentList" :icon="Search" />
@@ -156,8 +156,7 @@
 
   <el-dialog
       v-model="torrentDetailVisible"
-      title="磁力信息详情"
-      style="width: 90%;">
+      title="磁力信息详情">
     <div v-loading="torrentDetailLoading">
     <div class="torrent-detail-actions">
       <el-button type="primary" @click="refreshTorrentDetail">刷新状态</el-button>
@@ -188,8 +187,7 @@
 
   <el-dialog
       v-model="addTorrentVisible"
-      title="添加磁力链接"
-      style="width: 90%;">
+      title="添加磁力链接">
     <div v-loading="addTorrentLoading">
       <el-form :model="addTorrentInfo"
                ref="addTorrentFormRef"
@@ -583,40 +581,52 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .torrent-management-header {
-  display: flex; /* 使用 flexbox 排列子元素 */
-  justify-content: space-between; /* 左侧是路径，右侧是按钮区域 */
-  align-items: center; /* 垂直居中 */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .torrent-management-header-choose {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.torrent-state-select {
+  width: min(160px, 100%);
 }
 
 .torrent-management-header-actions {
-  display: flex; /* 用 flex 布局让按钮排成一行 */
-  gap: 10px; /* 按钮之间的间距 */
-  padding-left: 10px;
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.torrent-search {
+  width: 100%;
+  padding-top: var(--space-3);
 }
 
 .table-text {
   width: 100%;
-  display: -webkit-box; /* 使用多行文本框 */
-  -webkit-box-orient: vertical; /* 垂直排列 */
-  -webkit-line-clamp: 4; /* 限制最多显示 2 行 */
-  overflow: hidden; /* 隐藏超出文本 */
-  text-overflow: ellipsis; /* 超出部分显示省略号 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .table-option {
-  display: flex; /* 启用flex布局 */
-  flex-wrap: wrap; /* 启用自动换行 */
-  justify-content: flex-start; /* 子项水平对齐方式 */
-  align-items: flex-start; /* 子项垂直对齐方式 */
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
 }
 
 .torrent-table {
-  padding-top: 10px;
+  padding-top: var(--space-3);
 }
 
 .torrent-mobile-list {
@@ -624,36 +634,36 @@ onBeforeUnmount(() => {
 }
 
 .torrent-table-tail {
-  padding-top: 10px;
-  display: flex; /* 启用flex布局 */
-  flex-wrap: wrap; /* 启用自动换行 */
-  justify-content: flex-end; /* 子项水平对齐方式 */
+  padding-top: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .torrent-detail-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding-bottom: 10px;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .torrent-management-header {
     align-items: stretch;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--space-2);
   }
 
   .torrent-management-header-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    gap: var(--space-2);
     padding-left: 0;
   }
 
   .torrent-management-header-actions .el-button {
     margin-left: 0;
-    min-height: 36px;
+    min-height: 40px;
   }
 
   .torrent-management-header-actions .el-button:last-child {
@@ -666,43 +676,46 @@ onBeforeUnmount(() => {
 
   .torrent-mobile-list {
     display: grid;
-    gap: 10px;
-    padding-top: 10px;
+    gap: var(--space-3);
+    padding-top: var(--space-3);
   }
 
   .torrent-mobile-card {
-    border: 1px solid var(--el-border-color-light);
-    border-radius: 8px;
-    padding: 12px;
-    background: var(--el-bg-color);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    background: var(--color-bg-surface);
   }
 
   .mobile-card-title {
-    font-weight: 600;
-    line-height: 1.4;
+    font-weight: var(--font-weight-medium);
+    line-height: var(--line-height-tight);
     word-break: break-all;
+    color: var(--color-text-primary);
+    font-size: var(--font-size-sm);
   }
 
   .mobile-card-meta {
-    color: var(--el-text-color-secondary);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-xs);
     display: flex;
-    gap: 10px;
+    gap: var(--space-3);
     justify-content: space-between;
-    padding: 8px 0;
+    padding: var(--space-2) 0;
   }
 
   .mobile-card-path {
-    color: var(--el-text-color-secondary);
-    font-size: 12px;
-    padding-top: 8px;
+    color: var(--color-text-tertiary);
+    font-size: var(--font-size-xs);
+    padding-top: var(--space-2);
     word-break: break-all;
   }
 
   .mobile-card-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    padding-top: 8px;
+    gap: var(--space-2);
+    padding-top: var(--space-2);
   }
 
   .mobile-card-actions .el-button {

@@ -4,7 +4,7 @@
       <el-select
           v-model="rssQueryParam.state"
           placeholder="是否可用"
-          style="width: 110px"
+          class="rss-state-select"
           placement="bottom"
           clearable
           @change="getRssInfoList()"
@@ -18,11 +18,11 @@
       </el-select>
     </div>
     <div class="rss-management-header-actions">
-      <el-button type="primary" @click="addRssInfoVisible = true">添加rss订阅</el-button>
+      <el-button type="primary" @click="addRssInfoVisible = true">{{ isMobile ? '添加订阅' : '添加rss订阅' }}</el-button>
     </div>
   </div>
 
-  <div style="width: 100%; padding-top: 10px">
+  <div class="rss-search">
     <el-input v-model="rssQueryParam.keyword" @change="getRssInfoList" placeholder="筛选关键字" clearable>
       <template #append>
         <el-button @click="getRssInfoList" :icon="Search" />
@@ -30,7 +30,8 @@
     </el-input>
   </div>
 
-  <div class="rss-table">
+  <!-- 桌面端：表格 -->
+  <div v-if="isDesktop" class="rss-table">
     <el-table v-loading="getRssInfoListLoading"
               :data="rssInfoList.list"
               style="width: 100%">
@@ -87,10 +88,39 @@
     </div>
   </div>
 
+  <!-- 移动端：卡片 -->
+  <div v-else class="rss-cards" v-loading="getRssInfoListLoading">
+    <div v-if="!getRssInfoListLoading && (!rssInfoList.list || rssInfoList.list.length === 0)" class="rss-empty">
+      暂无订阅
+    </div>
+    <article v-for="rss in rssInfoList.list" :key="rss.rssId" class="rss-card">
+      <header class="rss-card-header">
+        <h3 class="rss-card-title">{{ rss.rssName }}</h3>
+        <span class="rss-card-state" :class="`rss-card-state-${rss.state}`">{{ formatRssState(rss.state) }}</span>
+      </header>
+      <p class="rss-card-meta">下载到：{{ rss.downloadPath }}</p>
+      <p class="rss-card-url">{{ rss.rssUrl }}</p>
+      <footer class="rss-card-actions">
+        <el-button link type="primary" @click="openRssTorrentListDialog(rss)">详情</el-button>
+        <el-button link type="primary" @click="openRssInfoDialog(rss)">修改</el-button>
+        <el-button link type="danger" @click="deleteRss(rss)">删除</el-button>
+      </footer>
+    </article>
+    <div v-if="rssInfoList.total > rssQueryParam.pageSize" class="rss-cards-tail">
+      <el-pagination background
+                     small
+                     layout="prev, pager, next"
+                     v-model:current-page="rssQueryParam.pageNum"
+                     v-model:page-size="rssQueryParam.pageSize"
+                     :total="rssInfoList.total"
+                     :pager-count="5"
+                     @change="getRssInfoList()"/>
+    </div>
+  </div>
+
   <el-dialog
       v-model="addRssInfoVisible"
-      title="添加rss订阅"
-      style="width: 90%;">
+      title="添加rss订阅">
     <div v-loading="addRssLoading">
       <el-form :model="addRssInfo"
                ref="addRssFormRef"
@@ -122,8 +152,7 @@
 
   <el-dialog
       v-model="updateRssVisible"
-      title="修改rss订阅"
-      style="width: 90%;">
+      title="修改rss订阅">
     <el-form :model="updateRssInfo"
              v-loading="updateRssLoading"
              ref="updateRssFormRef"
@@ -165,7 +194,8 @@
       v-model="rssDetailVisible"
       v-if="rssDetailVisible"
       title="rss订阅详情"
-      style="width: 95%;">
+      :width="isMobile ? undefined : '92%'"
+      :fullscreen="isMobile">
       <rss-torrent-detail
           :rss-info="rssDetailSelect" />
   </el-dialog>
@@ -184,6 +214,9 @@ import FilePathSelector from "@/components/fileServer/FilePathSelector.vue";
 import RssTorrentDetail from "@/components/fileServer/RssTorrentDetail.vue";
 import {QuestionFilled, Search} from "@element-plus/icons-vue";
 import FileUpload from "@/components/fileServer/FileUpload.vue";
+import { useBreakpoint } from '@/composables/useBreakpoint';
+
+const { isMobile, isDesktop } = useBreakpoint();
 
 const rssStateOption = ref([
   {label: "未知", value: 0},
@@ -353,47 +386,146 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .rss-management-header {
-  display: flex; /* 使用 flexbox 排列子元素 */
-  justify-content: space-between; /* 左侧是路径，右侧是按钮区域 */
-  align-items: center; /* 垂直居中 */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .rss-management-header-choose {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rss-state-select {
+  width: min(160px, 100%);
 }
 
 .rss-management-header-actions {
-  display: flex; /* 用 flex 布局让按钮排成一行 */
-  gap: 10px; /* 按钮之间的间距 */
-  padding-left: 10px;
-  padding-right: 10px;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.rss-search {
+  width: 100%;
+  padding-top: var(--space-3);
 }
 
 .table-text {
   width: 100%;
-  display: -webkit-box; /* 使用多行文本框 */
-  -webkit-box-orient: vertical; /* 垂直排列 */
-  -webkit-line-clamp: 4; /* 限制最多显示 2 行 */
-  overflow: hidden; /* 隐藏超出文本 */
-  text-overflow: ellipsis; /* 超出部分显示省略号 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .table-option {
-  display: flex; /* 启用flex布局 */
-  flex-wrap: wrap; /* 启用自动换行 */
-  justify-content: flex-start; /* 子项水平对齐方式 */
-  align-items: flex-start; /* 子项垂直对齐方式 */
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
 }
 
 .rss-table {
-  padding-top: 10px;
+  padding-top: var(--space-3);
 }
 
 .rss-table-tail {
-  padding-top: 10px;
-  display: flex; /* 启用flex布局 */
-  flex-wrap: wrap; /* 启用自动换行 */
-  justify-content: flex-end; /* 子项水平对齐方式 */
+  padding-top: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ---------- Mobile cards ---------- */
+.rss-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+
+.rss-empty {
+  padding: var(--space-12) var(--space-4);
+  text-align: center;
+  color: var(--color-text-tertiary);
+}
+
+.rss-card {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.rss-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.rss-card-title {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  word-break: break-all;
+  flex: 1 1 auto;
+}
+
+.rss-card-state {
+  flex-shrink: 0;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  background: var(--color-bg-muted);
+  color: var(--color-text-secondary);
+}
+
+.rss-card-state-1 {
+  background: var(--color-success-soft, #e7f0d6);
+  color: var(--color-success);
+}
+
+.rss-card-state-99 {
+  background: var(--color-danger-soft, #fbe2dc);
+  color: var(--color-danger);
+}
+
+.rss-card-meta {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.rss-card-url {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  word-break: break-all;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.rss-card-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}
+
+.rss-cards-tail {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-3);
 }
 </style>
