@@ -1,0 +1,104 @@
+# Nacos 配置：dataId = misu-file-server-local.yml, namespace = local, group = DEFAULT_GROUP
+# 由 ./dev.sh seed-nacos 推送到本机 Nacos
+# 仅供本地开发，账号密码均为弱口令
+
+logging:
+  level:
+    ROOT: INFO
+    com.misu: DEBUG
+
+server:
+  servlet:
+    context-path: /fileServer
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+
+  datasource:
+    file-server:
+      type: com.zaxxer.hikari.HikariDataSource
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      url: jdbc:mysql://127.0.0.1:3316/misu_file_server?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowMultiQueries=true&useSSL=false
+      username: root
+      password: root
+      hikari:
+        maximum-pool-size: 8
+        minimum-idle: 2
+
+  jpa:
+    show-sql: false
+    open-in-view: false
+    hibernate:
+      # 本地 dev：自动 update 建表 / 加列
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+
+# JWT —— 必须与 misu-account 一致
+token:
+  header: Authorization
+  cookieName: User-Token
+  expireTtl: 86400000
+  refreshExpireTtl: 2592000000
+  secret: vDW2/YL5VGg3wAub8ohhz2l+OUjtYa1k4twm4nNNzAY=
+
+misu:
+  static:
+    path: ${user.home}/.misu-dev/files/
+
+# 文件存储路径（程序运行时会自动创建子目录 transcode/preview/...）
+file-server:
+  path: ${user.home}/.misu-dev/files/file-server/
+  qBitTorrent:
+    remoteEnable: false
+    apiBaseUrl: http://127.0.0.1:30103
+    username: admin
+    password: ""
+    localPath: ${user.home}/.misu-dev/files/torrents/
+    remoteDownloadPath: /downloads
+
+# 视频转码（本地 dev 默认开启，需要 ffmpeg 在 PATH 中；不需要可关掉）
+video:
+  transcode:
+    enabled: false
+    max-bytes: 1610612736
+    queue-dir: ${file-server.path}transcode-queue
+    status-dir: ${file-server.path}transcode-status
+    transcode-dir: ${file-server.path}transcode
+    preview-dir: ${file-server.path}preview/video
+    max-height: 1080
+    crf: 28
+    preset: medium
+    audio-bitrate: 128k
+    profile-version: hevc-aac-mp4-1080p-v1
+
+# 文件下载/上传/映射 GC（沿用 application.yml 默认值）
+file:
+  download:
+    directory:
+      maxBytes: 209715200
+      maxFiles: 1000
+  upload:
+    lock:
+      expireMillis: 1800000
+      clean:
+        cron: 0 */10 * * * ?
+  mapping:
+    gc:
+      cron: 0 0 4 * * ?
+      retentionDays: 7
+
+# 文件客户端：本地文件系统
+fileClient:
+  type: local
+
+# 业务线程池
+fileServer:
+  corePoolSize: 5
+  maxPoolSize: 10
+  queueCapacity: 1000

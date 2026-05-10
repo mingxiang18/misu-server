@@ -36,3 +36,11 @@ electron-dist/
 
 # Environment-local overrides
 *.local
+
+# Local dev runtime（dev.sh 产生的 PID / 日志 / 文件存储）
+/.dev/
+/.misu-dev/
+
+# AI workflow scaffolding & Claude Code 本地缓存（不入库）
+/.ai-workflow/
+/.claude/

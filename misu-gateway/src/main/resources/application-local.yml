@@ -4,9 +4,12 @@ spring:
     import: optional:nacos:misu-gateway-local.yml
   cloud:
     nacos:
+      # 本地开发：指向 dev.sh 启动的本机 Nacos 容器
+      username: nacos
+      password: nacos
       discovery:
         # 服务注册地址
-        server-addr: 10.8.0.22:8848
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
         # 命名空间
         namespace: local
         # 组名
@@ -17,7 +20,7 @@ spring:
         import-check:
           enabled: false
         # 配置中心地址
-        server-addr: 10.8.0.22:8848
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
         # 命名空间
         namespace: local
         # 组名
@@ -54,27 +57,24 @@ spring:
                 allowCredentials: true
                 maxAge: 3600
 
+    # 本地开发禁用 Sentinel transport（不起 dashboard 容器）
+    # 如需启用：把 enabled 改为 true，启动 Sentinel dashboard 容器，并恢复下方 transport / datasource 配置
     sentinel:
-      enabled: true
-      # 取消控制台懒加载
-      eager: true
-      transport:
-        # 控制台地址
-        dashboard: 10.8.0.22:8858
-        # 跟sentinel控制台交流的端口，随意指定一个未使用的端口即可，默认是8719
-        port: 30270
-        # Get heartbeat client local ip
-        clientIp: 10.8.0.18
-      # nacos配置持久化
-      datasource:
-        ds1:
-          nacos:
-            server-addr: 10.8.0.22:8848
-            dataId: sentinel-misu-gateway-local.json
-            namespace: local
-            groupId: DEFAULT_GROUP
-            data-type: json
-            rule-type: flow
+      enabled: false
+      eager: false
+#      transport:
+#        dashboard: localhost:8858
+#        port: 30270
+#        clientIp: 127.0.0.1
+#      datasource:
+#        ds1:
+#          nacos:
+#            server-addr: localhost:8848
+#            dataId: sentinel-misu-gateway-local.json
+#            namespace: local
+#            groupId: DEFAULT_GROUP
+#            data-type: json
+#            rule-type: flow
       scg:
         fallback:
           response-status: 429
