@@ -1,0 +1,9 @@
+# Nacos 配置：dataId = misu-gateway-local.yml, namespace = local, group = DEFAULT_GROUP
+# 由 ./dev.sh seed-nacos 推送到本机 Nacos
+# 网关 routes 已在 application-local.yml 中给出，本配置只放可热更新的内容
+
+logging:
+  level:
+    ROOT: INFO
+    com.misu: DEBUG
+    org.springframework.cloud.gateway: INFO

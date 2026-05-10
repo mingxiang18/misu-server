@@ -4,9 +4,12 @@ spring:
     import: optional:nacos:misu-file-server-local.yml
   cloud:
     nacos:
+      # 本地开发：指向 dev.sh 启动的本机 Nacos 容器
+      username: nacos
+      password: nacos
       discovery:
         # 服务注册地址
-        server-addr: 10.8.0.22:8848
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
         # 命名空间
         namespace: local
         # 组名
@@ -17,7 +20,7 @@ spring:
         import-check:
           enabled: false
         # 配置中心地址
-        server-addr: 10.8.0.22:8848
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
         # 命名空间
         namespace: local
         # 组名

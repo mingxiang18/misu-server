@@ -1,0 +1,60 @@
+# Nacos 配置：dataId = misu-account-local.yml, namespace = local, group = DEFAULT_GROUP
+# 由 ./dev.sh seed-nacos 推送到本机 Nacos
+# 仅供本地开发，账号密码均为弱口令
+
+logging:
+  level:
+    ROOT: INFO
+    com.misu: DEBUG
+
+server:
+  servlet:
+    context-path: /account
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+  datasource:
+    account:
+      type: com.zaxxer.hikari.HikariDataSource
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      url: jdbc:mysql://127.0.0.1:3316/misu_account?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowMultiQueries=true&useSSL=false
+      username: root
+      password: root
+      hikari:
+        maximum-pool-size: 8
+        minimum-idle: 2
+
+  jpa:
+    show-sql: false
+    open-in-view: false
+    hibernate:
+      # 本地 dev：自动 update 建表 / 加列
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+
+# JWT
+token:
+  header: Authorization
+  cookieName: User-Token
+  expireTtl: 86400000        # 1d
+  refreshExpireTtl: 2592000000 # 30d
+  secret: vDW2/YL5VGg3wAub8ohhz2l+OUjtYa1k4twm4nNNzAY=
+
+# 是否允许注册
+register:
+  enable: true
+
+misu:
+  static:
+    path: ${user.home}/.misu-dev/files/
+
+# 文件客户端：本地文件系统
+fileClient:
+  type: local
