@@ -1,6 +1,7 @@
 package com.misu.fileServer.controller;
 
 import com.misu.common.domain.AjaxResult;
+import com.misu.fileServer.domain.dto.BatchFileRequestDto;
 import com.misu.fileServer.domain.dto.FileDownloadRequestDto;
 import com.misu.fileServer.domain.dto.FileRenameRequestDto;
 import com.misu.fileServer.domain.dto.FileRequestDto;
@@ -209,5 +210,34 @@ public class FileController {
             return num.longValue();
         }
         return Long.parseLong(value.toString());
+    }
+
+    // ===================== M4：批量操作 + ZIP 文件夹下载 =====================
+
+    /**
+     * 批量软删除（最多 500 项）
+     */
+    @PostMapping({"/batchDelete"})
+    @ApiOperation(value="批量删除")
+    public AjaxResult batchDelete(@Valid @RequestBody BatchFileRequestDto request) {
+        return AjaxResult.success(fileService.batchDelete(request));
+    }
+
+    /**
+     * 批量移动到目标父目录（最多 500 项）
+     */
+    @PostMapping({"/batchMove"})
+    @ApiOperation(value="批量移动")
+    public AjaxResult batchMove(@Valid @RequestBody BatchFileRequestDto request) {
+        return AjaxResult.success(fileService.batchMove(request));
+    }
+
+    /**
+     * 流式打包下载文件夹为 ZIP
+     */
+    @GetMapping({"/downloadDirectory"})
+    @ApiOperation(value="流式 ZIP 下载文件夹")
+    public void downloadDirectory(@Valid FileRequestDto fileRequestDto, HttpServletResponse response) {
+        fileService.downloadDirectoryAsZip(fileRequestDto, response);
     }
 }

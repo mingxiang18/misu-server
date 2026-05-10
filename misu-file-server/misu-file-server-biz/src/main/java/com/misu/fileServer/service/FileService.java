@@ -126,4 +126,19 @@ public interface FileService {
      * 永久删除回收站中的某条 mapping（含物理文件，若无其他 active 映射引用）。
      */
     void purgeFromTrash(Long id);
+
+    /**
+     * 批量软删除。逐项处理，单项失败不阻塞其他项；返回成功 / 失败明细。
+     */
+    BatchOperationResultDto batchDelete(BatchFileRequestDto request);
+
+    /**
+     * 批量移动到目标父目录（保留原文件名）。
+     */
+    BatchOperationResultDto batchMove(BatchFileRequestDto request);
+
+    /**
+     * 流式打包下载文件夹为 ZIP（不落临时文件，不支持 Range，使用分块编码）。
+     */
+    void downloadDirectoryAsZip(FileRequestDto fileRequestDto, HttpServletResponse response);
 }

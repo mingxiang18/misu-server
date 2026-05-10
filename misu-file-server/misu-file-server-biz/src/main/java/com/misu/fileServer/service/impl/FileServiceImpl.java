@@ -1553,4 +1553,151 @@ public class FileServiceImpl implements FileService {
             }
         }
     }
+
+    // =====================================================================
+    // M4：批量操作 + ZIP 文件夹下载
+    // =====================================================================
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public BatchOperationResultDto batchDelete(BatchFileRequestDto request) {
+        checkPublicWriteAuthority(request.getOpenType());
+        LoginUser loginUser = LoginMessageUtil.getLoginUser()
+                .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
+        String mappingUserId = getMappingUserId(request.getOpenType(), loginUser.getUserId().toString());
+        BatchOperationResultDto result = new BatchOperationResultDto();
+
+        for (String filePath : request.getFilePaths()) {
+            try {
+                String relativePath = FilePathGuard.normalizeRelativePath(filePath);
+                if (!hasMappingUnderPath(request.getOpenType(), mappingUserId, relativePath)) {
+                    result.addFailure(filePath, "不存在");
+                    continue;
+                }
+                markDeletedByPrefix(request.getOpenType(), mappingUserId, relativePath);
+                result.addSuccess();
+            } catch (ServiceException se) {
+                result.addFailure(filePath, se.getMessage());
+            } catch (Exception e) {
+                log.warn("batchDelete 失败，filePath={}", filePath, e);
+                result.addFailure(filePath, "处理异常");
+            }
+        }
+        return result;
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public BatchOperationResultDto batchMove(BatchFileRequestDto request) {
+        checkPublicWriteAuthority(request.getOpenType());
+        LoginUser loginUser = LoginMessageUtil.getLoginUser()
+                .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
+        String mappingUserId = getMappingUserId(request.getOpenType(), loginUser.getUserId().toString());
+        String targetParent = FilePathGuard.normalizeRelativePath(
+                StringUtils.defaultString(request.getTargetParentPath()), true);
+
+        // 目标父目录必须是已存在的目录（或 root）
+        if (StringUtils.isNotBlank(targetParent)) {
+            FileMapping parentMapping = fileMappingRepository
+                    .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(
+                            request.getOpenType(), mappingUserId, targetParent)
+                    .orElse(null);
+            if (parentMapping == null || !FileType.DIRECTORY_FILE.equals(parentMapping.getFileType())) {
+                throw new ServiceException(HttpStatus.BAD_REQUEST, "目标父目录不存在");
+            }
+        }
+
+        BatchOperationResultDto result = new BatchOperationResultDto();
+        for (String filePath : request.getFilePaths()) {
+            try {
+                String origin = FilePathGuard.normalizeRelativePath(filePath);
+                String fileName = Path.of(origin).getFileName().toString();
+                String newPath = StringUtils.isBlank(targetParent) ? fileName : targetParent + "/" + fileName;
+                if (origin.equals(newPath)) {
+                    result.addSuccess();
+                    continue;
+                }
+                if (StringUtils.startsWith(newPath + "/", origin + "/")) {
+                    result.addFailure(filePath, "不允许将目录移动到自身子目录");
+                    continue;
+                }
+                if (!hasMappingUnderPath(request.getOpenType(), mappingUserId, origin)) {
+                    result.addFailure(filePath, "原文件不存在");
+                    continue;
+                }
+                boolean targetExists = fileMappingRepository
+                        .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(
+                                request.getOpenType(), mappingUserId, newPath)
+                        .isPresent();
+                if (targetExists
+                        || hasMoveDestinationConflict(request.getOpenType(), mappingUserId, origin, newPath)) {
+                    result.addFailure(filePath, "目标目录已存在同名文件");
+                    continue;
+                }
+                moveFileMappingTree(request.getOpenType(), mappingUserId, origin, newPath);
+                result.addSuccess();
+            } catch (ServiceException se) {
+                result.addFailure(filePath, se.getMessage());
+            } catch (Exception e) {
+                log.warn("batchMove 失败，filePath={}", filePath, e);
+                result.addFailure(filePath, "处理异常");
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public void downloadDirectoryAsZip(FileRequestDto fileRequestDto, HttpServletResponse response) {
+        File directory = resolveUserRequestFile(fileRequestDto).toFile();
+        if (!directory.exists()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "目录不存在或已被删除");
+        }
+        if (!directory.isDirectory()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "当前路径不是目录");
+        }
+        // 复用既有的体积/文件数限制
+        checkDirectoryDownloadLimit(directory);
+
+        String zipBaseName = directory.getName();
+        if (StringUtils.isBlank(zipBaseName) || ".".equals(zipBaseName) || "..".equals(zipBaseName)) {
+            zipBaseName = "download";
+        }
+        String fallbackName = zipBaseName + ".zip";
+        String encodedName = URLEncoder.encode(fallbackName, StandardCharsets.UTF_8).replace("+", "%20");
+
+        response.setContentType("application/zip");
+        response.setCharacterEncoding("utf-8");
+        response.setHeader("Content-Disposition", "attachment; filename=\"download.zip\"; filename*=UTF-8''" + encodedName);
+        response.setHeader("Cache-Control", "no-store");
+
+        try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(response.getOutputStream())) {
+            Path rootPath = directory.toPath();
+            // 用 try-with-resources 包住 Files.walk，确保流释放
+            try (Stream<Path> walk = Files.walk(rootPath)) {
+                Iterator<Path> it = walk.iterator();
+                while (it.hasNext()) {
+                    Path path = it.next();
+                    if (path.equals(rootPath)) {
+                        continue;
+                    }
+                    String entryName = rootPath.relativize(path).toString().replace('\\', '/');
+                    try {
+                        if (Files.isDirectory(path)) {
+                            zos.putNextEntry(new java.util.zip.ZipEntry(entryName + "/"));
+                            zos.closeEntry();
+                        } else {
+                            zos.putNextEntry(new java.util.zip.ZipEntry(entryName));
+                            Files.copy(path, zos);
+                            zos.closeEntry();
+                        }
+                    } catch (IOException ioe) {
+                        log.warn("ZIP 单项失败，跳过：{}", path, ioe);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            // tomcat 原话：客户端断连导致的 IO 异常吃掉，仅记日志
+            log.warn("流式 ZIP 下载中断", e);
+        }
+    }
 }
