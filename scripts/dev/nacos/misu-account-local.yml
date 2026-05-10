@@ -31,11 +31,15 @@ spring:
   jpa:
     show-sql: false
     open-in-view: false
-    hibernate:
-      # 本地 dev：自动 update 建表 / 加列
-      ddl-auto: update
     properties:
       hibernate:
+        # 本地 dev：自动 update 建表 / 加列
+        # 这里走 spring.jpa.properties.hibernate.hbm2ddl.auto，而不是
+        # spring.jpa.hibernate.ddl-auto —— 因为本服务用了自定义的
+        # LocalContainerEntityManagerFactoryBean（AccountDataSourceConfig），
+        # Spring Boot 不会把高层 spring.jpa.hibernate.* 映射进自定义 EMF。
+        hbm2ddl:
+          auto: update
         format_sql: true
         dialect: org.hibernate.dialect.MySQLDialect
 
