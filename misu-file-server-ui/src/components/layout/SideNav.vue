@@ -11,6 +11,7 @@ import {
   Memo,
   Download,
   Delete,
+  Share,
   User,
   ArrowRight,
   SwitchButton
@@ -28,6 +29,7 @@ const nav = computed(() => {
     { key: 'private',  label: '私人目录', icon: Folder,            to: '/fileServer/privateDirectory',         match: ['privateDirectory'] },
     { key: 'public',   label: '公共目录', icon: FolderOpened,      to: '/fileServer/publicDirectory',          match: ['publicDirectory'] },
     { key: 'trash',    label: '回收站',   icon: Delete,            to: '/fileServer/trash',                    match: ['fileServer/trash'] },
+    { key: 'shares',   label: '我的分享', icon: Share,             to: '/fileServer/shares',                   match: ['fileServer/shares'] },
     { key: 'torrent',  label: '磁力下载', icon: Download,          to: '/fileServer/torrentManagement',        match: ['torrentManagement'] }
   ]
   if (isAdmin.value) {

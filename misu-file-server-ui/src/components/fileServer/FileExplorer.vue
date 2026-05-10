@@ -260,6 +260,75 @@
       </div>
     </el-dialog>
 
+    <!-- 外链分享弹窗 -->
+    <el-dialog
+        v-model="externalShareDialogVisible"
+        title="外链分享"
+        :width="dialogWidth"
+        @close="closeExternalShareDialog">
+      <div v-loading="externalShareLoading">
+        <template v-if="!externalShareResult">
+          <p style="color: var(--color-text-secondary); margin: 0 0 12px;">
+            为【{{ externalShareForm.fileName }}】生成一个公开链接。任何拿到链接的人在过期前可以下载。
+          </p>
+          <el-form label-position="top" :model="externalShareForm">
+            <el-form-item label="过期时间">
+              <el-radio-group v-model="externalShareForm.expireMinutes">
+                <el-radio-button v-for="o in externalShareExpireOptions" :key="o.value" :value="o.value">
+                  {{ o.label }}
+                </el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+
+            <el-form-item>
+              <el-checkbox v-model="externalShareForm.enablePassword">需要访问密码</el-checkbox>
+              <el-input
+                  v-if="externalShareForm.enablePassword"
+                  v-model="externalShareForm.password"
+                  type="password"
+                  show-password
+                  placeholder="4-32 位"
+                  style="margin-top: 6px;"/>
+            </el-form-item>
+
+            <el-form-item>
+              <el-checkbox v-model="externalShareForm.enableMaxDownloads">限制下载次数</el-checkbox>
+              <el-input-number
+                  v-if="externalShareForm.enableMaxDownloads"
+                  v-model="externalShareForm.maxDownloads"
+                  :min="1"
+                  :max="100000"
+                  placeholder="次数"
+                  style="margin-top: 6px; width: 160px;"/>
+            </el-form-item>
+          </el-form>
+
+          <div style="display: flex; justify-content: center; gap: 8px;">
+            <el-button @click="closeExternalShareDialog">取消</el-button>
+            <el-button type="primary" @click="submitExternalShare">生成链接</el-button>
+          </div>
+        </template>
+
+        <template v-else>
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;">
+            <el-icon style="color: var(--color-success); font-size: 32px;"><CircleCheckFilled/></el-icon>
+            <div style="font-weight: 500;">分享创建成功</div>
+            <el-input :model-value="externalShareResult.link" readonly>
+              <template #append>
+                <el-button @click="copyShareLink">复制</el-button>
+              </template>
+            </el-input>
+            <div style="font-size: 12px; color: var(--color-text-tertiary); text-align: center;">
+              过期：{{ externalShareResult.share.expireTime?.replace('T',' ').slice(0,19) }}
+              <span v-if="externalShareResult.share.hasPassword"> · 需要密码</span>
+              <span v-if="externalShareResult.share.maxDownloads"> · 限 {{ externalShareResult.share.maxDownloads }} 次</span>
+            </div>
+            <el-button type="primary" @click="closeExternalShareDialog">完成</el-button>
+          </div>
+        </template>
+      </div>
+    </el-dialog>
+
     <!-- 批量移动弹窗 -->
     <el-dialog
         v-model="batchMoveDialogVisible"
@@ -292,7 +361,8 @@
         <li @click="onMenuItemClick('download')">下载</li>
         <li v-if="menuChooseFile && menuChooseFile.fileType === 'directory'" @click="onMenuItemClick('downloadZip')">下载为 ZIP</li>
         <li @click="onMenuItemClick('move')">移动/重命名</li>
-        <li @click="onMenuItemClick('share')">分享</li>
+        <li @click="onMenuItemClick('share')">临时下载链</li>
+        <li v-if="menuChooseFile && menuChooseFile.fileType !== 'directory'" @click="onMenuItemClick('externalShare')">外链分享…</li>
         <li v-if="canSharePrivateFileToPublic" @click="onMenuItemClick('shareToPublic')">共享到公共目录</li>
         <li @click="onMenuItemClick('delete')">删除</li>
       </ul>
@@ -301,7 +371,7 @@
 </template>
 
 <script setup>
-import {Document, Film, Folder, Picture, Plus, FolderAdd, Upload, Search, Close, Check, Download} from "@element-plus/icons-vue";
+import {Document, Film, Folder, Picture, Plus, FolderAdd, Upload, Search, Close, Check, Download, CircleCheckFilled} from "@element-plus/icons-vue";
 import {computed, defineProps, onBeforeUnmount, onMounted, ref, watch} from "vue";
 import { useBreakpoint } from '@/composables/useBreakpoint';
 import VideoViewer from '@/components/fileServer/VideoViewer.vue'
@@ -323,6 +393,7 @@ import {
   batchMove as batchMoveApi,
   buildDirectoryDownloadUrl
 } from '@/api/fileServer/fileServerMvp';
+import { createShare as createShareApi } from '@/api/fileServer/fileShareApi';
 import { useRouter, useRoute } from 'vue-router';
 import { playMyVideo } from '@/api/fileServer/videoRoom';
 import FilePathSelector from "@/components/fileServer/FilePathSelector.vue";
@@ -624,6 +695,8 @@ const onMenuItemClick = (option) => {
     deleteFile(menuChooseFile.value);
   }else if (option === 'share') {
     shareFile(menuChooseFile.value);
+  }else if (option === 'externalShare') {
+    openExternalShareDialog(menuChooseFile.value);
   }else if (option === 'shareToPublic') {
     openShareToPublicDialog(menuChooseFile.value);
   }
@@ -773,6 +846,76 @@ const loadStorageUsage = () => {
   getStorageUsageApi(props.openType).then(resp => {
     storageUsage.value = resp.data;
   }).catch(() => {});
+};
+
+// ===== M14b：外链分享 =====
+const externalShareDialogVisible = ref(false);
+const externalShareLoading = ref(false);
+const externalShareForm = ref({
+  fileName: '',
+  filePath: '',
+  expireMinutes: 1440,
+  password: '',
+  maxDownloads: null,
+  enablePassword: false,
+  enableMaxDownloads: false,
+});
+const externalShareResult = ref(null);
+
+const externalShareExpireOptions = [
+  { value: 60,        label: '1 小时' },
+  { value: 60 * 24,   label: '1 天' },
+  { value: 60 * 24 * 7, label: '7 天' },
+  { value: 60 * 24 * 30, label: '30 天' },
+];
+
+const openExternalShareDialog = (file) => {
+  externalShareForm.value = {
+    fileName: file.fileName,
+    filePath: buildApiFilePath(file.filePath, file.fileName),
+    expireMinutes: 1440,
+    password: '',
+    maxDownloads: null,
+    enablePassword: false,
+    enableMaxDownloads: false,
+  };
+  externalShareResult.value = null;
+  externalShareDialogVisible.value = true;
+};
+
+const closeExternalShareDialog = () => {
+  externalShareDialogVisible.value = false;
+  externalShareResult.value = null;
+};
+
+const submitExternalShare = () => {
+  externalShareLoading.value = true;
+  const f = externalShareForm.value;
+  createShareApi({
+    openType: props.openType,
+    filePath: f.filePath,
+    expireMinutes: Number(f.expireMinutes) || 1440,
+    password: f.enablePassword && f.password ? f.password : undefined,
+    maxDownloads: f.enableMaxDownloads && f.maxDownloads ? Number(f.maxDownloads) : undefined,
+  }).then(resp => {
+    const share = resp.data;
+    const link = `${window.location.origin}/share/${share.shareToken}`;
+    externalShareResult.value = { share, link };
+    ElMessage.success('分享已创建');
+  }).finally(() => {
+    externalShareLoading.value = false;
+  });
+};
+
+const copyShareLink = async () => {
+  const link = externalShareResult.value?.link;
+  if (!link) return;
+  try {
+    await navigator.clipboard.writeText(link);
+    ElMessage.success('链接已复制到剪贴板');
+  } catch (e) {
+    ElMessage.warning('请手动复制链接');
+  }
 };
 
 // 下载文件
