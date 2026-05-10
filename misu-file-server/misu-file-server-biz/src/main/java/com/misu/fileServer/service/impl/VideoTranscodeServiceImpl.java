@@ -260,7 +260,7 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
 
     private void checkAdmin() {
         if (!AuthorityUtil.hasAuthority(UserRole.ADMIN)) {
-            throw new ServiceException(HttpStatus.BAD_REQUEST, "只有 ADMIN 用户可以管理视频转码任务");
+            throw new ServiceException(HttpStatus.FORBIDDEN, "只有 ADMIN 用户可以管理视频转码任务");
         }
     }
 

@@ -113,8 +113,13 @@ instance.interceptors.response.use(
             return response.data
         }
 
-        if (code === 401 || code === 403) {
+        if (code === 401) {
+            // 401 = 未登录或 token 失效；尝试 refresh，失败再让用户重新登录
             return handleAuthExpired(response.config)
+        } else if (code === 403) {
+            // 403 = 已登录但权限不足；不踢回登录页，直接报错
+            ElMessage({ message: msg, type: 'error' })
+            return Promise.reject(new Error(msg))
         } else if (code === 500) {
             ElMessage({ message: msg, type: 'error' })
             return Promise.reject(new Error(msg))
@@ -135,8 +140,13 @@ instance.interceptors.response.use(
         if (message === "Network Error") {
             message = "后端接口连接异常";
             markBackendDown()
-        } else if (message.includes("401") || message.includes("403")) {
+        } else if (message.includes("401")) {
             return handleAuthExpired(error.config)
+        } else if (status === 403) {
+            // 已登录但权限不足：不要触发 token 刷新 / 跳登录页
+            const forbidMsg = error?.response?.data?.msg || '权限不足';
+            ElMessage({ message: forbidMsg, type: 'error', duration: 5 * 1000 })
+            return Promise.reject(error)
         } else if (message.includes("timeout")) {
             message = "系统接口请求超时";
             markBackendDown()

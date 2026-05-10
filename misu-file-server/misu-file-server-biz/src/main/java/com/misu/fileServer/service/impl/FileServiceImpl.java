@@ -1176,7 +1176,8 @@ public class FileServiceImpl implements FileService {
     private void checkPublicWriteAuthority(Integer openType) {
         if (openType != null && openType == 1
                 && !AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
-            throw new ServiceException(HttpStatus.UNAUTHORIZED, "当前用户无法修改公共文件");
+            // 403 FORBIDDEN：用户已登录但权限不足；不能用 401（前端会当登录失效跳登录页）
+            throw new ServiceException(HttpStatus.FORBIDDEN, "当前用户无权修改公共文件");
         }
     }
 
@@ -1299,7 +1300,7 @@ public class FileServiceImpl implements FileService {
     @Override
     public void startFileMappingBackfill() {
         if (!AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
-            throw new ServiceException(HttpStatus.UNAUTHORIZED, "当前用户无权限执行回填");
+            throw new ServiceException(HttpStatus.FORBIDDEN, "当前用户无权限执行回填");
         }
         if (!backfillRunning.compareAndSet(false, true)) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "回填任务正在执行中，请稍后再试");
@@ -1326,7 +1327,7 @@ public class FileServiceImpl implements FileService {
     @Override
     public Map<String, Object> getFileMappingBackfillStatus() {
         if (!AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
-            throw new ServiceException(HttpStatus.UNAUTHORIZED, "当前用户无权限查看回填状态");
+            throw new ServiceException(HttpStatus.FORBIDDEN, "当前用户无权限查看回填状态");
         }
         Map<String, Object> status = new HashMap<>();
         status.put("running", backfillRunning.get());
