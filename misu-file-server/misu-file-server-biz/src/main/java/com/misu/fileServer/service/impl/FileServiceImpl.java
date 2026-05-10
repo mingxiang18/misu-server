@@ -31,6 +31,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpRange;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -1396,6 +1399,158 @@ public class FileServiceImpl implements FileService {
         }
         for (File child : children) {
             walkAndUpsert(openType, userId, rootDirectory, child, existingMap);
+        }
+    }
+
+    // =====================================================================
+    // M3：文件搜索 + 回收站
+    // =====================================================================
+
+    @Override
+    public PageResponseDto<FileResponseDto> searchFiles(SearchFileRequestDto request) {
+        LoginUser loginUser = LoginMessageUtil.getLoginUser()
+                .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
+        String mappingUserId = getMappingUserId(request.getOpenType(), loginUser.getUserId().toString());
+
+        int pageNumber = Math.max(0, request.getPageNumber() - 1);
+        int pageSize = Math.max(1, request.getPageSize());
+        Pageable pageable = PageRequest.of(pageNumber, pageSize);
+        String keyword = StringUtils.trim(request.getKeyword());
+
+        Page<FileMapping> page;
+        if (StringUtils.isNotBlank(request.getFileType())) {
+            page = fileMappingRepository
+                    .findByOpenTypeAndUserIdAndDeletedFalseAndFileTypeAndFileNameContainingIgnoreCaseOrderByFileNameAsc(
+                            request.getOpenType(), mappingUserId, request.getFileType(), keyword, pageable);
+        } else {
+            page = fileMappingRepository
+                    .findByOpenTypeAndUserIdAndDeletedFalseAndFileNameContainingIgnoreCaseOrderByFileTypeDescFileNameAsc(
+                            request.getOpenType(), mappingUserId, keyword, pageable);
+        }
+
+        List<FileResponseDto> items = page.getContent().stream()
+                .map(this::toFileResponseDto)
+                .filter(dto -> dto.getFile() != null && dto.getFile().exists())
+                .peek(dto -> {
+                    packagePreviewLink(request.getOpenType(), dto);
+                    packageVideoTranscodeInfo(request.getOpenType(), dto);
+                    String virtualPath = StringUtils.stripStart(dto.getFilePath(), "/") + dto.getFileName();
+                    dto.setDownloadLink(createUserFileAccessLink("/download", virtualPath, request.getOpenType()));
+                    dto.setStreamLink(createUserFileAccessLink("/stream", virtualPath, request.getOpenType()));
+                    dto.setFile(null);
+                })
+                .collect(Collectors.toList());
+
+        return new PageResponseDto<>(items, page.getTotalElements(), request.getPageNumber(), request.getPageSize());
+    }
+
+    @Override
+    public PageResponseDto<TrashFileResponseDto> listTrash(Integer openType, Integer pageNumber, Integer pageSize) {
+        if (openType == null) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不能为空");
+        }
+        checkPublicWriteAuthority(openType);
+        LoginUser loginUser = LoginMessageUtil.getLoginUser()
+                .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
+        String mappingUserId = getMappingUserId(openType, loginUser.getUserId().toString());
+
+        int normalizedPageNumber = Math.max(1, pageNumber == null ? 1 : pageNumber);
+        int normalizedPageSize = pageSize == null ? 50 : Math.max(1, Math.min(200, pageSize));
+        Pageable pageable = PageRequest.of(normalizedPageNumber - 1, normalizedPageSize);
+
+        Page<FileMapping> page = fileMappingRepository
+                .findByOpenTypeAndUserIdAndDeletedTrueOrderByUpdateTimeDesc(openType, mappingUserId, pageable);
+
+        List<TrashFileResponseDto> items = page.getContent().stream()
+                .map(this::toTrashResponseDto)
+                .collect(Collectors.toList());
+        return new PageResponseDto<>(items, page.getTotalElements(), normalizedPageNumber, normalizedPageSize);
+    }
+
+    private TrashFileResponseDto toTrashResponseDto(FileMapping mapping) {
+        TrashFileResponseDto dto = new TrashFileResponseDto();
+        dto.setId(mapping.getId());
+        dto.setFileName(mapping.getFileName());
+        dto.setFileType(mapping.getFileType());
+        dto.setFileSize(mapping.getFileSize());
+        dto.setOriginalPath(mapping.getVirtualPath());
+        dto.setOriginalParentPath(mapping.getParentPath());
+        dto.setDeleteTime(mapping.getUpdateTime() != null ? mapping.getUpdateTime() : mapping.getCreateTime());
+        return dto;
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public void restoreFromTrash(Long id) {
+        if (id == null) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "id 不能为空");
+        }
+        FileMapping mapping = fileMappingRepository.findById(id)
+                .orElseThrow(() -> new ServiceException(HttpStatus.BAD_REQUEST, "回收站项不存在或已被永久删除"));
+        if (!Boolean.TRUE.equals(mapping.getDeleted())) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "目标项不在回收站中");
+        }
+        checkPublicWriteAuthority(mapping.getOpenType());
+        ensureMappingOwnership(mapping);
+
+        // 还原前先确认目标 virtualPath 上没有 active mapping 占位
+        Optional<FileMapping> activeAtSamePath = fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(
+                        mapping.getOpenType(), mapping.getUserId(), mapping.getVirtualPath());
+        if (activeAtSamePath.isPresent()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "原位置已有同名文件，请先重命名当前文件再还原");
+        }
+
+        // 还原物理文件需存在；若已被 GC 物理清掉则不允许还原
+        if (StringUtils.isNotBlank(mapping.getTargetPath())
+                && !Path.of(mapping.getTargetPath()).toFile().exists()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "底层文件已被清理，无法还原");
+        }
+
+        mapping.setDeleted(false);
+        mapping.setUpdateTime(LocalDateTime.now());
+        fileMappingRepository.save(mapping);
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public void purgeFromTrash(Long id) {
+        if (id == null) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "id 不能为空");
+        }
+        FileMapping mapping = fileMappingRepository.findById(id)
+                .orElseThrow(() -> new ServiceException(HttpStatus.BAD_REQUEST, "回收站项不存在或已被永久删除"));
+        if (!Boolean.TRUE.equals(mapping.getDeleted())) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "目标项不在回收站中，请先删除再永久删除");
+        }
+        checkPublicWriteAuthority(mapping.getOpenType());
+        ensureMappingOwnership(mapping);
+
+        String targetPath = mapping.getTargetPath();
+        if (StringUtils.isNotBlank(targetPath)) {
+            Set<String> activeTargetPaths = new HashSet<>(fileMappingRepository.findDistinctActiveTargetPaths());
+            if (!activeTargetPaths.contains(targetPath)) {
+                File target = Path.of(targetPath).toFile();
+                if (target.exists() && !deletePhysicalRecursively(target)) {
+                    log.warn("永久删除物理文件失败，id={}, targetPath={}", id, targetPath);
+                    throw new ServiceException(HttpStatus.ERROR, "底层文件清理失败，请稍后重试");
+                }
+            }
+        }
+        fileMappingRepository.delete(mapping);
+    }
+
+    /**
+     * 校验 mapping 归属：私人空间必须是当前登录用户；公共空间必须是管理员。
+     * checkPublicWriteAuthority 已经覆盖公共空间，本方法只补私人空间归属。
+     */
+    private void ensureMappingOwnership(FileMapping mapping) {
+        if (mapping.getOpenType() != null && mapping.getOpenType() == 0) {
+            LoginUser loginUser = LoginMessageUtil.getLoginUser()
+                    .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
+            if (!StringUtils.equals(mapping.getUserId(), loginUser.getUserId().toString())) {
+                throw new ServiceException(HttpStatus.FORBIDDEN, "无权操作他人文件");
+            }
         }
     }
 }

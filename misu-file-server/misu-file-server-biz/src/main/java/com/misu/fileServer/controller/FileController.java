@@ -5,6 +5,7 @@ import com.misu.fileServer.domain.dto.FileDownloadRequestDto;
 import com.misu.fileServer.domain.dto.FileRenameRequestDto;
 import com.misu.fileServer.domain.dto.FileRequestDto;
 import com.misu.fileServer.domain.dto.FileUploadRequest;
+import com.misu.fileServer.domain.dto.SearchFileRequestDto;
 import com.misu.fileServer.domain.dto.SharePrivateFileToPublicRequestDto;
 import com.misu.fileServer.service.FileService;
 import com.misu.security.annotation.Anonymous;
@@ -14,8 +15,11 @@ import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 /**
  * 文件相关Controller
@@ -149,5 +153,61 @@ public class FileController {
     @ApiOperation(value="删除文件")
     public AjaxResult deleteFile(@Valid @RequestBody FileRequestDto fileRequestDto) {
         return AjaxResult.success(fileService.deleteFile(fileRequestDto));
+    }
+
+    // ===================== M3：搜索 + 回收站 =====================
+
+    /**
+     * 文件搜索（按文件名模糊匹配，分页）
+     */
+    @GetMapping({"/search"})
+    @ApiOperation(value="文件搜索")
+    public AjaxResult searchFiles(@Valid SearchFileRequestDto request) {
+        return AjaxResult.success(fileService.searchFiles(request));
+    }
+
+    /**
+     * 回收站列表（按删除时间倒序）
+     */
+    @GetMapping({"/listTrash"})
+    @ApiOperation(value="回收站列表")
+    public AjaxResult listTrash(@NotNull(message = "文件公开类型不能为空") Integer openType,
+                                Integer pageNumber,
+                                Integer pageSize) {
+        return AjaxResult.success(fileService.listTrash(openType, pageNumber, pageSize));
+    }
+
+    /**
+     * 从回收站还原
+     */
+    @PostMapping({"/restoreTrash"})
+    @ApiOperation(value="从回收站还原")
+    public AjaxResult restoreTrash(@RequestBody Map<String, Object> body) {
+        Object idValue = body == null ? null : body.get("id");
+        Long id = parseLongOrThrow(idValue);
+        fileService.restoreFromTrash(id);
+        return AjaxResult.success();
+    }
+
+    /**
+     * 永久删除回收站中的某项
+     */
+    @PostMapping({"/purgeTrash"})
+    @ApiOperation(value="永久删除回收站中的某项")
+    public AjaxResult purgeTrash(@RequestBody Map<String, Object> body) {
+        Object idValue = body == null ? null : body.get("id");
+        Long id = parseLongOrThrow(idValue);
+        fileService.purgeFromTrash(id);
+        return AjaxResult.success();
+    }
+
+    private Long parseLongOrThrow(Object value) {
+        if (value == null) {
+            throw new IllegalArgumentException("id 不能为空");
+        }
+        if (value instanceof Number num) {
+            return num.longValue();
+        }
+        return Long.parseLong(value.toString());
     }
 }

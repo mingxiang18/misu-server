@@ -106,4 +106,24 @@ public interface FileService {
      * 校验指定用户视角下的文件是否存在并可访问。
      */
     boolean existsUserFile(Integer openType, String userId, String filePath, boolean allowDirectory);
+
+    /**
+     * 文件搜索（按文件名模糊匹配，分页）。
+     */
+    PageResponseDto<FileResponseDto> searchFiles(SearchFileRequestDto request);
+
+    /**
+     * 回收站列表（已逻辑删除项），按删除时间倒序。
+     */
+    PageResponseDto<TrashFileResponseDto> listTrash(Integer openType, Integer pageNumber, Integer pageSize);
+
+    /**
+     * 从回收站还原指定 mapping。
+     */
+    void restoreFromTrash(Long id);
+
+    /**
+     * 永久删除回收站中的某条 mapping（含物理文件，若无其他 active 映射引用）。
+     */
+    void purgeFromTrash(Long id);
 }
