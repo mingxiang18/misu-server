@@ -143,10 +143,36 @@ watch(() => selectedOption.value, (newSelectedOption) => {
 
 <style scoped>
 .excel-upload-container {
-  padding: 20px;
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
+
+@media (max-width: 640px) {
+  .excel-upload-container {
+    padding: var(--space-3);
+    gap: var(--space-3);
+  }
+}
+
 .button-actions {
-  display: flex; /* 用 flex 布局让按钮排成一行 */
-  gap: 10px; /* 按钮之间的间距 */
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* el-tabs 自身在窄屏可能撑开 */
+.excel-upload-container :deep(.el-tabs__nav-wrap) {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.excel-upload-container :deep(.el-tabs__nav-wrap::-webkit-scrollbar) {
+  display: none;
+}
+
+.excel-upload-container :deep(.el-tabs__item) {
+  font-size: var(--font-size-md);
 }
 </style>

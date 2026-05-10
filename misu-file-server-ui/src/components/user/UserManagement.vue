@@ -29,7 +29,8 @@
         <el-button type="primary" :icon="Plus" @click="openAddDialog">新增用户</el-button>
       </div>
 
-      <el-table v-loading="loading" :data="tableData" height="calc(100vh - 220px)">
+      <!-- 桌面：表格 -->
+      <el-table v-if="isDesktop" v-loading="loading" :data="tableData" :max-height="tableMaxHeight" class="user-table">
         <el-table-column prop="userId" label="ID" width="80" />
         <el-table-column prop="userName" label="用户名" min-width="130" />
         <el-table-column prop="nickName" label="昵称" min-width="130" />
@@ -57,6 +58,35 @@
         </el-table-column>
       </el-table>
 
+      <!-- 移动：卡片 -->
+      <div v-else class="user-cards" v-loading="loading">
+        <div v-if="!loading && tableData.length === 0" class="user-empty">暂无用户</div>
+        <article v-for="row in tableData" :key="row.userId" class="user-card">
+          <header class="user-card-header">
+            <div class="user-card-name">
+              <span class="user-card-username">{{ row.userName }}</span>
+              <span class="user-card-nick" v-if="row.nickName">（{{ row.nickName }}）</span>
+            </div>
+            <el-tag :type="row.status === '1' ? 'danger' : 'success'" size="small">
+              {{ row.status === '1' ? '停用' : '正常' }}
+            </el-tag>
+          </header>
+          <div class="user-card-meta" v-if="row.phoneNumber || row.email">
+            <div v-if="row.phoneNumber">手机：{{ row.phoneNumber }}</div>
+            <div v-if="row.email" class="user-card-email">邮箱：{{ row.email }}</div>
+          </div>
+          <div class="user-card-roles">
+            <el-tag v-for="role in row.roles" :key="role" class="role-tag" size="small">{{ role }}</el-tag>
+          </div>
+          <footer class="user-card-actions">
+            <el-button link type="primary" :icon="View" @click="openViewDialog(row)">查看</el-button>
+            <el-button link type="primary" :icon="Edit" @click="openEditDialog(row)">修改</el-button>
+            <el-button link type="warning" :icon="Key" @click="openResetPasswordDialog(row)">重置密码</el-button>
+            <el-button link type="danger" :icon="Delete" @click="deleteUserRow(row)">删除</el-button>
+          </footer>
+        </article>
+      </div>
+
       <div class="pagination">
         <el-pagination
             background
@@ -69,8 +99,8 @@
       </div>
     </template>
 
-    <el-dialog v-model="userDialogVisible" :title="dialogTitle" width="560px">
-      <el-form ref="userFormRef" :model="userForm" :rules="userRules" label-width="90px" :disabled="dialogMode === 'view'">
+    <el-dialog v-model="userDialogVisible" :title="dialogTitle" :width="isMobile ? undefined : '560px'">
+      <el-form ref="userFormRef" :model="userForm" :rules="userRules" :label-width="isMobile ? '74px' : '90px'" :disabled="dialogMode === 'view'">
         <el-form-item label="用户名" prop="userName">
           <el-input v-model="userForm.userName" :disabled="dialogMode === 'edit'" />
         </el-form-item>
@@ -111,8 +141,8 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="passwordDialogVisible" title="重置密码" width="420px">
-      <el-form ref="passwordFormRef" :model="passwordForm" :rules="passwordRules" label-width="90px">
+    <el-dialog v-model="passwordDialogVisible" title="重置密码" :width="isMobile ? undefined : '420px'">
+      <el-form ref="passwordFormRef" :model="passwordForm" :rules="passwordRules" :label-width="isMobile ? '74px' : '90px'">
         <el-form-item label="用户">
           <el-input v-model="passwordForm.userName" disabled />
         </el-form-item>
@@ -134,9 +164,12 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Edit, Key, Plus, Refresh, Search, View } from '@element-plus/icons-vue'
 import { addUser, deleteUser, getUserDetail, getUserInfo, getUserInfoFromToken, listUsers, resetUserPassword, updateUser } from '@/api/user/user'
+import { useBreakpoint } from '@/composables/useBreakpoint'
 
 const router = useRouter()
 const roleOptions = ['USER', 'ADMIN', 'FILE_ADMIN']
+const { isMobile, isDesktop } = useBreakpoint()
+const tableMaxHeight = computed(() => (isMobile.value ? '50vh' : 'calc(100vh - 240px)'))
 const currentUserInfo = ref(getUserInfo())
 const isAdmin = computed(() => (currentUserInfo.value.authorities || []).includes('ADMIN'))
 
@@ -314,17 +347,17 @@ function deleteUserRow(row) {
 <style scoped>
 .user-management {
   height: 100%;
-  padding: 16px;
+  padding: var(--space-4);
   box-sizing: border-box;
-  background: #f6f7fb;
+  background: var(--color-bg-base);
 }
 
 .toolbar {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
 .query-form {
@@ -332,27 +365,107 @@ function deleteUserRow(row) {
 }
 
 .status-select {
-  width: 120px;
+  width: min(160px, 100%);
 }
 
 .role-tag {
-  margin-right: 6px;
+  margin-right: var(--space-1);
 }
 
 .pagination {
   display: flex;
   justify-content: flex-end;
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 
-@media (max-width: 760px) {
+/* ---------- Mobile cards ---------- */
+.user-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.user-empty {
+  padding: var(--space-12) var(--space-4);
+  text-align: center;
+  color: var(--color-text-tertiary);
+}
+
+.user-card {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.user-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.user-card-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-all;
+}
+
+.user-card-nick {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-regular);
+}
+
+.user-card-meta {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed);
+}
+
+.user-card-email {
+  word-break: break-all;
+}
+
+.user-card-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.user-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  border-top: 1px dashed var(--color-border-subtle);
+  padding-top: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+@media (max-width: 640px) {
+  .user-management {
+    padding: var(--space-3);
+  }
+
   .toolbar {
     display: block;
   }
 
   .toolbar > .el-button {
     width: 100%;
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
+  }
+
+  .query-form :deep(.el-form-item) {
+    margin-right: 0;
+    width: 100%;
   }
 }
 </style>
