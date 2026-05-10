@@ -2,7 +2,7 @@
   <div style="height: 100%"
        @dragover.prevent="handlePageDragOver">
     <div class="file-header">
-      <div class="file-path-choose">
+      <div class="file-path-choose" v-show="!searchActive">
         <div style="display: inline;">
           路径：/<span class="choose-text" @click="changeDirectory('')">根目录</span>
           <span v-for="(subFilePath, index) in filePath.split('/').filter(Boolean)" :key="index">
@@ -10,8 +10,25 @@
           </span>
         </div>
       </div>
+      <div v-if="searchActive" class="file-search-info">
+        <Search class="file-search-info-icon"/>
+        <span>"{{ searchKeyword }}" 的搜索结果（{{ searchTotal }}）</span>
+        <el-button size="small" link @click="exitSearch">返回浏览</el-button>
+      </div>
+
       <div v-if="isDesktop" class="file-actions">
-        <el-button type="primary" @click="createDirectory">新建目录</el-button>
+        <el-input
+            v-model="searchKeyword"
+            class="file-search-input"
+            placeholder="搜索文件名"
+            clearable
+            @keyup.enter="runSearch"
+            @clear="exitSearch">
+          <template #prefix><Search/></template>
+        </el-input>
+        <el-button v-if="!batchMode" @click="enterBatch">选择</el-button>
+        <el-button v-else @click="exitBatch">取消选择</el-button>
+        <el-button type="primary" @click="createDirectory" :disabled="batchMode || searchActive">新建目录</el-button>
         <el-upload
             ref="fileUploadComponent"
             :on-change="fileUploadChange"
@@ -19,20 +36,45 @@
             :show-file-list=false
             multiple
             :limit="100">
-          <el-button type="primary">上传</el-button>
+          <el-button type="primary" :disabled="batchMode">上传</el-button>
         </el-upload>
       </div>
     </div>
 
-    <div class="file-container" v-loading="fileListLoading">
+    <!-- 配额条（仅私人目录） -->
+    <div v-if="showQuota && storageUsage" class="quota-bar">
+      <div class="quota-bar-text">
+        <span class="quota-bar-used">{{ usageBytesText }}</span>
+        <span class="quota-bar-total">{{ quotaText }}</span>
+        <span class="quota-bar-count">· {{ fileCountText }}</span>
+      </div>
+      <el-progress
+          v-if="storageUsage.quotaBytes"
+          class="quota-bar-progress"
+          :percentage="quotaPercent"
+          :stroke-width="6"
+          :show-text="false"
+          :status="quotaPercent >= 90 ? 'exception' : (quotaPercent >= 70 ? 'warning' : '')"/>
+    </div>
+
+    <!-- 批量操作栏 -->
+    <div v-if="batchMode" class="batch-bar">
+      <span class="batch-bar-count">已选 {{ selectedFileKeys.size }} 项</span>
+      <el-button size="small" @click="selectAllVisible">全选当前页</el-button>
+      <el-button size="small" @click="clearSelection">清空选择</el-button>
+      <el-button size="small" type="primary" :disabled="selectedFileKeys.size === 0" @click="openBatchMoveDialog">批量移动到…</el-button>
+      <el-button size="small" type="danger" :disabled="selectedFileKeys.size === 0" @click="batchDelete">批量删除</el-button>
+    </div>
+
+    <div class="file-container" v-loading="fileListLoading || searchLoading">
       <div
-          v-if="!fileListLoading && fileList.length === 0"
+          v-if="!fileListLoading && !searchLoading && displayFileList.length === 0"
           class="file-empty">
         <el-icon class="file-empty-icon"><Folder /></el-icon>
-        <p class="file-empty-title">这个目录还是空的</p>
-        <p class="file-empty-hint">把文件拖到这里，或点击右下角按钮上传</p>
+        <p class="file-empty-title">{{ searchActive ? '未找到匹配的文件' : '这个目录还是空的' }}</p>
+        <p class="file-empty-hint">{{ searchActive ? '换个关键词试试' : '把文件拖到这里，或点击右下角按钮上传' }}</p>
         <el-button
-            v-if="isMobile"
+            v-if="!searchActive && isMobile"
             type="primary"
             size="large"
             class="file-empty-cta"
@@ -40,7 +82,7 @@
           上传文件
         </el-button>
         <el-button
-            v-else
+            v-if="!searchActive && !isMobile"
             type="primary"
             size="default"
             class="file-empty-cta"
@@ -48,11 +90,17 @@
           上传文件
         </el-button>
       </div>
-      <el-container class="file-card" v-for="file in fileList" :key="file.filePath"
+      <el-container class="file-card"
+                    :class="{ 'file-card-selected': isSelected(file), 'file-card-batch': batchMode }"
+                    v-for="file in displayFileList" :key="file.fileId || (file.filePath + file.fileName)"
                     @contextmenu.prevent="showContextMenu($event, file)"
                     @touchstart="fileTouchStart($event, file)"
                     @touchend="fileTouchEnd($event, file)"
                     @touchcancel="fileTouchCancel">
+        <!-- 批量模式选中标记 -->
+        <div v-if="batchMode" class="file-card-checkbox" :class="{ checked: isSelected(file) }">
+          <Check v-if="isSelected(file)" class="file-card-check-icon"/>
+        </div>
         <el-main class="file-card-main" @click="openFile(file)">
           <Folder v-if="file.fileType === 'directory'" class="file-show file-show-folder"/>
           <el-image v-if="file.fileType === 'image' && !!file.previewLink" class="file-preview"
@@ -212,6 +260,27 @@
       </div>
     </el-dialog>
 
+    <!-- 批量移动弹窗 -->
+    <el-dialog
+        v-model="batchMoveDialogVisible"
+        title="批量移动到目标目录"
+        :width="dialogWidth">
+      <div v-loading="batchMoveLoading">
+        <p style="color: var(--color-text-secondary); margin: 0 0 12px;">
+          将选中的 {{ selectedFileKeys.size }} 项移动到指定目录（保留原文件名）。
+        </p>
+        <el-form label-width="auto">
+          <el-form-item label="目标目录">
+            <file-path-selector v-model="batchMoveTargetPath" :open-type="props.openType"/>
+          </el-form-item>
+        </el-form>
+        <div style="display: flex; justify-content: center;">
+          <el-button @click="batchMoveDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="batchMove">确认移动</el-button>
+        </div>
+      </div>
+    </el-dialog>
+
     <!-- 自定义右键菜单 -->
     <div
         v-show="menuVisible"
@@ -221,6 +290,7 @@
     >
       <ul ref="rightMenuUl">
         <li @click="onMenuItemClick('download')">下载</li>
+        <li v-if="menuChooseFile && menuChooseFile.fileType === 'directory'" @click="onMenuItemClick('downloadZip')">下载为 ZIP</li>
         <li @click="onMenuItemClick('move')">移动/重命名</li>
         <li @click="onMenuItemClick('share')">分享</li>
         <li v-if="canSharePrivateFileToPublic" @click="onMenuItemClick('shareToPublic')">共享到公共目录</li>
@@ -231,7 +301,7 @@
 </template>
 
 <script setup>
-import {Document, Film, Folder, Picture, Plus, FolderAdd, Upload} from "@element-plus/icons-vue";
+import {Document, Film, Folder, Picture, Plus, FolderAdd, Upload, Search, Close, Check, Download} from "@element-plus/icons-vue";
 import {computed, defineProps, onBeforeUnmount, onMounted, ref, watch} from "vue";
 import { useBreakpoint } from '@/composables/useBreakpoint';
 import VideoViewer from '@/components/fileServer/VideoViewer.vue'
@@ -246,6 +316,13 @@ import {
   getFileDownloadLink,
   sharePrivateFileToPublic as sharePrivateFileToPublicApi
 } from '@/api/fileServer/fileServer';
+import {
+  searchFiles as searchFilesApi,
+  getStorageUsage as getStorageUsageApi,
+  batchDelete as batchDeleteApi,
+  batchMove as batchMoveApi,
+  buildDirectoryDownloadUrl
+} from '@/api/fileServer/fileServerMvp';
 import { useRouter, useRoute } from 'vue-router';
 import { playMyVideo } from '@/api/fileServer/videoRoom';
 import FilePathSelector from "@/components/fileServer/FilePathSelector.vue";
@@ -271,6 +348,38 @@ const filePath = ref("/");
 const fileList = ref([]);
 //文件列表的加载函数
 const fileListLoading = ref(false);
+
+// ===== M8 搜索 =====
+const searchKeyword = ref('');
+const searchActive = ref(false);
+const searchResults = ref([]);
+const searchTotal = ref(0);
+const searchLoading = ref(false);
+
+// ===== M10 批量 =====
+const batchMode = ref(false);
+const selectedFileKeys = ref(new Set());
+const isSelected = (file) => selectedFileKeys.value.has(buildApiFilePath(file.filePath, file.fileName));
+
+// ===== M11 配额 =====
+const storageUsage = ref(null);
+const showQuota = computed(() => props.openType === 0);
+const formatBytesPretty = (b) => {
+  if (b == null) return '0 B';
+  if (b >= 1024 * 1024 * 1024) return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  if (b >= 1024 * 1024) return `${(b / 1024 / 1024).toFixed(2)} MB`;
+  if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${b} B`;
+};
+const usageBytesText = computed(() => formatBytesPretty(storageUsage.value?.usedBytes || 0));
+const quotaText = computed(() => storageUsage.value?.quotaBytes ? `/ ${formatBytesPretty(storageUsage.value.quotaBytes)}` : '/ 不限');
+const quotaPercent = computed(() => {
+  const used = storageUsage.value?.usedBytes || 0;
+  const quota = storageUsage.value?.quotaBytes;
+  if (!quota || quota <= 0) return 0;
+  return Math.min(100, Math.round(used * 100 / quota));
+});
+const fileCountText = computed(() => `${storageUsage.value?.fileCount ?? 0} 个文件`);
 // 下载文件基本url
 const downloadBaseUrl = normalizeResourceBaseUrl(import.meta.env.VITE_RESOURCE_API)
 
@@ -501,6 +610,8 @@ const hideContextMenu = (event) => {
 const onMenuItemClick = (option) => {
   if (option === 'download') {
     downloadFile(menuChooseFile.value);
+  }else if (option === 'downloadZip') {
+    downloadDirectoryZip(menuChooseFile.value);
   }else if (option === 'move') {
     moveFileInfo.value = {
       fileName: menuChooseFile.value.fileName,
@@ -519,6 +630,149 @@ const onMenuItemClick = (option) => {
   // 点击后隐藏菜单
   menuVisible.value = false;
   menuChooseFile.value = null;
+};
+
+// M11：目录 ZIP 流式下载
+const downloadDirectoryZip = (file) => {
+  const zipPath = buildApiFilePath(file.filePath, file.fileName);
+  // token 走 cookie，浏览器同 origin 跨域时不会自动带，直接拿出来当 query
+  // 简单做法：用 a 标签 + 隐藏 form？这里 backend 已支持 cookie 同 origin 才会自动带
+  // 由于 axios 在拦截器里把 token 放在 Authorization header，下载链接得手动用 fetch 拿 blob
+  fetch(`${import.meta.env.VITE_BASE_API.replace(/\/$/, '')}/fileServer/file/downloadDirectory?openType=${props.openType}&filePath=${encodeURIComponent(zipPath)}`, {
+    headers: {
+      'Authorization': `Bearer ${getRawToken()}`
+    }
+  }).then(async (resp) => {
+    if (!resp.ok) {
+      const text = await resp.text();
+      ElMessage.error(`ZIP 下载失败：${resp.status} ${text.slice(0,100)}`);
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${file.fileName}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }).catch(err => {
+    ElMessage.error(`ZIP 下载失败：${err.message || err}`);
+  });
+};
+
+const getRawToken = () => {
+  const cookieMatch = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('User-Token='));
+  if (cookieMatch) return cookieMatch.substring('User-Token='.length);
+  return '';
+};
+
+// ===== M8：搜索 =====
+const runSearch = () => {
+  const kw = String(searchKeyword.value || '').trim();
+  if (!kw) {
+    exitSearch();
+    return;
+  }
+  searchActive.value = true;
+  searchLoading.value = true;
+  searchFilesApi({ openType: props.openType, keyword: kw, pageNumber: 1, pageSize: 100 })
+      .then(resp => {
+        searchResults.value = resp.data?.items || [];
+        searchTotal.value = resp.data?.total || 0;
+      })
+      .catch(() => {})
+      .finally(() => { searchLoading.value = false; });
+};
+const exitSearch = () => {
+  searchActive.value = false;
+  searchKeyword.value = '';
+  searchResults.value = [];
+  searchTotal.value = 0;
+};
+const displayFileList = computed(() => searchActive.value ? searchResults.value : fileList.value);
+
+// ===== M10：批量 =====
+const batchMoveDialogVisible = ref(false);
+const batchMoveLoading = ref(false);
+const batchMoveTargetPath = ref('/');
+
+const enterBatch = () => {
+  batchMode.value = true;
+  selectedFileKeys.value = new Set();
+};
+const exitBatch = () => {
+  batchMode.value = false;
+  selectedFileKeys.value = new Set();
+};
+const toggleSelection = (file) => {
+  const key = buildApiFilePath(file.filePath, file.fileName);
+  const next = new Set(selectedFileKeys.value);
+  if (next.has(key)) next.delete(key); else next.add(key);
+  selectedFileKeys.value = next;
+};
+const clearSelection = () => {
+  selectedFileKeys.value = new Set();
+};
+const selectAllVisible = () => {
+  const next = new Set(selectedFileKeys.value);
+  for (const f of displayFileList.value) {
+    next.add(buildApiFilePath(f.filePath, f.fileName));
+  }
+  selectedFileKeys.value = next;
+};
+const batchDelete = () => {
+  const paths = Array.from(selectedFileKeys.value);
+  if (paths.length === 0) return;
+  ElMessageBox.confirm(
+      `将批量删除 ${paths.length} 项（可在回收站恢复）。是否继续？`,
+      '批量删除',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+  ).then(() => {
+    batchDeleteApi(props.openType, paths).then(resp => {
+      const r = resp.data || {};
+      const msg = r.failureCount > 0
+          ? `成功 ${r.successCount}，失败 ${r.failureCount}：${(r.failures||[])[0]?.message || ''}`
+          : `已删除 ${r.successCount} 项`;
+      r.failureCount > 0 ? ElMessage.warning(msg) : ElMessage.success(msg);
+      exitBatch();
+      queryFileList();
+      loadStorageUsage();
+    });
+  }).catch(() => {});
+};
+const openBatchMoveDialog = () => {
+  batchMoveTargetPath.value = '/';
+  batchMoveDialogVisible.value = true;
+};
+const batchMove = () => {
+  const paths = Array.from(selectedFileKeys.value);
+  if (paths.length === 0) {
+    batchMoveDialogVisible.value = false;
+    return;
+  }
+  // FilePathSelector 给的是 "/path/" 形式，要去掉首尾斜杠转成 "path" 后端期望
+  const target = String(batchMoveTargetPath.value || '/').replace(/^\/+|\/+$/g, '');
+  batchMoveLoading.value = true;
+  batchMoveApi(props.openType, paths, target).then(resp => {
+    const r = resp.data || {};
+    const msg = r.failureCount > 0
+        ? `成功 ${r.successCount}，失败 ${r.failureCount}：${(r.failures||[])[0]?.message || ''}`
+        : `已移动 ${r.successCount} 项`;
+    r.failureCount > 0 ? ElMessage.warning(msg) : ElMessage.success(msg);
+    batchMoveDialogVisible.value = false;
+    exitBatch();
+    queryFileList();
+  }).finally(() => { batchMoveLoading.value = false; });
+};
+
+// ===== M11：配额 =====
+const loadStorageUsage = () => {
+  if (!showQuota.value) return;
+  getStorageUsageApi(props.openType).then(resp => {
+    storageUsage.value = resp.data;
+  }).catch(() => {});
 };
 
 // 下载文件
@@ -692,6 +946,11 @@ const changeDirectory = (subFilePath, index = -1) => {
 };
 
 const openFile = (file) => {
+  // 批量模式：点击切换选中状态
+  if (batchMode.value) {
+    toggleSelection(file);
+    return;
+  }
   //获取扩展名
   const dotIndex = file.fileName.lastIndexOf('.');
   let extName = null;
@@ -701,7 +960,13 @@ const openFile = (file) => {
 
   if (file.fileType === 'directory') {
     // 如果是目录，打开目录界面
-    filePath.value = file.filePath + file.fileName + '/';
+    if (searchActive.value) {
+      // 在搜索结果中点目录：跳转浏览到该目录的位置
+      filePath.value = file.filePath + file.fileName + '/';
+      exitSearch();
+    } else {
+      filePath.value = file.filePath + file.fileName + '/';
+    }
   } else if (file.fileType === 'image') {
     // 打开文件预览
     imageIndex.value = getImageIndex(file);
@@ -996,8 +1261,16 @@ watch(() => route.params.path, (newPath) => {
   queryFileList();
 }, { immediate: true });
 
-// 初始化文件列表
+// 初始化文件列表 + 配额
 queryFileList();
+loadStorageUsage();
+
+// 切换 openType（仅 prop 变化时触发，例如从私人切到公共）也要重新拉配额
+watch(() => props.openType, () => {
+  exitBatch();
+  exitSearch();
+  loadStorageUsage();
+});
 </script>
 
 <style scoped>
@@ -1067,6 +1340,119 @@ queryFileList();
   display: flex;
   gap: var(--space-2);
   flex-shrink: 0;
+  align-items: center;
+}
+
+.file-search-input {
+  width: 240px;
+}
+
+.file-search-info {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  min-width: 0;
+}
+
+.file-search-info-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+/* 配额条 */
+.quota-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px var(--space-5);
+  background: var(--color-bg-base);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.quota-bar-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.quota-bar-used {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.quota-bar-total {
+  color: var(--color-text-tertiary);
+}
+
+.quota-bar-count {
+  color: var(--color-text-tertiary);
+  margin-left: 8px;
+}
+
+.quota-bar-progress {
+  width: 280px;
+  max-width: 100%;
+}
+
+/* 批量栏 */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px var(--space-5);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.batch-bar-count {
+  font-size: var(--font-size-sm);
+  color: var(--accent);
+  font-weight: var(--font-weight-medium);
+  margin-right: var(--space-2);
+}
+
+/* 卡片选中态 */
+.file-card.file-card-batch {
+  cursor: pointer;
+  position: relative;
+}
+
+.file-card.file-card-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.file-card-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.9);
+  border: 1.5px solid var(--color-border-default);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.file-card-checkbox.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.file-card-check-icon {
+  width: 14px;
+  height: 14px;
+  color: white;
 }
 
 /* ---------- Empty state ---------- */
