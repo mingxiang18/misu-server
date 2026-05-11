@@ -281,6 +281,30 @@ public class FileController {
     }
 
     /**
+     * 读取文本文件内容
+     */
+    @GetMapping({"/textContent"})
+    @ApiOperation(value="读取文本文件内容")
+    public AjaxResult textContent(
+            @RequestParam("openType") @NotNull(message = "文件公开类型不能为空") Integer openType,
+            @RequestParam("filePath") @jakarta.validation.constraints.NotBlank(message = "文件路径不能为空") String filePath) {
+        return AjaxResult.success(fileService.getTextContent(openType, filePath));
+    }
+
+    /**
+     * 覆盖保存文本文件
+     */
+    @PostMapping({"/saveText"})
+    @ApiOperation(value="保存文本文件内容")
+    @Audited(value = AuditAction.EDIT_TEXT,
+            openTypeExpr = "#request.openType",
+            virtualPathExpr = "#request.filePath")
+    public AjaxResult saveText(@Valid @RequestBody com.misu.fileServer.domain.dto.SaveTextRequestDto request) {
+        fileService.saveTextContent(request);
+        return AjaxResult.success();
+    }
+
+    /**
      * 续传探测：返回已经落盘的分片索引；前端可据此跳过已传分片。
      */
     @GetMapping({"/getUploadStatus"})

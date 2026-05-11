@@ -46,6 +46,7 @@ import {ElMessage} from "element-plus";
 import { useRoute } from 'vue-router';
 import { useBreakpoint } from '@/composables/useBreakpoint';
 import logger from '@/utils/logger';
+import request from '@/api/request';
 
 const { isMobile } = useBreakpoint();
 
@@ -75,21 +76,25 @@ const getNodeClass = (node) => {
 };
 
 // 选择文件并加载
+// 走 axios 实例：拦截器会自动加 Authorization Bearer，避免跨域 fetch 不带 cookie 时鉴权失败
 const onFileSelected = () => {
-  fetch(url)
-      .then(response => {
-        if (!response.ok) {
-          ElMessage.error("网络异常，无法获取到文件");
-        }
-        return response.arrayBuffer();  // 获取文件的二进制数据
-      })
-      .then(file => {
-        loadEpub(file);
-      })
-      .catch(error => {
-        logger.error('Error fetching file:', error);
-        ElMessage.error("epub载入失败");
-      });
+  // url 形如 "http://localhost:30260/fileServer/file/stream?openType=0&filePath=foo.epub"
+  // axios 已配置 baseURL=VITE_BASE_API，去掉前缀再交给它
+  const baseApi = (import.meta.env.VITE_BASE_API || '').replace(/\/$/, '');
+  let target = String(url || '');
+  if (baseApi && target.startsWith(baseApi)) {
+    target = target.substring(baseApi.length);
+  }
+  request({
+    url: target,
+    method: 'get',
+    responseType: 'arraybuffer'
+  }).then(buf => {
+    loadEpub(buf);
+  }).catch(error => {
+    logger.error('Error fetching epub:', error);
+    ElMessage.error("epub载入失败");
+  });
 };
 
 // 加载 EPUB 文件

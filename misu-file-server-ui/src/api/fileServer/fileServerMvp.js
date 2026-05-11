@@ -91,6 +91,28 @@ export function checkUploadByHash(payload) {
 }
 
 /**
+ * 读取文本文件内容（≤1 MB）
+ */
+export function getTextContent({ openType, filePath }) {
+    return request({
+        url: '/fileServer/file/textContent',
+        method: 'get',
+        params: { openType, filePath }
+    })
+}
+
+/**
+ * 覆盖保存文本文件
+ */
+export function saveTextContent({ openType, filePath, content }) {
+    return request({
+        url: '/fileServer/file/saveText',
+        method: 'post',
+        data: { openType, filePath, content }
+    })
+}
+
+/**
  * 续传探测：传入目标 (openType, filePath, fileName, totalChunks)，返回已传分片索引。
  */
 export function getUploadStatus({ openType, fileName, filePath, totalChunks }) {

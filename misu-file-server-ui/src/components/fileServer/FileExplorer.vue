@@ -110,6 +110,7 @@
           <Picture v-if="file.fileType === 'image' && !file.previewLink" class="file-show"/>
           <Document v-if="file.fileType === 'other'" class="file-show"/>
           <Document v-if="file.fileType === 'document'" class="file-show file-show-document"/>
+          <Document v-if="file.fileType === 'text'" class="file-show file-show-text"/>
           <div v-if="file.fileType === 'video'" class="video-file-show">
             <el-image v-if="!!file.videoPreviewLink" class="video-preview"
                       :src="downloadBaseUrl + file.videoPreviewLink"
@@ -362,7 +363,6 @@
         <li @click="onMenuItemClick('download')">下载</li>
         <li v-if="menuChooseFile && menuChooseFile.fileType === 'directory'" @click="onMenuItemClick('downloadZip')">下载为 ZIP</li>
         <li @click="onMenuItemClick('move')">移动/重命名</li>
-        <li @click="onMenuItemClick('share')">临时下载链</li>
         <li v-if="menuChooseFile && menuChooseFile.fileType !== 'directory'" @click="onMenuItemClick('externalShare')">外链分享…</li>
         <li v-if="canSharePrivateFileToPublic" @click="onMenuItemClick('shareToPublic')">共享到公共目录</li>
         <li @click="onMenuItemClick('delete')">删除</li>
@@ -384,7 +384,6 @@ import {
   moveFile as moveFileApi,
   deleteFile as deleteFileApi,
   createDirectory as createDirectoryApi,
-  getFileDownloadLink,
   sharePrivateFileToPublic as sharePrivateFileToPublicApi
 } from '@/api/fileServer/fileServer';
 import {
@@ -694,8 +693,6 @@ const onMenuItemClick = (option) => {
     moveFileDialogVisible.value = true;
   }else if (option === 'delete') {
     deleteFile(menuChooseFile.value);
-  }else if (option === 'share') {
-    shareFile(menuChooseFile.value);
   }else if (option === 'externalShare') {
     openExternalShareDialog(menuChooseFile.value);
   }else if (option === 'shareToPublic') {
@@ -980,23 +977,6 @@ const deleteFile = (file) => {
   })
 }
 
-// 分享文件
-const shareFile = (file) => {
-  getFileDownloadLink(buildApiFilePath(file.filePath, file.fileName), props.openType).then((response) => {
-    let shareLink = downloadBaseUrl + response.data;
-
-    ElMessageBox.alert(
-        '当前链接1天内有效：<a style="word-break: break-all;">' + shareLink + '</a>',
-        '分享',
-        {
-          dangerouslyUseHTMLString: true,
-        }
-    )
-  }).catch(() => {
-    ElMessage.error('获取分享链接失败')
-  })
-}
-
 const openShareToPublicDialog = (file) => {
   if (!file) {
     return;
@@ -1123,6 +1103,10 @@ const openFile = (file) => {
   }else if (file.fileType === 'document' || (!!extName && extName.toLowerCase() === 'pdf')) {
     // F9：PDF 走浏览器原生 iframe 渲染（支持打印/缩放/搜索）
     router.push({ path: '/fileServer/pdfViewer', query: { url: downloadBaseUrl + file.streamLink, name: file.fileName }});
+  }else if (file.fileType === 'text') {
+    // 文本文件 → 内置编辑器（≤1 MB 可读写）
+    const path = buildApiFilePath(file.filePath, file.fileName);
+    router.push({ path: '/fileServer/textViewer', query: { openType: props.openType, filePath: path }});
   }else if (!!extName && extName === 'epub'){
     //跳转到epub浏览目录
     router.push({path: '/fileServer/epubViewer', query: { url: downloadBaseUrl + file.streamLink}});

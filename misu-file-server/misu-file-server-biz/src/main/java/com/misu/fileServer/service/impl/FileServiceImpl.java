@@ -1789,6 +1789,87 @@ public class FileServiceImpl implements FileService {
         return dto;
     }
 
+    /** 文本预览/编辑大小上限（1 MB） */
+    private static final long TEXT_PREVIEW_MAX_BYTES = 1024 * 1024L;
+
+    @Override
+    public TextContentResponseDto getTextContent(Integer openType, String filePath) {
+        if (openType == null) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不能为空");
+        }
+        Path resolved = resolveUserRequestFile(new FileRequestDto(filePath, openType));
+        File file = resolved.toFile();
+        if (!file.exists() || file.isDirectory()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或为目录");
+        }
+        if (file.length() > TEXT_PREVIEW_MAX_BYTES) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST,
+                    "文件过大（>" + (TEXT_PREVIEW_MAX_BYTES / 1024) + "KB），不支持在线编辑");
+        }
+        TextContentResponseDto dto = new TextContentResponseDto();
+        dto.setSizeBytes(file.length());
+        try {
+            byte[] bytes = Files.readAllBytes(resolved);
+            String encodingHint = null;
+            int offset = 0;
+            // UTF-8 BOM 检测
+            if (bytes.length >= 3
+                    && (bytes[0] & 0xFF) == 0xEF
+                    && (bytes[1] & 0xFF) == 0xBB
+                    && (bytes[2] & 0xFF) == 0xBF) {
+                encodingHint = "utf-8-bom";
+                offset = 3;
+            }
+            // 检测疑似二进制（前 8KB 含 NUL 字节）
+            int probe = Math.min(bytes.length, 8 * 1024);
+            boolean binaryLikely = false;
+            for (int i = 0; i < probe; i++) {
+                if (bytes[i] == 0) { binaryLikely = true; break; }
+            }
+            dto.setEncodingHint(encodingHint);
+            dto.setBinaryLikely(binaryLikely);
+            dto.setContent(new String(bytes, offset, bytes.length - offset, StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new ServiceException(HttpStatus.ERROR, "读取文件失败：" + e.getMessage());
+        }
+        return dto;
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public void saveTextContent(SaveTextRequestDto request) {
+        checkPublicWriteAuthority(request.getOpenType());
+        Path resolved = resolveUserRequestFile(new FileRequestDto(request.getFilePath(), request.getOpenType()));
+        File file = resolved.toFile();
+        if (!file.exists() || file.isDirectory()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件不存在或为目录");
+        }
+        // 写入限制：内容字节数也卡在 1 MB
+        byte[] data = (request.getContent() == null ? "" : request.getContent()).getBytes(StandardCharsets.UTF_8);
+        if (data.length > TEXT_PREVIEW_MAX_BYTES) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST,
+                    "内容过大（>" + (TEXT_PREVIEW_MAX_BYTES / 1024) + "KB）");
+        }
+        try {
+            Files.write(resolved, data);
+            // 内容变了，重置 mapping 的 fileSize / file_md5
+            LoginUser loginUser = LoginMessageUtil.getLoginUser()
+                    .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
+            String mappingUserId = getMappingUserId(request.getOpenType(), loginUser.getUserId().toString());
+            String relativePath = FilePathGuard.normalizeRelativePath(request.getFilePath());
+            fileMappingRepository.findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(
+                    request.getOpenType(), mappingUserId, relativePath
+            ).ifPresent(m -> {
+                m.setFileSize((long) data.length);
+                m.setFileMd5(DigestUtils.md5Hex(data));
+                m.setUpdateTime(LocalDateTime.now());
+                fileMappingRepository.save(m);
+            });
+        } catch (IOException e) {
+            throw new ServiceException(HttpStatus.ERROR, "写入文件失败：" + e.getMessage());
+        }
+    }
+
     @Override
     public UploadStatusResponseDto getUploadStatus(Integer openType, String fileName, String filePath, Integer totalChunks) {
         if (openType == null) {

@@ -16,4 +16,5 @@ public final class AuditAction {
     public static final String SHARE_CREATE = "SHARE_CREATE";
     public static final String SHARE_REVOKE = "SHARE_REVOKE";
     public static final String HASH_INSTANT_UPLOAD = "HASH_INSTANT_UPLOAD";
+    public static final String EDIT_TEXT = "EDIT_TEXT";
 }

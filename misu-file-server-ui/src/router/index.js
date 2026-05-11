@@ -16,6 +16,7 @@ import AuditLogView from '@/components/fileServer/AuditLogView.vue';
 import BotChat from '@/components/bot/BotChat.vue';
 import EpubViewer from '@/components/utils/EpubViewer.vue';
 import PdfViewer from '@/components/utils/PdfViewer.vue';
+import TextViewer from '@/components/utils/TextViewer.vue';
 import LanguageLearn from "@/components/languageLearn/LanguageLearn.vue";
 
 const routes = [
@@ -37,6 +38,7 @@ const routes = [
             { path: 'fileServer/audit', component: AuditLogView, name: 'AuditLogView' },
             { path: 'fileServer/epubViewer', component: EpubViewer, name: 'EpubViewer' },
             { path: 'fileServer/pdfViewer', component: PdfViewer, name: 'PdfViewer' },
+            { path: 'fileServer/textViewer', component: TextViewer, name: 'TextViewer' },
             { path: 'bot', component: BotChat, name: 'BotChat' },
         ],
     },

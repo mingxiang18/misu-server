@@ -156,4 +156,14 @@ public interface FileService {
      * 续传探测：返回已经落盘的分片索引；前端可据此跳过已传分片。
      */
     UploadStatusResponseDto getUploadStatus(Integer openType, String fileName, String filePath, Integer totalChunks);
+
+    /**
+     * 读取文本文件内容（限 1 MB，UTF-8 解码）。
+     */
+    TextContentResponseDto getTextContent(Integer openType, String filePath);
+
+    /**
+     * 覆盖保存文本文件（UTF-8）。
+     */
+    void saveTextContent(SaveTextRequestDto request);
 }

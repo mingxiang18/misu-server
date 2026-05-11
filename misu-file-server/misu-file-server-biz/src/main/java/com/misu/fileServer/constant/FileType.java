@@ -6,5 +6,7 @@ public class FileType {
     public static final String VIDEO_FILE = "video";
     /** 浏览器原生可预览的文档（PDF）— v1.1 仅 PDF；Office 走外部预览服务后续再做 */
     public static final String DOCUMENT_FILE = "document";
+    /** 文本类（txt/md/json/源码等）— 可在线预览 + 编辑 */
+    public static final String TEXT_FILE = "text";
     public static final String OTHER_FILE = "other";
 }
