@@ -1,162 +1,130 @@
 <template>
   <div class="epub-reader">
-    <!-- EPUB 内容展示 -->
-    <div class="reader-container" ref="readerContainer">
-      <!-- This will hold the rendered EPUB content -->
+    <div class="epub-toolbar">
+      <el-button @click="goBack" size="small" :icon="ArrowLeft">返回</el-button>
+      <span class="epub-title" :title="bookTitle">{{ bookTitle || 'EPUB 阅读' }}</span>
+      <span class="epub-progress" v-if="progress != null">{{ Math.round(progress * 100) }}%</span>
+      <el-button @click="openToc" size="small" :icon="Menu" v-if="toc.length > 0">目录</el-button>
     </div>
 
-    <!-- 翻页控制按钮 -->
-    <div class="controls">
-      <el-button @click="previousPage">上一页</el-button>
-      <el-button @click="openToc">目录</el-button>
-      <el-button @click="nextPage">下一页</el-button>
+    <div class="epub-stage" ref="stageRef">
+      <!-- foliate-view 在 mount 后 JS 注入 -->
     </div>
+
+    <div class="epub-controls">
+      <el-button @click="prev" size="default" :icon="ArrowLeftBold">上一页</el-button>
+      <el-button @click="next" size="default" :icon="ArrowRightBold">下一页</el-button>
+    </div>
+
+    <el-dialog v-model="tocVisible" title="目录" :width="isMobile ? 'calc(100vw - 32px)' : '480px'">
+      <div class="epub-toc">
+        <div v-for="(item, i) in flatToc" :key="i"
+             class="epub-toc-item"
+             :style="{ paddingLeft: (12 + item.depth * 16) + 'px' }"
+             @click="goToHref(item.href)">
+          {{ item.label }}
+        </div>
+      </div>
+    </el-dialog>
   </div>
-
-  <!-- 目录对话框 -->
-  <el-dialog
-      v-model="tocVisible"
-      :width="isMobile ? undefined : 'min(640px, 80vw)'"
-      :fullscreen="isMobile"
-      title="目录">
-
-    <!-- 目录展示 -->
-    <div class="toc-container">
-      <el-tree
-          :data="toc"
-          node-key="href"
-          :props="tocProps"
-          :default-expanded-keys="[selectedChapter]"
-          @nodeClick="goToChapter"
-          check-strictly>
-        <template #default="{ node, data }">
-          <span class="custom-tree-node" :class="getNodeClass(node)">
-            <span>{{ node.label }}</span>
-          </span>
-        </template>
-      </el-tree>
-    </div>
-  </el-dialog>
 </template>
 
 <script setup>
-import {ref, onMounted} from 'vue';
-import Epub from 'epubjs';
-import {ElMessage} from "element-plus";
-import { useRoute } from 'vue-router';
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { ArrowLeft, Menu, ArrowLeftBold, ArrowRightBold } from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
 import { useBreakpoint } from '@/composables/useBreakpoint';
-import logger from '@/utils/logger';
 import request from '@/api/request';
+// foliate-js 是 ES module，import 触发 <foliate-view> custom element 注册
+import '@/lib/foliate-js/view.js';
 
+const route = useRoute();
+const router = useRouter();
 const { isMobile } = useBreakpoint();
 
-// 接收外部传入的接口函数
-const route = useRoute();
-const url = route.query.url;  // 获取文件请求url
-
-const readerContainer = ref();  // 用来挂载 EPUB 渲染内容的元素
-let book = null;
-let rendition = null;
-
-//目录相关
+const url = route.query.url;
+const stageRef = ref();
+const bookTitle = ref('');
+const toc = ref([]);
 const tocVisible = ref(false);
-const toc = ref([]);  // 存储目录内容
-const selectedChapter = ref('');  // 当前选中的章节ID
+const progress = ref(null);
+let view = null;
 
-const tocProps = {
-  children: 'subitems',
-  label: 'label',
-  id: 'href',
-}
-
-// 返回节点的 CSS 类
-const getNodeClass = (node) => {
-  // 如果节点的 id 等于当前选中的章节 ID，则为该节点添加选中样式
-  return node.data.href === selectedChapter.value ? 'selected-node' : '';
-};
-
-// 选择文件并加载
-// 走 axios 实例：拦截器会自动加 Authorization Bearer，避免跨域 fetch 不带 cookie 时鉴权失败
-const onFileSelected = () => {
-  // url 形如 "http://localhost:30260/fileServer/file/stream?openType=0&filePath=foo.epub"
-  // axios 已配置 baseURL=VITE_BASE_API，去掉前缀再交给它
-  const baseApi = (import.meta.env.VITE_BASE_API || '').replace(/\/$/, '');
-  let target = String(url || '');
-  if (baseApi && target.startsWith(baseApi)) {
-    target = target.substring(baseApi.length);
-  }
-  request({
-    url: target,
-    method: 'get',
-    responseType: 'arraybuffer'
-  }).then(buf => {
-    loadEpub(buf);
-  }).catch(error => {
-    logger.error('Error fetching epub:', error);
-    ElMessage.error("epub载入失败");
-  });
-};
-
-// 加载 EPUB 文件
-const loadEpub = (file) => {
-  book = Epub(file);  // 使用 epub.js 加载 EPUB 文件
-
-  // 初始化 EPUB 渲染
-  rendition = book.renderTo(readerContainer.value, {
-    width: '100%',
-    height: '100%',
-    flow: 'scrolled', // 设置为上下滚动
-  });
-
-  // 获取书籍的元数据（如作者、标题等）
-  book.loaded.metadata.then((metadata) => {
-    logger.debug('Metadata:', metadata);
-  });
-
-  // 获取目录并存储到 toc 中
-  book.loaded.navigation.then((tocData) => {
-    toc.value = tocData.toc;
-  });
-
-  // 显示书籍的第一个章节
-  rendition.display();
-
-  // 监听章节变化，更新目录选中项
-  rendition.on('relocated', (location) => {
-    const currentSection = location.start.href;
-    if (currentSection) {
-      selectedChapter.value = currentSection; // 更新当前选中的章节
+const flatToc = computed(() => {
+  const out = [];
+  const walk = (items, depth) => {
+    for (const it of items) {
+      out.push({ label: it.label, href: it.href, depth });
+      if (it.subitems && it.subitems.length > 0) walk(it.subitems, depth + 1);
     }
-  });
+  };
+  walk(toc.value || [], 0);
+  return out;
+});
+
+const openToc = () => { tocVisible.value = true; };
+const goToHref = async (href) => {
+  if (!view) return;
+  tocVisible.value = false;
+  try { await view.goTo(href); } catch (e) { ElMessage.error('跳转失败'); }
+};
+const prev = () => view?.prev?.();
+const next = () => view?.next?.();
+
+const goBack = () => {
+  if (window.history.length > 1) router.back();
+  else router.push('/fileServer/privateDirectory');
 };
 
-// 跳转到指定章节
-const goToChapter = (data) => {
-  rendition.display(data.href);
-  selectedChapter.value = data.href;  // 更新选中的章节
-};
+const loadEpub = async () => {
+  try {
+    // 走 axios 拿 ArrayBuffer 自动带 Authorization
+    const baseApi = (import.meta.env.VITE_BASE_API || '').replace(/\/$/, '');
+    let target = String(url || '');
+    if (baseApi && target.startsWith(baseApi)) target = target.substring(baseApi.length);
+    const buf = await request({ url: target, method: 'get', responseType: 'arraybuffer' });
+    const blob = new Blob([buf], { type: 'application/epub+zip' });
+    const file = new File([blob], 'book.epub', { type: 'application/epub+zip' });
 
-// 打开目录
-const openToc = () => {
-  tocVisible.value = true;
-};
+    view = document.createElement('foliate-view');
+    view.style.cssText = 'display: block; width: 100%; height: 100%;';
+    stageRef.value.appendChild(view);
 
-// 显示上一页
-const previousPage = () => {
-  if (rendition) {
-    rendition.prev();
+    view.addEventListener('relocate', (e) => {
+      progress.value = e.detail?.fraction ?? null;
+    });
+
+    await view.open(file);
+    bookTitle.value = pickMeta(view.book?.metadata?.title);
+    toc.value = view.book?.toc || [];
+    // 渲染到第一个 section（view.open 不自动 navigate）
+    if (view.renderer) {
+      view.renderer.setAttribute('flow', isMobile.value ? 'scrolled' : 'paginated');
+    }
+    // 跳到首节（resolveNavigation 要求数字 / href string / CFI；这里用数字 0）
+    try {
+      await view.goTo(0);
+    } catch (e) {
+      console.warn('initial goTo failed', e);
+    }
+  } catch (e) {
+    console.error('epub load failed', e);
+    ElMessage.error('EPUB 加载失败：' + (e?.message || e));
   }
 };
 
-// 显示下一页
-const nextPage = () => {
-  if (rendition) {
-    rendition.next();
-  }
+// metadata.title 可能是字符串或多语言对象 {en: ..., zh: ...}
+const pickMeta = (m) => {
+  if (!m) return '';
+  if (typeof m === 'string') return m;
+  return m.zh || m['zh-cn'] || m['zh-CN'] || m.en || Object.values(m)[0] || '';
 };
 
-onMounted(() => {
-  onFileSelected();
+onMounted(loadEpub);
+onBeforeUnmount(() => {
+  try { view?.close?.(); } catch (e) {}
+  view = null;
 });
 </script>
 
@@ -164,53 +132,77 @@ onMounted(() => {
 .epub-reader {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  padding: var(--space-2);
-  height: 100%;
-  /* 全屏阅读时铺满容器，避免父级滚动条 */
-  min-height: 100%;
+  height: 100dvh;
+  background: var(--color-bg-base);
+}
+
+@supports not (height: 100dvh) {
+  .epub-reader { height: 100vh; }
+}
+
+.epub-toolbar {
+  display: flex;
+  align-items: center;
   gap: var(--space-2);
-}
-
-@media (max-width: 640px) {
-  .epub-reader {
-    padding: var(--space-1);
-  }
-}
-
-.reader-container {
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border-subtle);
   background: var(--color-bg-surface);
-  width: 100%;
-  /* 用 flex 占据剩余空间，避免 92% 在 dvh 不可计算时塌掉 */
+  flex-shrink: 0;
+}
+
+.epub-title {
+  flex: 1 1 auto;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.epub-progress {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  margin-right: 8px;
+}
+
+.epub-stage {
   flex: 1 1 0;
   min-height: 0;
+  position: relative;
+  background: var(--color-bg-surface);
   overflow: hidden;
 }
 
-.toc-container {
-  width: 100%;
-  max-height: min(70vh, 480px);
+.epub-controls {
+  display: flex;
+  gap: var(--space-2);
+  padding: 10px 16px;
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-surface);
+  flex-shrink: 0;
+}
+
+.epub-controls .el-button {
+  flex: 1 1 auto;
+  min-height: 40px;
+}
+
+.epub-toc {
+  max-height: min(60vh, 480px);
   overflow-y: auto;
 }
 
-.controls {
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  width: 100%;
-  padding-top: var(--space-2);
+.epub-toc-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--color-text-primary);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  transition: background var(--duration-fast) var(--ease-standard);
 }
 
-.controls .el-button {
-  flex: 1 1 auto;
-  min-height: 44px;
-}
-
-.selected-node {
-  color: var(--accent);
-  font-weight: var(--font-weight-medium);
+.epub-toc-item:hover {
+  background: var(--color-bg-hover);
 }
 </style>
