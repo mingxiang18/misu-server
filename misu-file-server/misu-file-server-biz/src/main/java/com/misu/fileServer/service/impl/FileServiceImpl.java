@@ -10,6 +10,7 @@ import com.misu.fileServer.domain.dto.*;
 import com.misu.fileServer.domain.entity.FileMapping;
 import com.misu.fileServer.repository.FileMappingRepository;
 import com.misu.fileServer.service.FileService;
+import com.misu.fileServer.service.FileVersionService;
 import com.misu.fileServer.service.PreviewService;
 import com.misu.fileServer.service.UploadConcurrencyGuard;
 import com.misu.fileServer.service.VideoTranscodeService;
@@ -118,6 +119,9 @@ public class FileServiceImpl implements FileService {
 
     @Resource
     private UploadConcurrencyGuard uploadConcurrencyGuard;
+
+    @Resource
+    private FileVersionService fileVersionService;
 
     private final AtomicBoolean backfillRunning = new AtomicBoolean(false);
     private volatile LocalDateTime backfillStartTime;
@@ -425,6 +429,8 @@ public class FileServiceImpl implements FileService {
                     String contentMd5 = mergeChunks(file, fileMD5, fileUploadRequest.getTotalChunks());
                     //上传完成后执行后置操作
                     fileAddAfter(file);
+                    // M18：覆盖上传场景，先给旧 mapping 打快照（异常不影响主流程）
+                    existingMapping.ifPresent(m -> fileVersionService.snapshotIfEligible(m, "OVERWRITE"));
                     saveOrUpdateFileMapping(fileUploadRequest.getOpenType(),
                             mappingUserId,
                             virtualPath,
@@ -1262,6 +1268,8 @@ public class FileServiceImpl implements FileService {
                     log.warn("物理文件清理失败，id={}, targetPath={}", mapping.getId(), targetPath);
                     return;
                 }
+                // M18：GC 物理清除时级联清版本快照
+                fileVersionService.purgeAllVersionsForMapping(mapping.getId());
                 fileMappingRepository.delete(mapping);
             });
         }
@@ -1570,6 +1578,8 @@ public class FileServiceImpl implements FileService {
                 }
             }
         }
+        // M18：级联清版本快照（不论物理还在不在）
+        fileVersionService.purgeAllVersionsForMapping(mapping.getId());
         fileMappingRepository.delete(mapping);
     }
 
@@ -1850,16 +1860,22 @@ public class FileServiceImpl implements FileService {
             throw new ServiceException(HttpStatus.BAD_REQUEST,
                     "内容过大（>" + (TEXT_PREVIEW_MAX_BYTES / 1024) + "KB）");
         }
+
+        // 找到 mapping（需要在写入前拿到，用于快照）
+        LoginUser loginUser = LoginMessageUtil.getLoginUser()
+                .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
+        String mappingUserId = getMappingUserId(request.getOpenType(), loginUser.getUserId().toString());
+        String relativePath = FilePathGuard.normalizeRelativePath(request.getFilePath());
+        Optional<FileMapping> mappingOpt = fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(
+                        request.getOpenType(), mappingUserId, relativePath);
+
+        // M18：写入前快照旧内容
+        mappingOpt.ifPresent(m -> fileVersionService.snapshotIfEligible(m, "TEXT_EDIT"));
+
         try {
             Files.write(resolved, data);
-            // 内容变了，重置 mapping 的 fileSize / file_md5
-            LoginUser loginUser = LoginMessageUtil.getLoginUser()
-                    .orElseThrow(() -> new ServiceException(HttpStatus.UNAUTHORIZED, "用户未登录"));
-            String mappingUserId = getMappingUserId(request.getOpenType(), loginUser.getUserId().toString());
-            String relativePath = FilePathGuard.normalizeRelativePath(request.getFilePath());
-            fileMappingRepository.findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(
-                    request.getOpenType(), mappingUserId, relativePath
-            ).ifPresent(m -> {
+            mappingOpt.ifPresent(m -> {
                 m.setFileSize((long) data.length);
                 m.setFileMd5(DigestUtils.md5Hex(data));
                 m.setUpdateTime(LocalDateTime.now());
@@ -1948,6 +1964,9 @@ public class FileServiceImpl implements FileService {
         if (hit.isEmpty()) {
             return new HashUploadCheckResponseDto(0, "未命中秒传，请走完整上传");
         }
+
+        // M18：覆盖场景（同位置同文件名）先快照旧文件
+        existingAtSamePath.ifPresent(m -> fileVersionService.snapshotIfEligible(m, "HASH_DEDUP"));
 
         FileMapping reuse = existingAtSamePath.orElseGet(FileMapping::new);
         reuse.setOpenType(request.getOpenType());

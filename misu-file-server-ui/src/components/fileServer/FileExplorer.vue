@@ -262,6 +262,43 @@
       </div>
     </el-dialog>
 
+    <!-- 版本历史弹窗 -->
+    <el-dialog
+        v-model="versionsDialogVisible"
+        :width="isMobile ? 'calc(100vw - 32px)' : '640px'"
+        title="版本历史">
+      <div v-loading="versionsLoading">
+        <p style="color: var(--color-text-secondary); margin: 0 0 8px;">
+          【{{ versionsTargetFileName }}】最近 {{ versionsList.length }} 个版本（每次覆盖前自动留底，超过 5 个删最旧；&gt;50 MB 不留版本）。
+        </p>
+        <el-table v-if="versionsList.length > 0" :data="versionsList" stripe size="small">
+          <el-table-column label="版本" width="80">
+            <template #default="{ row }">v{{ row.versionNo }}</template>
+          </el-table-column>
+          <el-table-column label="时间" width="170">
+            <template #default="{ row }">{{ formatVersionTime(row.createTime) }}</template>
+          </el-table-column>
+          <el-table-column label="大小" width="100">
+            <template #default="{ row }">{{ formatVersionBytes(row.fileSize) }}</template>
+          </el-table-column>
+          <el-table-column label="原因" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" type="info">{{ versionReasonLabel(row.snapshotReason) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" link @click="restoreVersionAction(row)">还原</el-button>
+              <el-button size="small" type="danger" link @click="purgeVersionAction(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div v-else-if="!versionsLoading" style="text-align: center; color: var(--color-text-tertiary); padding: 32px 0;">
+          暂无历史版本
+        </div>
+      </div>
+    </el-dialog>
+
     <!-- 外链分享弹窗 -->
     <el-dialog
         v-model="externalShareDialogVisible"
@@ -364,6 +401,7 @@
         <li v-if="menuChooseFile && menuChooseFile.fileType === 'directory'" @click="onMenuItemClick('downloadZip')">下载为 ZIP</li>
         <li @click="onMenuItemClick('move')">移动/重命名</li>
         <li v-if="menuChooseFile && menuChooseFile.fileType !== 'directory'" @click="onMenuItemClick('externalShare')">外链分享…</li>
+        <li v-if="menuChooseFile && menuChooseFile.fileType !== 'directory'" @click="onMenuItemClick('versions')">版本历史</li>
         <li v-if="canSharePrivateFileToPublic" @click="onMenuItemClick('shareToPublic')">共享到公共目录</li>
         <li @click="onMenuItemClick('delete')">删除</li>
       </ul>
@@ -394,6 +432,7 @@ import {
   buildDirectoryDownloadUrl
 } from '@/api/fileServer/fileServerMvp';
 import { createShare as createShareApi } from '@/api/fileServer/fileShareApi';
+import { listVersions as listVersionsApi, restoreVersion as restoreVersionApi, purgeVersion as purgeVersionApi } from '@/api/fileServer/fileVersionApi';
 import { useRouter, useRoute } from 'vue-router';
 import { playMyVideo } from '@/api/fileServer/videoRoom';
 import FilePathSelector from "@/components/fileServer/FilePathSelector.vue";
@@ -695,6 +734,8 @@ const onMenuItemClick = (option) => {
     deleteFile(menuChooseFile.value);
   }else if (option === 'externalShare') {
     openExternalShareDialog(menuChooseFile.value);
+  }else if (option === 'versions') {
+    openVersionsDialog(menuChooseFile.value);
   }else if (option === 'shareToPublic') {
     openShareToPublicDialog(menuChooseFile.value);
   }
@@ -915,6 +956,71 @@ const copyShareLink = async () => {
     ElMessage.warning('请手动复制链接');
   }
 };
+
+// ===== M18：版本历史 =====
+const versionsDialogVisible = ref(false);
+const versionsLoading = ref(false);
+const versionsTargetFileName = ref('');
+const versionsTargetFilePath = ref('');
+const versionsList = ref([]);
+
+const openVersionsDialog = (file) => {
+  versionsTargetFileName.value = file.fileName;
+  versionsTargetFilePath.value = buildApiFilePath(file.filePath, file.fileName);
+  versionsList.value = [];
+  versionsDialogVisible.value = true;
+  loadVersions();
+};
+
+const loadVersions = () => {
+  versionsLoading.value = true;
+  listVersionsApi({ openType: props.openType, filePath: versionsTargetFilePath.value })
+      .then(resp => { versionsList.value = resp.data || []; })
+      .finally(() => { versionsLoading.value = false; });
+};
+
+const restoreVersionAction = (row) => {
+  ElMessageBox.confirm(
+      `还原到第 ${row.versionNo} 版（${formatVersionTime(row.createTime)}）？当前内容会自动留存为新版本。`,
+      '还原版本',
+      { confirmButtonText: '还原', cancelButtonText: '取消' }
+  ).then(() => {
+    versionsLoading.value = true;
+    restoreVersionApi(row.id).then(() => {
+      ElMessage.success('已还原');
+      loadVersions();
+      queryFileList(true);
+    }).finally(() => { versionsLoading.value = false; });
+  }).catch(() => {});
+};
+
+const purgeVersionAction = (row) => {
+  ElMessageBox.confirm(
+      `删除第 ${row.versionNo} 版快照？删除后该版本无法再还原。`,
+      '删除版本',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+  ).then(() => {
+    versionsLoading.value = true;
+    purgeVersionApi(row.id).then(() => {
+      ElMessage.success('已删除');
+      loadVersions();
+    }).finally(() => { versionsLoading.value = false; });
+  }).catch(() => {});
+};
+
+const formatVersionTime = (t) => t ? String(t).replace('T', ' ').slice(0, 19) : '';
+const formatVersionBytes = (b) => {
+  if (b == null) return '';
+  if (b >= 1024 * 1024) return `${(b / 1024 / 1024).toFixed(2)} MB`;
+  if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${b} B`;
+};
+const versionReasonLabel = (r) => ({
+  OVERWRITE: '覆盖上传',
+  TEXT_EDIT: '文本编辑',
+  HASH_DEDUP: '秒传覆盖',
+  RESTORE_DEMOTE: '还原前留底',
+}[r] || (r || '-'));
 
 // 下载文件
 const downloadFile = (file) => {
