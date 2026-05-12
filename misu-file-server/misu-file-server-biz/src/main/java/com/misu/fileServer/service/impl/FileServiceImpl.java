@@ -52,6 +52,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -98,6 +99,10 @@ public class FileServiceImpl implements FileService {
 
     @Value("${file.quota.privateBytesPerUser:-1}")
     private long privateQuotaBytesPerUser;
+
+    /** 超级管理员维护的 staging 物理目录，给 SCP / 本地挂载等线下方式投递文件用。 */
+    @Value("${file.staging.path:}")
+    private String stagingPath;
 
     @Resource
     private TokenService tokenService;
@@ -1849,6 +1854,165 @@ public class FileServiceImpl implements FileService {
     private void checkAdminViewAuthority() {
         if (!AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
             throw new ServiceException(HttpStatus.FORBIDDEN, "当前用户无权浏览其他用户的文件");
+        }
+    }
+
+    // =====================================================================
+    // M5：staging 物理目录 —— 管理员维护的 "落地区"，可右键共享到公共 / 私人
+    // =====================================================================
+
+    @Override
+    public String getStagingRoot() {
+        checkAdminViewAuthority();
+        return resolveStagingRoot().toString();
+    }
+
+    @Override
+    public List<StagingEntryDto> listStaging(String subPath) {
+        checkAdminViewAuthority();
+        Path root = resolveStagingRoot();
+        ensureDirectoryExists(root);
+        Path target = FilePathGuard.resolveInsideRoot(root.toString(), StringUtils.defaultString(subPath), true);
+        if (!Files.exists(target) || !Files.isDirectory(target)) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "staging 子目录不存在");
+        }
+
+        List<StagingEntryDto> entries = new ArrayList<>();
+        try (Stream<Path> stream = Files.list(target)) {
+            stream.forEach(child -> entries.add(toStagingEntry(root, child)));
+        } catch (IOException e) {
+            log.error("列出 staging 目录失败 target={}", target, e);
+            throw new ServiceException(HttpStatus.ERROR, "读取 staging 目录失败");
+        }
+
+        entries.sort(Comparator
+                .comparing(StagingEntryDto::getDirectory, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(StagingEntryDto::getName, Comparator.nullsLast(String::compareToIgnoreCase)));
+        return entries;
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public void shareStagingToPublic(ShareStagingRequestDto request) {
+        if (!AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
+            throw new ServiceException(HttpStatus.FORBIDDEN, "当前用户无权共享 staging 文件到公共目录");
+        }
+        File physicalRoot = resolveStagingSource(request.getSourceStagingPath());
+        String targetVirtualPath = resolveStagingTargetVirtualPath(physicalRoot, request.getTargetVirtualPath());
+        ensurePublicTargetDirectoryAvailable(targetVirtualPath);
+        mapPhysicalTreeToVirtualPaths(1, "public", targetVirtualPath, physicalRoot);
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public void shareStagingToUser(ShareStagingRequestDto request) {
+        if (!AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
+            throw new ServiceException(HttpStatus.FORBIDDEN, "当前用户无权共享 staging 文件到用户私人目录");
+        }
+        if (StringUtils.isBlank(request.getTargetUserId())) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "目标用户ID不能为空");
+        }
+        File physicalRoot = resolveStagingSource(request.getSourceStagingPath());
+        String targetUserId = request.getTargetUserId().trim();
+        String targetVirtualPath = resolveStagingTargetVirtualPath(physicalRoot, request.getTargetVirtualPath());
+        ensurePrivateTargetDirectoryAvailable(targetUserId, targetVirtualPath);
+        mapPhysicalTreeToVirtualPaths(0, targetUserId, targetVirtualPath, physicalRoot);
+    }
+
+    private Path resolveStagingRoot() {
+        String configured = StringUtils.isBlank(stagingPath)
+                ? Path.of(fileServerPath).resolve("staging").toString()
+                : stagingPath;
+        return Path.of(configured).toAbsolutePath().normalize();
+    }
+
+    private void ensureDirectoryExists(Path directory) {
+        try {
+            Files.createDirectories(directory);
+        } catch (IOException e) {
+            throw new ServiceException(HttpStatus.ERROR, "无法创建 staging 目录");
+        }
+    }
+
+    private StagingEntryDto toStagingEntry(Path root, Path child) {
+        StagingEntryDto dto = new StagingEntryDto();
+        dto.setName(child.getFileName().toString());
+        dto.setRelativePath(root.relativize(child).toString().replace("\\", "/"));
+        boolean directory = Files.isDirectory(child);
+        dto.setDirectory(directory);
+        long size = 0L;
+        LocalDateTime lastModified = null;
+        try {
+            if (!directory) {
+                size = Files.size(child);
+            }
+            lastModified = Files.getLastModifiedTime(child).toInstant()
+                    .atZone(ZoneId.systemDefault()).toLocalDateTime();
+        } catch (IOException ignored) {
+            // 单条失败不影响整体列表
+        }
+        dto.setSize(size);
+        dto.setLastModified(lastModified);
+        return dto;
+    }
+
+    private File resolveStagingSource(String sourceStagingPath) {
+        Path root = resolveStagingRoot();
+        ensureDirectoryExists(root);
+        Path target = FilePathGuard.resolveInsideRoot(root.toString(), sourceStagingPath);
+        File source = target.toFile();
+        if (!source.exists()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "staging 源文件不存在");
+        }
+        return source;
+    }
+
+    private String resolveStagingTargetVirtualPath(File physicalRoot, String requestedTargetPath) {
+        if (StringUtils.isBlank(requestedTargetPath)) {
+            return FilePathGuard.normalizeFileName(physicalRoot.getName());
+        }
+        String normalized = FilePathGuard.normalizeRelativePath(requestedTargetPath, true);
+        if (StringUtils.isBlank(normalized)) {
+            return FilePathGuard.normalizeFileName(physicalRoot.getName());
+        }
+        // 如果用户传的是目录式路径（末尾 /），则在其下使用源文件名
+        if (requestedTargetPath.endsWith("/")) {
+            return normalized + "/" + FilePathGuard.normalizeFileName(physicalRoot.getName());
+        }
+        return normalized;
+    }
+
+    private void ensurePublicTargetDirectoryAvailable(String targetVirtualPath) {
+        String parent = getParentPath(targetVirtualPath);
+        if (StringUtils.isNotBlank(parent)) {
+            FileMapping parentMapping = fileMappingRepository
+                    .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(1, "public", parent)
+                    .orElseThrow(() -> new ServiceException(HttpStatus.BAD_REQUEST, "公共目标目录不存在：" + parent));
+            if (!FileType.DIRECTORY_FILE.equals(parentMapping.getFileType())) {
+                throw new ServiceException(HttpStatus.BAD_REQUEST, "公共目标父级不是目录");
+            }
+        }
+        if (fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(1, "public", targetVirtualPath)
+                .isPresent()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "公共目录已存在同名文件或文件夹");
+        }
+    }
+
+    private void ensurePrivateTargetDirectoryAvailable(String userId, String targetVirtualPath) {
+        String parent = getParentPath(targetVirtualPath);
+        if (StringUtils.isNotBlank(parent)) {
+            FileMapping parentMapping = fileMappingRepository
+                    .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(0, userId, parent)
+                    .orElseThrow(() -> new ServiceException(HttpStatus.BAD_REQUEST, "用户目标目录不存在：" + parent));
+            if (!FileType.DIRECTORY_FILE.equals(parentMapping.getFileType())) {
+                throw new ServiceException(HttpStatus.BAD_REQUEST, "用户目标父级不是目录");
+            }
+        }
+        if (fileMappingRepository
+                .findFirstByOpenTypeAndUserIdAndVirtualPathAndDeletedFalse(0, userId, targetVirtualPath)
+                .isPresent()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "用户目录已存在同名文件或文件夹");
         }
     }
 

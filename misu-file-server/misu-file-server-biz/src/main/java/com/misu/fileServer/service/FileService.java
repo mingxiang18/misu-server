@@ -158,6 +158,26 @@ public interface FileService {
     List<FileResponseDto> listFilesAsAdmin(Integer openType, String userId, String parentPath);
 
     /**
+     * 获取 staging 物理根目录（管理员维护用的物理目录入口）。
+     */
+    String getStagingRoot();
+
+    /**
+     * 列出 staging 物理目录下的条目，不依赖 file_mapping，按目录优先 + 文件名升序排序。
+     */
+    List<StagingEntryDto> listStaging(String subPath);
+
+    /**
+     * 把 staging 物理文件 / 目录共享到公共目录。
+     */
+    void shareStagingToPublic(ShareStagingRequestDto request);
+
+    /**
+     * 把 staging 物理文件 / 目录共享到指定用户的私人目录。
+     */
+    void shareStagingToUser(ShareStagingRequestDto request);
+
+    /**
      * 哈希秒传校验：命中则直接落 mapping 复用底层物理文件，不命中再走完整分片上传。
      */
     HashUploadCheckResponseDto checkUploadByHash(HashUploadCheckRequestDto request);
