@@ -83,6 +83,10 @@ video:
     preset: medium
     audio-bitrate: 128k
     profile-version: hevc-aac-mp4-1080p-v1
+    # 容器化 worker 的管理 API 地址；prod 默认 misu-ffmpeg-worker.misu-server.svc.cluster.local:18765
+    # 本地 dev 跑 Mac 上的 worker 时可以指向 127.0.0.1:18765
+    worker:
+      base-url: http://127.0.0.1:18765
 
 # 文件下载/上传/映射 GC（沿用 application.yml 默认值）
 file:

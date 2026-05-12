@@ -15,8 +15,10 @@ RUN sed -i 's|https://dl-cdn.alpinelinux.org|https://mirrors.aliyun.com|g' /etc/
 
 WORKDIR /app
 
-COPY detect-encoder.sh worker-linux.sh entrypoint.sh /app/
-RUN chmod +x /app/detect-encoder.sh /app/worker-linux.sh /app/entrypoint.sh
+COPY detect-encoder.sh worker-linux.sh worker-api.py entrypoint.sh /app/
+RUN chmod +x /app/detect-encoder.sh /app/worker-linux.sh /app/worker-api.py /app/entrypoint.sh
+
+EXPOSE 18765
 
 ENV USER_FILE_ROOT=/data/user-file \
     CONTAINER_USER_FILE_ROOT=/app/user-file \
@@ -25,7 +27,8 @@ ENV USER_FILE_ROOT=/data/user-file \
     POLL_INTERVAL=5 \
     KEEP_LOCAL_WORK=0 \
     AUDIO_BITRATE=128k \
-    MAX_TASK_RETRIES=1
+    MAX_TASK_RETRIES=1 \
+    WORKER_API_PORT=18765
 
 # tini 作为 PID 1，确保 SIGTERM 能干净传到 worker-linux.sh（含 ffmpeg）
 ENTRYPOINT ["/sbin/tini", "--", "/app/entrypoint.sh"]

@@ -17,6 +17,42 @@
         </div>
       </div>
 
+      <el-card class="worker-card" :class="workerCardClass" shadow="never">
+        <template #header>
+          <div class="worker-card-header">
+            <div class="worker-card-title">
+              <span class="worker-dot" :class="workerStatusDotClass"></span>
+              <strong>Worker 状态</strong>
+              <el-tag size="small" :type="workerStatusTagType">{{ workerStatusLabel }}</el-tag>
+            </div>
+            <div class="muted worker-card-updated" v-if="workerState.updatedAt">
+              更新于 {{ workerState.updatedAt }}
+            </div>
+          </div>
+        </template>
+        <div class="worker-grid">
+          <div class="worker-cell">
+            <span>编码器</span>
+            <strong>{{ workerState.encoder || '-' }}</strong>
+          </div>
+          <div class="worker-cell">
+            <span>当前任务</span>
+            <strong class="worker-current-task">{{ workerState.currentTask?.taskId || '空闲' }}</strong>
+          </div>
+          <div class="worker-cell worker-cell-progress" v-if="workerState.currentTask">
+            <span>进度</span>
+            <el-progress
+              :percentage="workerState.currentTask?.progress || 0"
+              :stroke-width="10"
+            />
+          </div>
+          <div class="worker-cell">
+            <span>消息</span>
+            <strong class="worker-message">{{ workerState.message || '-' }}</strong>
+          </div>
+        </div>
+      </el-card>
+
       <div class="summary">
         <div class="summary-item">
           <span>等待</span>
@@ -122,6 +158,7 @@ import {
   retryFailedTask
 } from '@/api/fileServer/videoTranscodeAdmin'
 import {getFileMappingBackfillStatus, startFileMappingBackfill} from '@/api/fileServer/fileAdmin'
+import {getWorkerState} from '@/api/fileServer/transcodeWorker'
 import { useBreakpoint } from '@/composables/useBreakpoint'
 
 const { isMobile } = useBreakpoint()
@@ -138,11 +175,28 @@ const startingBackfill = ref(false)
 const backfillStatus = ref({})
 let backfillTimer = null
 
+const workerState = ref({})
+const workerOnline = ref(false)
+let workerTimer = null
+
+const loadWorkerState = async () => {
+  try {
+    const response = await getWorkerState()
+    workerState.value = response.data || {}
+    workerOnline.value = true
+  } catch (e) {
+    // 502 / 5xx 表示 worker pod 不可达；保留上次 state，仅翻 online 旗
+    workerOnline.value = false
+  }
+}
+
 onMounted(() => {
   if (isAdmin.value) {
     loadTasks()
     loadBackfillStatus()
+    loadWorkerState()
     backfillTimer = setInterval(loadBackfillStatus, 3000)
+    workerTimer = setInterval(loadWorkerState, 5000)
   }
 })
 
@@ -151,7 +205,36 @@ onBeforeUnmount(() => {
     clearInterval(backfillTimer)
     backfillTimer = null
   }
+  if (workerTimer) {
+    clearInterval(workerTimer)
+    workerTimer = null
+  }
 })
+
+const workerStatusLabel = computed(() => {
+  if (!workerOnline.value) return 'OFFLINE'
+  const s = workerState.value.workerState
+  if (s === 'RUNNING') return '转码中'
+  if (s === 'IDLE') return '空闲'
+  if (s === 'STARTING') return '启动中'
+  return s || '未知'
+})
+
+const workerStatusTagType = computed(() => {
+  if (!workerOnline.value) return 'danger'
+  const s = workerState.value.workerState
+  if (s === 'RUNNING') return 'warning'
+  if (s === 'IDLE') return 'success'
+  return 'info'
+})
+
+const workerStatusDotClass = computed(() => {
+  if (!workerOnline.value) return 'dot-offline'
+  if (workerState.value.workerState === 'RUNNING') return 'dot-running'
+  return 'dot-idle'
+})
+
+const workerCardClass = computed(() => (workerOnline.value ? '' : 'worker-card-offline'))
 
 const loadTasks = async () => {
   loading.value = true
@@ -286,6 +369,81 @@ h2 {
   justify-content: flex-end;
 }
 
+.worker-card {
+  margin-bottom: var(--space-3);
+}
+
+.worker-card-offline {
+  border-color: var(--color-danger);
+}
+
+.worker-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.worker-card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.worker-card-updated {
+  font-size: var(--font-size-xs);
+}
+
+.worker-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot-idle { background: var(--color-success); }
+.dot-running {
+  background: var(--color-warning);
+  animation: worker-pulse 1.4s ease-in-out infinite;
+}
+.dot-offline { background: var(--color-danger); }
+
+@keyframes worker-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.8); }
+}
+
+.worker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.worker-cell span {
+  display: block;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.worker-cell strong {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  word-break: break-all;
+}
+
+.worker-current-task,
+.worker-message {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-tight);
+}
+
+.worker-cell-progress {
+  grid-column: span 2;
+}
+
 .summary {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -372,6 +530,14 @@ h2 {
 
   .backfill-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .worker-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .worker-cell-progress {
+    grid-column: span 2;
   }
 }
 </style>
