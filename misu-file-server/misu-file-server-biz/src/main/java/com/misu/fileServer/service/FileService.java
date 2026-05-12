@@ -148,6 +148,16 @@ public interface FileService {
     StorageUsageResponseDto getStorageUsage(Integer openType);
 
     /**
+     * 管理员视角：查看指定用户在指定 openType 下的存储用量。
+     */
+    StorageUsageResponseDto getStorageUsageAsAdmin(Integer openType, String userId);
+
+    /**
+     * 管理员视角：列出指定用户在指定 openType / parentPath 下的文件。openType=1 公共时 userId 自动归一为 "public"。
+     */
+    List<FileResponseDto> listFilesAsAdmin(Integer openType, String userId, String parentPath);
+
+    /**
      * 哈希秒传校验：命中则直接落 mapping 复用底层物理文件，不命中再走完整分片上传。
      */
     HashUploadCheckResponseDto checkUploadByHash(HashUploadCheckRequestDto request);

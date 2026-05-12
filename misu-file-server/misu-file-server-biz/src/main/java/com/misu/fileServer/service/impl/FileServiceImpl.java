@@ -1805,6 +1805,53 @@ public class FileServiceImpl implements FileService {
         return dto;
     }
 
+    @Override
+    public StorageUsageResponseDto getStorageUsageAsAdmin(Integer openType, String userId) {
+        if (openType == null) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不能为空");
+        }
+        checkAdminViewAuthority();
+        String mappingUserId = getMappingUserId(openType, StringUtils.defaultString(userId).trim());
+        if (openType == 0 && StringUtils.isBlank(userId)) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "用户ID不能为空");
+        }
+        StorageUsageResponseDto dto = new StorageUsageResponseDto();
+        dto.setOpenType(openType);
+        dto.setUsedBytes(fileMappingRepository.sumUsedBytes(openType, mappingUserId));
+        dto.setFileCount(fileMappingRepository.countUsedFiles(openType, mappingUserId));
+        if (openType == 0 && privateQuotaBytesPerUser > 0) {
+            dto.setQuotaBytes(privateQuotaBytesPerUser);
+        }
+        return dto;
+    }
+
+    @Override
+    public List<FileResponseDto> listFilesAsAdmin(Integer openType, String userId, String parentPath) {
+        if (openType == null) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件公开类型不能为空");
+        }
+        checkAdminViewAuthority();
+        if (openType == 0 && StringUtils.isBlank(userId)) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "用户ID不能为空");
+        }
+        String mappingUserId = getMappingUserId(openType, StringUtils.defaultString(userId).trim());
+        String relativePath = FilePathGuard.normalizeRelativePath(parentPath, true);
+        return fileMappingRepository
+                .findByOpenTypeAndUserIdAndParentPathAndDeletedFalseOrderByFileTypeDescFileNameAsc(
+                        openType, mappingUserId, relativePath)
+                .stream()
+                .map(this::toFileResponseDto)
+                .filter(dto -> dto.getFile() != null && dto.getFile().exists())
+                .peek(dto -> dto.setFile(null))
+                .collect(Collectors.toList());
+    }
+
+    private void checkAdminViewAuthority() {
+        if (!AuthorityUtil.hasAuthority(Arrays.asList(UserRole.ADMIN, UserRole.FILE_ADMIN))) {
+            throw new ServiceException(HttpStatus.FORBIDDEN, "当前用户无权浏览其他用户的文件");
+        }
+    }
+
     /** 文本预览/编辑大小上限（1 MB） */
     private static final long TEXT_PREVIEW_MAX_BYTES = 1024 * 1024L;
 
