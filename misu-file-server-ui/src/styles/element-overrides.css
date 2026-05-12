@@ -67,9 +67,9 @@
   --el-box-shadow-lighter: var(--shadow-sm);
   --el-box-shadow-dark: var(--shadow-lg);
 
-  /* Mask */
-  --el-mask-color: rgba(31, 27, 22, 0.32);
-  --el-mask-color-extra-light: rgba(31, 27, 22, 0.12);
+  /* Mask — warm cream wash (匹配 --color-bg-base #FAF8F5)，避免 table v-loading 出现黑色阴影 */
+  --el-mask-color: rgba(250, 248, 245, 0.72);
+  --el-mask-color-extra-light: rgba(250, 248, 245, 0.45);
 
   /* 过渡 */
   --el-transition-duration: var(--duration-base);
@@ -93,4 +93,18 @@
 .el-input__inner,
 .el-textarea__inner {
   font-size: var(--font-size-md);
+}
+
+/* ---------- Loading spinner：浅色 mask 下用品牌色描边/文字保持对比 ---------- */
+.el-loading-mask {
+  backdrop-filter: blur(2px);
+}
+.el-loading-spinner .circular .path {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.el-loading-spinner .el-loading-text {
+  color: var(--accent-strong);
+  font-weight: 500;
+  margin-top: var(--space-2);
 }
