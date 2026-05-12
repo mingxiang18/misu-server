@@ -280,7 +280,7 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
     }
 
     @Override
-    @Transactional(value = "fileServerTransactionManager", readOnly = true)
+    @Transactional("fileServerTransactionManager")
     public Page<VideoTranscodeJobDto> queryJobs(String state, String queueState, String keyword, Pageable pageable) {
         checkAdmin();
         reconcileFromDisk();

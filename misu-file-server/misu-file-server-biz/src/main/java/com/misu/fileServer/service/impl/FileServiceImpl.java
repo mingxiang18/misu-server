@@ -1840,7 +1840,7 @@ public class FileServiceImpl implements FileService {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "用户ID不能为空");
         }
         String mappingUserId = getMappingUserId(openType, StringUtils.defaultString(userId).trim());
-        String relativePath = FilePathGuard.normalizeRelativePath(parentPath, true);
+        String relativePath = FilePathGuard.normalizeRelativePath(StringUtils.defaultString(parentPath), true);
         return fileMappingRepository
                 .findByOpenTypeAndUserIdAndParentPathAndDeletedFalseOrderByFileTypeDescFileNameAsc(
                         openType, mappingUserId, relativePath)

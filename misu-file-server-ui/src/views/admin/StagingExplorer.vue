@@ -269,7 +269,7 @@ const searchUsers = async (keyword) => {
   try {
     const response = await listUsers({ userName: keyword || undefined })
     const data = response.data || {}
-    const content = data.content || data.records || data || []
+    const content = data.list || data.content || data.records || []
     userDialog.users = Array.isArray(content) ? content : []
   } finally {
     userDialog.usersLoading = false

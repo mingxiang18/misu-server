@@ -171,9 +171,10 @@ const loadUsers = async () => {
     // 后端 selectUserPage 暂未支持 pageNum / pageSize 参数；这里调用并直接消费返回值
     const response = await listUsers({ userName: userQuery.userName || undefined })
     const data = response.data || {}
-    const content = data.content || data.records || data || []
+    // 后端 AjaxResult.success(Page) → PageResult.buildPageResult：{ list, total, totalPages, pageSize, pageNumber }
+    const content = data.list || data.content || data.records || []
     users.value = Array.isArray(content) ? content : []
-    userPagination.total = data.totalElements || data.total || users.value.length
+    userPagination.total = data.total ?? data.totalElements ?? users.value.length
   } finally {
     usersLoading.value = false
   }

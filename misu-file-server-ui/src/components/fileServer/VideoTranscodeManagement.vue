@@ -364,8 +364,9 @@ const loadJobs = async () => {
       size: pagination.size
     })
     const page = response.data || {}
-    jobs.value = page.content || []
-    pagination.total = page.totalElements || 0
+    // 后端 AjaxResult.success(Page) 走 PageResult.buildPageResult 包装：{ list, total, totalPages, pageSize, pageNumber }
+    jobs.value = page.list || page.content || []
+    pagination.total = page.total ?? page.totalElements ?? 0
   } finally {
     loading.value = false
   }
