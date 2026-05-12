@@ -38,17 +38,26 @@ public class QBitTorrentApi {
     private String password;
 
     /**
-     * qBitTorrent登陆后的cookie
+     * qBitTorrent登陆后的cookie ("name=value" 整段；老版本是 SID=xxx，新版本 v5+ 是 QBT_SID_<port>=xxx)
      */
     private static final String cookieKey = "qBitTorrent-cookie";
 
-    private final Pattern cookeSidRegex = Pattern.compile("SID=([^;]+)");
+    /**
+     * 匹配 qBitTorrent 登录返回的 Set-Cookie 中的 SID 段。
+     * 兼容两种格式：
+     *   - 旧版: "SID=xxx"
+     *   - v5+ : "QBT_SID_<port>=xxx" (端口后缀方便用户同时跑多实例)
+     * 捕获完整的 "name=value" 整段（含 cookie name 自身）；后续直接拼到
+     * Cookie 请求头里，避免硬编码"SID"前缀对不上服务端实际期待的 cookie name。
+     */
+    private final Pattern cookieSidRegex = Pattern.compile("((?:QBT_)?SID(?:_\\d+)?=[^;]+)");
 
     @Resource
     private RestUtils restUtils;
 
     /**
      * 登录
+     * @return 完整的 "cookieName=value" 字符串（不带分号/HttpOnly 等属性），供后续请求 Cookie 头直接复用
      */
     public String login() {
         String loginUrl = apiBaseUrl + "/api/v2/auth/login";
@@ -61,24 +70,18 @@ public class QBitTorrentApi {
         try (ClientHttpResponse response = restUtils.postByForm(loginUrl, dataMap, new TypeReference<ClientHttpResponse>() {});) {
             // 获取响应中的 Set-Cookie 头（如果有）
             List<String> cookies = response.getHeaders().get(HttpHeaders.SET_COOKIE);
-            if (cookies != null) {
-                for (String cookie : cookies) {
-                    // 格式：SID=O+ro863UEuLukR3JVdBml/biw/CSDVqZ; HttpOnly; SameSite=Strict; path=/
-                    // 提取SID
-                    Matcher matcher = cookeSidRegex.matcher(cookie);
-                    if (matcher.find()) {
-                        // 提取 SID 值
-                        return matcher.group(1);
-                    } else {
-                        throw new ServiceException(HttpStatus.ERROR, "无法获取qBitTorrent的cookie的sid");
-                    }
-                }
-            } else {
-                throw new ServiceException(HttpStatus.ERROR, "登录qBitTorrent失败");
+            if (cookies == null || cookies.isEmpty()) {
+                throw new ServiceException(HttpStatus.ERROR, "登录qBitTorrent失败：响应无 Set-Cookie，多半是账号密码错或 qBitTorrent 配了 IP 白名单豁免（白名单豁免下 body=Ok. 但不发 cookie）");
             }
+            for (String cookie : cookies) {
+                // 格式举例：QBT_SID_30120=Bp6V/...; HttpOnly; SameSite=Strict; path=/
+                Matcher matcher = cookieSidRegex.matcher(cookie);
+                if (matcher.find()) {
+                    return matcher.group(1);
+                }
+            }
+            throw new ServiceException(HttpStatus.ERROR, "无法在 qBitTorrent 的 Set-Cookie 里找到 SID 段：" + cookies);
         }
-
-        return null;
     }
 
     /**
@@ -134,6 +137,7 @@ public class QBitTorrentApi {
 
     /**
      * 登录qBitTorrent获取cookie
+     * 返回的 HttpHeaders 已经设置好 Cookie 头，可直接交给后续请求。
      */
     private HttpHeaders getCookieHeader() {
         //从缓存获取，如果没有则调用登录接口获取
@@ -143,9 +147,9 @@ public class QBitTorrentApi {
             CacheUtils.setCacheObject(cookieKey, cookie);
         }
 
-        //封装为cookie的header
+        //封装为cookie的header。cookie 变量本身就是 "name=value" 整段，直接放进 Cookie 头。
         HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.set(HttpHeaders.COOKIE, "SID=" + cookie);
+        httpHeaders.set(HttpHeaders.COOKIE, cookie);
 
         //检查cookie是否有效
         try {
@@ -157,7 +161,7 @@ public class QBitTorrentApi {
                 //如果cookie无效，重新登录并更新cookie
                 cookie = login();
                 CacheUtils.setCacheObject(cookieKey, cookie);
-                httpHeaders.set(HttpHeaders.COOKIE, "SID=" + cookie);
+                httpHeaders.set(HttpHeaders.COOKIE, cookie);
             } else {
                 throw se;
             }
