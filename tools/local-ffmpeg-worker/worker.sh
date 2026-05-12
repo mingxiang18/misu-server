@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Legacy Mac-side SSH worker. 生产环境优先用 worker-linux.sh + Dockerfile
+# (k8s 部署见 tools/local-ffmpeg-worker/k8s/)，本文件保留作开发机一次性回灌用途。
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
