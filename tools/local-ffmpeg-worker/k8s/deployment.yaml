@@ -43,7 +43,7 @@ spec:
         supplementalGroups: [44, 27, 107, 109, 110, 989, 990]
       containers:
         - name: misu-ffmpeg-worker
-          image: 10.8.0.26:30500/misuaa/misu-ffmpeg-worker:0.0.7
+          image: 10.8.0.26:30500/misuaa/misu-ffmpeg-worker:0.0.8
           imagePullPolicy: IfNotPresent
           # privileged 用来打开 device cgroup —— k8s 默认即便 hostPath 把
           # /dev/dri/renderD128 挂进来，字符设备 cgroup 仍然 deny。

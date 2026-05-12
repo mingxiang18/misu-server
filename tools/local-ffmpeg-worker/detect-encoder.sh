@@ -68,9 +68,9 @@ detect_encoder() {
   if echo "$encoders" | grep -q "hevc_vaapi" && [[ -e /dev/dri/renderD128 ]]; then
     if probe_encoder "vaapi" \
         "-vaapi_device /dev/dri/renderD128" \
-        "-c:v hevc_vaapi -qp 23"; then
+        "-c:v hevc_vaapi -qp 23 -tag:v hvc1"; then
       # 全 GPU pipeline：hwaccel vaapi 硬解 → scale_vaapi GPU 缩放 → hevc_vaapi 硬编
-      VIDEO_ENCODER_ARGS="-c:v hevc_vaapi -qp 23"
+      VIDEO_ENCODER_ARGS="-c:v hevc_vaapi -qp 23 -tag:v hvc1"
       HWACCEL_INPUT_ARGS="-hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128 -extra_hw_frames 8"
       SCALE_FILTER_TYPE="vaapi"
       ENCODER_NAME="hevc_vaapi"

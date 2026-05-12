@@ -474,7 +474,7 @@ run_ffmpeg_task() {
         hwaccel_args=()
         scale_type="cpu-then-hwupload"
         # 软解 + CPU scale + 硬编 (hwupload 把 CPU 帧上传到 GPU)
-        video_args=(-vaapi_device /dev/dri/renderD128 -c:v hevc_vaapi -qp 23)
+        video_args=(-vaapi_device /dev/dri/renderD128 -c:v hevc_vaapi -qp 23 -tag:v hvc1)
         ;;
     esac
   fi
