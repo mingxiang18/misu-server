@@ -1735,7 +1735,7 @@ watch(() => props.openType, () => {
 .file-container {
   padding: var(--space-4) var(--space-5) var(--space-6);
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
   gap: var(--space-3);
   align-content: start;
 }
@@ -1743,8 +1743,8 @@ watch(() => props.openType, () => {
 @media (max-width: 640px) {
   .file-container {
     padding: var(--space-3) var(--space-4) var(--space-12);
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: var(--space-3);
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: var(--space-2);
   }
 }
 
@@ -1802,19 +1802,25 @@ watch(() => props.openType, () => {
   background: var(--color-bg-surface);
 }
 
-/* Element Plus 图标是线条风格，原 80% 大小在大卡片里显得空洞细弱。
-   固定到 48px（移动 40px），让图标视觉更聚焦。
+@media (max-width: 640px) {
+  .file-card-footer {
+    padding: var(--space-1) var(--space-2) !important;
+  }
+}
+
+/* Element Plus 图标线条风格，密度收紧后用 40px (桌面) / 32px (移动)，
+   配合更紧凑的卡片宽度让一屏能看到更多文件。
    颜色：文件夹用 accent（导航主体），其他类型用 text-secondary 中性色。 */
 .file-show {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   color: var(--color-text-secondary);
 }
 
 @media (max-width: 640px) {
   .file-show {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
   }
 }
 
@@ -1881,6 +1887,12 @@ watch(() => props.openType, () => {
   font-size: var(--font-size-sm);
   line-height: var(--line-height-tight);
   color: var(--color-text-primary);
+}
+
+@media (max-width: 640px) {
+  .wrap-and-ellipsis {
+    font-size: var(--font-size-xs);
+  }
 }
 
 /* ---------- Fullscreen drag overlay (desktop only) ---------- */
