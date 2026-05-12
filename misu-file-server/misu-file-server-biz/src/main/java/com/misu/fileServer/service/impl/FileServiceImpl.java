@@ -158,7 +158,7 @@ public class FileServiceImpl implements FileService {
             for (FileResponseDto responseDto : fileList) {
                 //封装文件预览路径
                 packagePreviewLink(fileRequestDto.getOpenType(), responseDto);
-                packageVideoTranscodeInfo(fileRequestDto.getOpenType(), responseDto);
+                packageVideoTranscodeInfo(fileRequestDto.getOpenType(), userId, responseDto);
 
                 //设置下载路径
                 responseDto.setDownloadLink(createUserFileAccessLink("/download", fileRequestDto.getFilePath() + responseDto.getFileName(),
@@ -174,12 +174,18 @@ public class FileServiceImpl implements FileService {
         }
     }
 
-    private void packageVideoTranscodeInfo(Integer openType, FileResponseDto responseDto) {
+    private void packageVideoTranscodeInfo(Integer openType, String mappingUserId, FileResponseDto responseDto) {
         if (!FileType.VIDEO_FILE.equals(responseDto.getFileType())) {
             return;
         }
 
-        VideoTranscodeStatusDto status = videoTranscodeService.getOrCreateTranscodeStatus(responseDto.getFile());
+        String virtualPath = StringUtils.defaultString(responseDto.getFilePath())
+                + StringUtils.defaultString(responseDto.getFileName());
+        if (virtualPath.startsWith("/")) {
+            virtualPath = virtualPath.substring(1);
+        }
+        VideoTranscodeStatusDto status = videoTranscodeService.getOrCreateTranscodeStatus(
+                responseDto.getFile(), openType, mappingUserId, virtualPath);
         responseDto.setTranscodeState(status.getState());
         responseDto.setTranscodeProgress(status.getProgress());
         responseDto.setTranscodeMessage(status.getMessage());
@@ -1474,7 +1480,7 @@ public class FileServiceImpl implements FileService {
                 .filter(dto -> dto.getFile() != null && dto.getFile().exists())
                 .peek(dto -> {
                     packagePreviewLink(request.getOpenType(), dto);
-                    packageVideoTranscodeInfo(request.getOpenType(), dto);
+                    packageVideoTranscodeInfo(request.getOpenType(), mappingUserId, dto);
                     String virtualPath = StringUtils.stripStart(dto.getFilePath(), "/") + dto.getFileName();
                     dto.setDownloadLink(createUserFileAccessLink("/download", virtualPath, request.getOpenType()));
                     dto.setStreamLink(createUserFileAccessLink("/stream", virtualPath, request.getOpenType()));
