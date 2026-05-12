@@ -58,4 +58,14 @@ public interface VideoTranscodeService {
      * @return 实际重排数量
      */
     int reTranscodeJobsBatch(List<String> taskIds);
+
+    /**
+     * 把指定 taskId 集合提到队列最前面 —— 通过给 .task 文件加 "!priority-" 前缀实现（worker 按文件名 ASCII
+     * 升序领取，'!' 0x21 < '0' 0x30 < 字母）。
+     *
+     * <p>已在 RUNNING 队列的任务无法被抢占；处于 FAILED / DONE 的任务会先被 re-enqueue 再标 priority。</p>
+     *
+     * @return 实际提升优先级的任务数量
+     */
+    int prioritizeJobsBatch(List<String> taskIds);
 }

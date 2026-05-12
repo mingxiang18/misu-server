@@ -46,6 +46,14 @@ export function reTranscodeBatch(taskIds) {
     })
 }
 
+export function prioritizeTranscodeBatch(taskIds) {
+    return request({
+        url: '/fileServer/videoTranscodeAdmin/prioritizeBatch',
+        method: 'post',
+        data: { taskIds }
+    })
+}
+
 export function recoverRunningTasks() {
     return request({
         url: '/fileServer/videoTranscodeAdmin/recoverRunningTasks',

@@ -49,4 +49,6 @@ public class VideoTranscodeJobDto {
     private Boolean retryable;
 
     private Boolean reTranscodeable;
+
+    private Boolean priority;
 }

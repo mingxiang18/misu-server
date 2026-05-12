@@ -71,6 +71,12 @@ public class VideoTranscodeAdminController {
         return AjaxResult.success(videoTranscodeService.reTranscodeJobsBatch(requestDto.getTaskIds()));
     }
 
+    @PostMapping("/prioritizeBatch")
+    @ApiOperation(value = "按 taskId 列表把队列内任务提为最优先")
+    public AjaxResult prioritizeBatch(@Valid @RequestBody VideoTranscodeBatchRequestDto requestDto) {
+        return AjaxResult.success(videoTranscodeService.prioritizeJobsBatch(requestDto.getTaskIds()));
+    }
+
     @PostMapping("/recoverRunningTasks")
     @ApiOperation(value = "恢复运行中断的视频转码任务")
     public AjaxResult recoverRunningTasks() {

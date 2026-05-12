@@ -95,6 +95,15 @@ public class VideoTranscodeJob {
     @Column(name = "enqueue_count", nullable = false)
     private Integer enqueueCount = 1;
 
+    /**
+     * 是否被设为最优先：worker 按 .task 文件名升序拾取，priority=true 的任务在队列中带 "!priority-" 前缀，
+     * 保证在常规 taskId 之前被领取。
+     */
+    @NotNull
+    @ColumnDefault("0")
+    @Column(name = "priority", nullable = false)
+    private Boolean priority = false;
+
     @Column(name = "last_enqueued_at")
     private LocalDateTime lastEnqueuedAt;
 

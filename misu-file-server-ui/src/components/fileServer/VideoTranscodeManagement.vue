@@ -98,6 +98,15 @@
       <div class="batch-actions">
         <span class="batch-summary muted">已选 {{ selectedIds.length }} 项</span>
         <el-button
+          type="danger"
+          :icon="Top"
+          :disabled="selectedIds.length === 0"
+          :loading="prioritizing"
+          @click="prioritizeBatchHandler"
+        >
+          设为最优先
+        </el-button>
+        <el-button
           type="primary"
           :icon="RefreshRight"
           :disabled="selectedIds.length === 0"
@@ -134,9 +143,12 @@
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="队列" width="110">
+        <el-table-column label="队列" width="140">
           <template #default="{ row }">
-            <el-tag :type="queueTagType(row.queueState)">{{ row.queueState || 'UNKNOWN' }}</el-tag>
+            <div class="queue-cell">
+              <el-tag :type="queueTagType(row.queueState)">{{ row.queueState || 'UNKNOWN' }}</el-tag>
+              <el-tag v-if="row.priority" type="danger" size="small" effect="dark">最优先</el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="120">
@@ -183,8 +195,15 @@
             <span class="muted">{{ formatTime(row.updateTime) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
+            <el-button
+              v-if="canPrioritize(row)"
+              type="danger"
+              link
+              :icon="Top"
+              @click="prioritizeOne(row)"
+            >置顶</el-button>
             <el-button v-if="row.retryable" type="primary" link :icon="RefreshRight" @click="retryOne(row)">重试</el-button>
             <el-button
               v-if="row.reTranscodeable"
@@ -193,7 +212,7 @@
               :icon="VideoCamera"
               @click="reTranscodeOne(row)"
             >重转</el-button>
-            <span v-if="!row.retryable && !row.reTranscodeable" class="muted">-</span>
+            <span v-if="!row.retryable && !row.reTranscodeable && !canPrioritize(row)" class="muted">-</span>
           </template>
         </el-table-column>
       </el-table>
@@ -253,11 +272,12 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CaretRight, CopyDocument, Refresh, RefreshLeft, RefreshRight, Search, VideoCamera } from '@element-plus/icons-vue'
+import { CaretRight, CopyDocument, Refresh, RefreshLeft, RefreshRight, Search, Top, VideoCamera } from '@element-plus/icons-vue'
 import { getUserInfo } from '@/api/user/user'
 import {
   getTranscodeJobs,
   getTranscodeTaskSummary,
+  prioritizeTranscodeBatch,
   recoverRunningTasks,
   reTranscodeBatch,
   retryFailedTask,
@@ -293,6 +313,7 @@ const loading = ref(false)
 const recovering = ref(false)
 const retryingBatch = ref(false)
 const reTranscoding = ref(false)
+const prioritizing = ref(false)
 
 const summary = ref({})
 const jobs = ref([])
@@ -457,6 +478,52 @@ const reTranscodeHandler = async () => {
     loadJobs()
   } finally {
     reTranscoding.value = false
+  }
+}
+
+const canPrioritize = (row) => {
+  if (!row) return false
+  // RUNNING 已被 worker 抢走、TOO_LARGE / UNSUPPORTED 没有可调度的 task 文件，都不允许置顶
+  if (row.queueState === 'RUNNING') return false
+  if (row.state === 'TOO_LARGE' || row.state === 'UNSUPPORTED' || row.state === 'NONE') return false
+  return true
+}
+
+const prioritizeOne = async (row) => {
+  await ElMessageBox.confirm(
+      `确认把 ${shortTaskId(row.taskId)} 提到队列最前？已运行的任务不会被抢占，DONE / FAILED 会先重排到等待队列。`,
+      '设为最优先',
+      { type: 'warning' }
+  )
+  prioritizing.value = true
+  try {
+    const response = await prioritizeTranscodeBatch([row.taskId])
+    if (response.data) {
+      ElMessage.success('已置顶')
+    } else {
+      ElMessage.warning('未能置顶（任务可能已在运行）')
+    }
+    loadJobs()
+  } finally {
+    prioritizing.value = false
+  }
+}
+
+const prioritizeBatchHandler = async () => {
+  const ids = selectedIds.value
+  if (ids.length === 0) return
+  await ElMessageBox.confirm(
+      `确认把所选 ${ids.length} 个任务提到队列最前？已运行的任务不会被抢占；DONE / FAILED 会先重排到等待队列。`,
+      '批量设为最优先',
+      { type: 'warning' }
+  )
+  prioritizing.value = true
+  try {
+    const response = await prioritizeTranscodeBatch(ids)
+    ElMessage.success(`已置顶 ${response.data || 0} 个任务`)
+    loadJobs()
+  } finally {
+    prioritizing.value = false
   }
 }
 
@@ -729,6 +796,13 @@ h2 {
   align-items: center;
   gap: var(--space-1);
   word-break: break-all;
+}
+
+.queue-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
 }
 
 .pager {
