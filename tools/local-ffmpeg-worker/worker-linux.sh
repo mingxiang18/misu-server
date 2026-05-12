@@ -452,13 +452,64 @@ run_ffmpeg_task() {
 
   # shellcheck disable=SC2206
   local video_args=($VIDEO_ENCODER_ARGS)
+  # shellcheck disable=SC2206
+  local hwaccel_args=(${HWACCEL_INPUT_ARGS:-})
+  local scale_type="${SCALE_FILTER_TYPE:-cpu}"
 
-  log "Task $TASK_ID: transcoding with $ENCODER_NAME (${video_args[*]})"
-  publish_status "PROCESSING" "5" "容器内转码中 ($ENCODER_NAME)" "TRANSCODING" || return 1
+  # ---- VAAPI 硬解兼容性预检 ----------------------------------------------------
+  # AMD VCN / Intel iGPU 的 VAAPI 解码只支持 4:2:0 (yuv420p / yuv420p10le / nv12)，
+  # 4:2:2 / 4:4:4 (FUJIFILM、Sony、RED 等专业相机 RAW) 会让 hwaccel 初始化失败，
+  # 导致整条 pipeline 崩溃。这里 ffprobe 抓输入 pix_fmt，遇不支持的就把
+  # hwaccel/scale_vaapi 退回 CPU 软解+CPU scale+hwupload，依然硬编。
+  if [[ "$scale_type" == "vaapi" ]]; then
+    local input_pix_fmt
+    input_pix_fmt="$(ffprobe -v error -select_streams v:0 \
+      -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$LOCAL_SOURCE" 2>/dev/null || true)"
+    case "$input_pix_fmt" in
+      yuv420p|yuv420p10le|yuv420p12le|nv12|nv21)
+        # VAAPI decode 支持，保持全 GPU pipeline
+        ;;
+      *)
+        log "Task $TASK_ID: pix_fmt=$input_pix_fmt VAAPI 解码不支持, 回退 CPU 软解 + 硬编"
+        hwaccel_args=()
+        scale_type="cpu-then-hwupload"
+        # 软解 + CPU scale + 硬编 (hwupload 把 CPU 帧上传到 GPU)
+        video_args=(-vaapi_device /dev/dri/renderD128 -c:v hevc_vaapi -qp 23)
+        ;;
+    esac
+  fi
 
-  ffmpeg -y -i "$LOCAL_SOURCE" \
-    -map 0:v:0 -map 0:a? \
-    -vf "scale='if(gt(ih,$MAX_HEIGHT),-2,iw)':'if(gt(ih,$MAX_HEIGHT),$MAX_HEIGHT,ih)'" \
+  # 按 scale_type 构建对应 scale 滤镜：
+  #   - vaapi             : 整条 GPU pipeline（hwaccel vaapi → scale_vaapi → hevc_vaapi）
+  #   - cuda              : 整条 NVENC pipeline（hwaccel cuda → scale_cuda → hevc_nvenc）
+  #   - cpu-then-hwupload : VAAPI 解码不支持的格式 → CPU 软解 → CPU scale → hwupload → hevc_vaapi
+  #   - cpu               : 全软（libx265），无硬件
+  local vf
+  case "$scale_type" in
+    vaapi)
+      vf="scale_vaapi=w='if(gt(ih\\,${MAX_HEIGHT})\\,trunc(iw*${MAX_HEIGHT}/ih/2)*2\\,iw)':h='if(gt(ih\\,${MAX_HEIGHT})\\,${MAX_HEIGHT}\\,ih)':format=nv12"
+      ;;
+    cuda)
+      vf="scale_cuda=w='if(gt(ih\\,${MAX_HEIGHT})\\,trunc(iw*${MAX_HEIGHT}/ih/2)*2\\,iw)':h='if(gt(ih\\,${MAX_HEIGHT})\\,${MAX_HEIGHT}\\,ih)'"
+      ;;
+    cpu-then-hwupload)
+      vf="scale='if(gt(ih,${MAX_HEIGHT}),-2,iw)':'if(gt(ih,${MAX_HEIGHT}),${MAX_HEIGHT},ih)',format=nv12,hwupload"
+      ;;
+    cpu|*)
+      vf="scale='if(gt(ih,${MAX_HEIGHT}),-2,iw)':'if(gt(ih,${MAX_HEIGHT}),${MAX_HEIGHT},ih)'"
+      ;;
+  esac
+
+  log "Task $TASK_ID: transcoding with $ENCODER_NAME (scale=$scale_type)"
+  publish_status "PROCESSING" "5" "容器内转码中 ($ENCODER_NAME, scale=$scale_type)" "TRANSCODING" || return 1
+
+  # 注意 hwaccel 必须放 -i 之前（input options），${hwaccel_args[@]:+...} 让空数组安全展开。
+  # -ignore_unknown 跳过 ffmpeg 不认识的流（iPhone 17 Pro / iOS 26 录像里的 apac 空间音频、
+  # mebx 元数据等），否则 ffmpeg 会因为找不到 decoder for "none" 而整段失败。
+  # -map 0:a:0? 只取第一条音频（最常用的 AAC），避免误抓到不识别的辅音轨。
+  ffmpeg -y "${hwaccel_args[@]}" -ignore_unknown -i "$LOCAL_SOURCE" \
+    -map 0:v:0 -map 0:a:0? \
+    -vf "$vf" \
     "${video_args[@]}" \
     -c:a aac -b:a "$AUDIO_BITRATE" \
     -movflags +faststart \
@@ -524,7 +575,7 @@ main() {
   log "In-cluster ffmpeg worker started, encoder=$ENCODER_NAME, root=$USER_FILE_ROOT"
   log "Task path map: $CONTAINER_USER_FILE_ROOT -> $USER_FILE_ROOT"
   log "Dashboard state: $STATE_FILE"
-  log "ffmpeg args: $VIDEO_ENCODER_ARGS"
+  log "ffmpeg args: hwaccel='${HWACCEL_INPUT_ARGS:-}' scale=${SCALE_FILTER_TYPE:-cpu} encoder='${VIDEO_ENCODER_ARGS}'"
 
   if [[ "$RECOVER_RUNNING" == "1" ]]; then
     log "Recover running tasks back to queue"
