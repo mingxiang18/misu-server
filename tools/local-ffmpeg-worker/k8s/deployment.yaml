@@ -32,6 +32,7 @@ spec:
       # running/ 任务退回 queue/ 再退。
       terminationGracePeriodSeconds: 60
       # /dev/dri/renderD128 在不同发行版属于不同 group：
+      #   - Ubuntu 26.04 (misu-maco): render(gid 990)
       #   - Debian 12 / Ubuntu 22+: render(gid 109)
       #   - Alpine: video(44) 通常够用
       #   - Fedora: render(989)
@@ -39,11 +40,16 @@ spec:
       # 但保留 supplementalGroups 是 hardening，将来如果改成非 root 跑也能直接用。
       # 节点上查询实际 gid：`ls -ln /dev/dri/renderD128`，第 4 列是 gid。
       securityContext:
-        supplementalGroups: [44, 27, 107, 109, 110, 989]
+        supplementalGroups: [44, 27, 107, 109, 110, 989, 990]
       containers:
         - name: misu-ffmpeg-worker
-          image: 10.8.0.26:30500/misuaa/misu-ffmpeg-worker:0.0.1
+          image: 10.8.0.26:30500/misuaa/misu-ffmpeg-worker:0.0.2
           imagePullPolicy: IfNotPresent
+          # privileged 用来打开 device cgroup —— k8s 默认即便 hostPath 把
+          # /dev/dri/renderD128 挂进来，字符设备 cgroup 仍然 deny。
+          # 单 pod 单节点风险可控；要更精细可换 generic-device-plugin。
+          securityContext:
+            privileged: true
           ports:
             - { name: api, containerPort: 18765 }
           envFrom:
