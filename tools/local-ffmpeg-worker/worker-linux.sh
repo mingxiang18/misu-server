@@ -456,34 +456,12 @@ run_ffmpeg_task() {
   local hwaccel_args=(${HWACCEL_INPUT_ARGS:-})
   local scale_type="${SCALE_FILTER_TYPE:-cpu}"
 
-  # ---- VAAPI 硬解兼容性预检 ----------------------------------------------------
-  # AMD VCN / Intel iGPU 的 VAAPI 解码只支持 4:2:0 (yuv420p / yuv420p10le / nv12)，
-  # 4:2:2 / 4:4:4 (FUJIFILM、Sony、RED 等专业相机 RAW) 会让 hwaccel 初始化失败，
-  # 导致整条 pipeline 崩溃。这里 ffprobe 抓输入 pix_fmt，遇不支持的就把
-  # hwaccel/scale_vaapi 退回 CPU 软解+CPU scale+hwupload，依然硬编。
-  if [[ "$scale_type" == "vaapi" ]]; then
-    local input_pix_fmt
-    input_pix_fmt="$(ffprobe -v error -select_streams v:0 \
-      -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$LOCAL_SOURCE" 2>/dev/null || true)"
-    case "$input_pix_fmt" in
-      yuv420p|yuv420p10le|yuv420p12le|nv12|nv21)
-        # VAAPI decode 支持，保持全 GPU pipeline
-        ;;
-      *)
-        log "Task $TASK_ID: pix_fmt=$input_pix_fmt VAAPI 解码不支持, 回退 CPU 软解 + 硬编"
-        hwaccel_args=()
-        scale_type="cpu-then-hwupload"
-        # 软解 + CPU scale + 硬编 (hwupload 把 CPU 帧上传到 GPU)
-        video_args=(-vaapi_device /dev/dri/renderD128 -c:v hevc_vaapi -qp 23 -tag:v hvc1)
-        ;;
-    esac
-  fi
-
   # 按 scale_type 构建对应 scale 滤镜：
-  #   - vaapi             : 整条 GPU pipeline（hwaccel vaapi → scale_vaapi → hevc_vaapi）
-  #   - cuda              : 整条 NVENC pipeline（hwaccel cuda → scale_cuda → hevc_nvenc）
-  #   - cpu-then-hwupload : VAAPI 解码不支持的格式 → CPU 软解 → CPU scale → hwupload → hevc_vaapi
-  #   - cpu               : 全软（libx265），无硬件
+  #   - vaapi             : 整条 GPU pipeline (env override 强开 hevc_vaapi 时使用)
+  #   - cuda              : 整条 NVENC pipeline
+  #   - cpu (默认)        : libx265 软编，最大兼容性
+  # 关于 VAAPI 硬解兼容性（AMD VCN 仅 4:2:0、Safari SPS flag 兼容性等）
+  # 详见 detect-encoder.sh 注释。
   local vf
   case "$scale_type" in
     vaapi)
@@ -491,9 +469,6 @@ run_ffmpeg_task() {
       ;;
     cuda)
       vf="scale_cuda=w='if(gt(ih\\,${MAX_HEIGHT})\\,trunc(iw*${MAX_HEIGHT}/ih/2)*2\\,iw)':h='if(gt(ih\\,${MAX_HEIGHT})\\,${MAX_HEIGHT}\\,ih)'"
-      ;;
-    cpu-then-hwupload)
-      vf="scale='if(gt(ih,${MAX_HEIGHT}),-2,iw)':'if(gt(ih,${MAX_HEIGHT}),${MAX_HEIGHT},ih)',format=nv12,hwupload"
       ;;
     cpu|*)
       vf="scale='if(gt(ih,${MAX_HEIGHT}),-2,iw)':'if(gt(ih,${MAX_HEIGHT}),${MAX_HEIGHT},ih)'"
