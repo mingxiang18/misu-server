@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: misu-ffmpeg-worker
+  namespace: misu-server
+  labels:
+    app: misuffmpegworker
+spec:
+  type: ClusterIP
+  # 故意不开 NodePort / Ingress：worker API 不做 auth，唯一允许的访问
+  # 路径是 misu-file-server pod (它会做 JWT + ADMIN 校验后透传)。
+  selector:
+    app: misuffmpegworker
+  ports:
+    - name: api
+      port: 18765
+      targetPort: api

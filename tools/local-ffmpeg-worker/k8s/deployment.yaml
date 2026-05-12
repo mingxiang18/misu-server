@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: misu-ffmpeg-worker
+  namespace: misu-server
+  labels:
+    app: misuffmpegworker
+spec:
+  replicas: 1
+  # 与 misu-file-server 同样的 Recreate —— transcode-queue 是 hostPath 上
+  # 文件锁，不能两个 pod 同时 mv 同一个 .task 进 running/。
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: misuffmpegworker
+  template:
+    metadata:
+      labels:
+        app: misuffmpegworker
+    spec:
+      # 必须和 misu-file-server pod 落在同一节点，hostPath 才指向同一份磁盘。
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [misu-maco]
+      # 给 ffmpeg 留 60s grace period，让 worker 的 SIGTERM trap 把
+      # running/ 任务退回 queue/ 再退。
+      terminationGracePeriodSeconds: 60
+      # video 组 (gid 44) 用于访问 /dev/dri (VAAPI)。节点没 iGPU 时也无害。
+      securityContext:
+        supplementalGroups: [44]
+      containers:
+        - name: misu-ffmpeg-worker
+          image: 10.8.0.26:30500/misuaa/misu-ffmpeg-worker:0.0.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: api, containerPort: 18765 }
+          envFrom:
+            - configMapRef:
+                name: misu-ffmpeg-worker-config
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits:   { cpu: 4,    memory: 2Gi  }
+          startupProbe:
+            httpGet: { path: /api/health, port: 18765 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet: { path: /api/health, port: 18765 }
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet: { path: /api/health, port: 18765 }
+            periodSeconds: 10
+          volumeMounts:
+            - { name: user-file, mountPath: /data/user-file }
+            - { name: scratch,   mountPath: /work }
+            - { name: state,     mountPath: /work/state }
+            # 取消注释下两行（并保留 supplementalGroups: 44）以启用 VAAPI 硬编：
+            # - { name: dri,       mountPath: /dev/dri }
+      volumes:
+        - name: user-file
+          hostPath:
+            path: /mnt/misu/misu-server/user-file
+            type: Directory
+        - name: scratch
+          emptyDir:
+            sizeLimit: 8Gi
+        - name: state
+          hostPath:
+            path: /mnt/misu/misu-server/transcode-state
+            type: DirectoryOrCreate
+        # 节点上挂 Intel/AMD iGPU 时去掉下面 # 即可启用 VAAPI 路径：
+        # - name: dri
+        #   hostPath:
+        #     path: /dev/dri
+        #     type: Directory

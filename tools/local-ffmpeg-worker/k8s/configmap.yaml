@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: misu-ffmpeg-worker-config
+  namespace: misu-server
+data:
+  # 与 worker-linux.sh 顶部的默认值同名同义；这里只放需要调的。
+  USER_FILE_ROOT: "/data/user-file"
+  CONTAINER_USER_FILE_ROOT: "/app/user-file"
+  WORK_DIR: "/work"
+  STATE_DIR: "/work/state"
+  POLL_INTERVAL: "5"
+  AUDIO_BITRATE: "128k"
+  MAX_TASK_RETRIES: "1"
+  KEEP_LOCAL_WORK: "0"
+  WORKER_API_PORT: "18765"
+  # VIDEO_ENCODER_ARGS 故意不设，让容器内的 detect-encoder.sh 在启动时
+  # VAAPI → NVENC → libx265 级联探测。需要强制指定时取消注释下一行：
+  # VIDEO_ENCODER_ARGS: "-c:v libx265 -preset slower -crf 26 -tag:v hvc1 -pix_fmt yuv420p"

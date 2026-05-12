@@ -1,0 +1,22 @@
+# 可选：限定只有 misu-file-server pod 能访问 worker API。
+# 集群没启用 NetworkPolicy 控制器 (Calico / Cilium / ...) 时此文件无效。
+# 用法：cp networkpolicy.yaml.example networkpolicy.yaml && kubectl apply -f .
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: misu-ffmpeg-worker-allow-file-server
+  namespace: misu-server
+spec:
+  podSelector:
+    matchLabels:
+      app: misuffmpegworker
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: misufileserver
+      ports:
+        - protocol: TCP
+          port: 18765
