@@ -45,7 +45,8 @@ spec:
                 name: misu-ffmpeg-worker-config
           resources:
             requests: { cpu: 200m, memory: 256Mi }
-            limits:   { cpu: 4,    memory: 2Gi  }
+            # namespace 的 LimitRange 卡 max cpu=2,与 misu-file-server 同款
+            limits:   { cpu: 2,    memory: 2Gi  }
           startupProbe:
             httpGet: { path: /api/health, port: 18765 }
             initialDelaySeconds: 5
