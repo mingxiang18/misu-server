@@ -13,6 +13,8 @@ import TrashView from '@/components/fileServer/TrashView.vue';
 import SharesView from '@/components/fileServer/SharesView.vue';
 import SharedDownload from '@/components/fileServer/SharedDownload.vue';
 import AuditLogView from '@/components/fileServer/AuditLogView.vue';
+import UserDirectoryAdmin from '@/views/admin/UserDirectoryAdmin.vue';
+import StagingExplorer from '@/views/admin/StagingExplorer.vue';
 import BotChat from '@/components/bot/BotChat.vue';
 import EpubViewer from '@/components/utils/EpubViewer.vue';
 import PdfViewer from '@/components/utils/PdfViewer.vue';
@@ -36,6 +38,8 @@ const routes = [
             { path: 'fileServer/trash', component: TrashView, name: 'TrashView' },
             { path: 'fileServer/shares', component: SharesView, name: 'SharesView' },
             { path: 'fileServer/audit', component: AuditLogView, name: 'AuditLogView' },
+            { path: 'admin/userDirectory', component: UserDirectoryAdmin, name: 'UserDirectoryAdmin' },
+            { path: 'admin/staging', component: StagingExplorer, name: 'StagingExplorer' },
             { path: 'fileServer/epubViewer', component: EpubViewer, name: 'EpubViewer' },
             { path: 'fileServer/pdfViewer', component: PdfViewer, name: 'PdfViewer' },
             { path: 'fileServer/textViewer', component: TextViewer, name: 'TextViewer' },
