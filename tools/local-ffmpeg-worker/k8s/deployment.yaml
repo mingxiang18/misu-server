@@ -31,9 +31,15 @@ spec:
       # 给 ffmpeg 留 60s grace period，让 worker 的 SIGTERM trap 把
       # running/ 任务退回 queue/ 再退。
       terminationGracePeriodSeconds: 60
-      # video 组 (gid 44) 用于访问 /dev/dri (VAAPI)。节点没 iGPU 时也无害。
+      # /dev/dri/renderD128 在不同发行版属于不同 group：
+      #   - Debian 12 / Ubuntu 22+: render(gid 109)
+      #   - Alpine: video(44) 通常够用
+      #   - Fedora: render(989)
+      # 容器默认以 root 跑（Dockerfile 没 USER 指令），其实不依赖 group 就能访问设备；
+      # 但保留 supplementalGroups 是 hardening，将来如果改成非 root 跑也能直接用。
+      # 节点上查询实际 gid：`ls -ln /dev/dri/renderD128`，第 4 列是 gid。
       securityContext:
-        supplementalGroups: [44]
+        supplementalGroups: [44, 27, 107, 109, 110, 989]
       containers:
         - name: misu-ffmpeg-worker
           image: 10.8.0.26:30500/misuaa/misu-ffmpeg-worker:0.0.1
@@ -63,8 +69,10 @@ spec:
             - { name: user-file, mountPath: /data/user-file }
             - { name: scratch,   mountPath: /work }
             - { name: state,     mountPath: /work/state }
-            # 取消注释下两行（并保留 supplementalGroups: 44）以启用 VAAPI 硬编：
-            # - { name: dri,       mountPath: /dev/dri }
+            # /dev/dri 默认挂上。节点没 GPU 时 detect-encoder.sh 的 testsrc dry-encode
+            # 会失败，自动回退到 libx265 软编，无副作用。要彻底关掉 GPU 这一条尝试，
+            # 注释掉下行 + volumes 里对应 dri 块。
+            - { name: dri,       mountPath: /dev/dri }
       volumes:
         - name: user-file
           hostPath:
@@ -77,8 +85,9 @@ spec:
           hostPath:
             path: /mnt/misu/misu-server/transcode-state
             type: DirectoryOrCreate
-        # 节点上挂 Intel/AMD iGPU 时去掉下面 # 即可启用 VAAPI 路径：
-        # - name: dri
-        #   hostPath:
-        #     path: /dev/dri
-        #     type: Directory
+        # AMD Radeon iGPU/dGPU 走 VAAPI 通过这个挂载暴露给容器。
+        # NVIDIA 不走 /dev/dri，需要额外装 nvidia-container-toolkit + 加 runtimeClassName。
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
