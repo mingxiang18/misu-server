@@ -117,7 +117,7 @@
                       fit="cover"
                       loading="lazy" />
             <Film v-else class="file-show"/>
-            <div v-if="file.transcodeState && file.transcodeState !== 'SUCCESS'" class="video-status-mask">
+            <div v-if="file.transcodeState && file.transcodeState !== 'SUCCESS' && file.transcodeState !== 'PASSTHROUGH'" class="video-status-mask">
               <span class="video-status-text">{{ getVideoStatusText(file) }}</span>
               <el-progress v-if="file.transcodeState === 'PROCESSING'"
                            class="video-progress"

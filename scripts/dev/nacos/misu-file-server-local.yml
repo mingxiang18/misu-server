@@ -72,7 +72,7 @@ file-server:
 # 视频转码（本地 dev 默认开启，需要 ffmpeg 在 PATH 中；不需要可关掉）
 video:
   transcode:
-    enabled: false
+    enabled: true
     max-bytes: 1610612736
     queue-dir: ${file-server.path}transcode-queue
     status-dir: ${file-server.path}transcode-status
@@ -83,6 +83,13 @@ video:
     preset: medium
     audio-bitrate: 128k
     profile-version: hevc-aac-mp4-1080p-v1
+    # 直通探测：worker 领到 .task 后先 ffprobe，如果源文件已经是 Safari 可播放的
+    # HEVC + hvc1 + AAC + MP4 + <=max-height + <=max-bitrate，跳过 libx265 转码、
+    # 只截预览封面，状态标记为 PASSTHROUGH。FE 播放时直接拉源文件流。
+    passthrough:
+      enabled: true
+      # 5 Mbps；超过此码率认为还有压缩空间，强制走 libx265 转码
+      max-bitrate: 5000000
     # 容器化 worker 的管理 API 地址；prod 默认 misu-ffmpeg-worker.misu-server.svc.cluster.local:18765
     # 本地 dev 跑 Mac 上的 worker 时可以指向 127.0.0.1:18765
     worker:

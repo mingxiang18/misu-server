@@ -52,16 +52,30 @@ DROP TABLE IF EXISTS misu_file_server.video_transcode_job;
 
 ## 2. Nacos 配置（必做）
 
-在生产 nacos 的 `misu-file-server.yml`（或 `misu-file-server-prod.yml`）里新增 staging 路径配置：
+在生产 nacos 的 `misu-file-server.yml`（或 `misu-file-server-prod.yml`）里新增以下两组：
 
 ```yaml
-# 超级管理员维护的"预置目录"。文件可通过 SCP / 挂载 / docker volume 投递进来，
+# (a) 超级管理员维护的"预置目录"。文件可通过 SCP / 挂载 / docker volume 投递进来，
 # 再通过 /admin/staging UI 共享到公共目录或某用户的私人目录。
 file:
   staging:
     # 留空会回退到 ${file-server.path}/staging，建议显式指定 + 单独挂载
     path: /data/misu/staging/
+
+# (b) 直通探测（PASSTHROUGH）：worker 领到 .task 后先 ffprobe 一遍源文件，
+# 如已经是 Safari 可播放的 HEVC+hvc1+AAC+MP4+<=max-height+<=max-bitrate，
+# 跳过 libx265 转码，只截预览封面。状态写为 PASSTHROUGH，FE 播放时直接拉源文件流。
+video:
+  transcode:
+    passthrough:
+      enabled: true
+      # 5 Mbps，比 Netflix 1080p 标准（~5 Mbps）低；源文件已经压到这以下就不再转，
+      # 超过则强制 libx265 转码以省存储 / 带宽。
+      max-bitrate: 5000000
 ```
+
+PASSTHROUGH 不引入新 DB 列 —— `video_transcode_job.state` 是 `VARCHAR(32)`，已经能装下；
+也不需要 worker 镜像升级 —— 探测脚本由 file-server 写进 `.task`，复用 worker 自带的 ffprobe。
 
 **注意事项**：
 
