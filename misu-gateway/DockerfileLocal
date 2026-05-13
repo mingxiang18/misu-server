@@ -1,4 +1,4 @@
-FROM 192.168.50.194:30500/library/amazoncorretto:17-alpine3.20-jdk
+FROM 192.168.50.227:30500/library/amazoncorretto:17-alpine3.20-jdk
 
 WORKDIR /app/
 

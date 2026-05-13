@@ -12,7 +12,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MVN="/Users/renyuming/Documents/develop/maven/apache-maven-3.6.3/bin/mvn"
 MAVEN_REPO="/Users/renyuming/Documents/develop/maven/repository"
 MODULE="misu-file-server/misu-file-server-biz"
-IMAGE="192.168.50.194:30500/misuaa/misu-file-server:${VERSION}"
+IMAGE="192.168.50.227:30500/misuaa/misu-file-server:${VERSION}"
 PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
 
 cd "${ROOT_DIR}"
