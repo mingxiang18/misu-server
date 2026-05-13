@@ -5,11 +5,6 @@ import NetworkBanner from '@/components/layout/NetworkBanner.vue'
 <template>
   <main>
     <NetworkBanner />
-    <!-- 黑夜模式装饰层：弯月 + 月晕 + 远山剪影 + 银河。aria-hidden，pointer-events:none -->
-    <div class="sky-decor" aria-hidden="true">
-      <div class="sky-moon"></div>
-      <div class="sky-mountains"></div>
-    </div>
     <div class="main-view">
       <router-view></router-view>
     </div>
@@ -23,5 +18,4 @@ import NetworkBanner from '@/components/layout/NetworkBanner.vue'
   position: relative;
   z-index: 1;
 }
-.sky-decor { display: none; }
 </style>
