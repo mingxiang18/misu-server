@@ -131,9 +131,12 @@ const goTo = (path) => router.push(path)
   gap: var(--space-5);
   min-height: 144px;
   padding: var(--space-5);
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border-subtle);
+  background: var(--feature-card-bg);
+  border: 1px solid var(--feature-card-border);
   border-radius: var(--radius-lg);
+  box-shadow: var(--feature-card-shadow);
+  backdrop-filter: var(--feature-card-backdrop);
+  -webkit-backdrop-filter: var(--feature-card-backdrop);
   text-align: left;
   cursor: pointer;
   transition:

@@ -211,8 +211,10 @@ const handleLogout = () => {
   display: flex;
   height: calc(var(--layout-tab-bar-height) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
-  background: var(--color-bg-surface);
-  border-top: 1px solid var(--color-border-subtle);
+  background: var(--nav-bg);
+  backdrop-filter: var(--nav-backdrop);
+  -webkit-backdrop-filter: var(--nav-backdrop);
+  border-top: 1px solid var(--nav-border);
   z-index: var(--z-sticky);
 }
 

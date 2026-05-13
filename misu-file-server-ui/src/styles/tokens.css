@@ -113,6 +113,19 @@
   /* ---------- Shell 背景 (#app / .app-shell 用)
      light 直接复用 base；dark 让其透明，露出 body 的星空层 ---------- */
   --shell-bg: var(--color-bg-base);
+
+  /* ---------- Feature card (首页大卡片 / 同等氛围位)
+     light 用实色 surface；dark 切毛玻璃，让月夜透出 ---------- */
+  --feature-card-bg: var(--color-bg-surface);
+  --feature-card-border: var(--color-border-subtle);
+  --feature-card-backdrop: none;
+  --feature-card-shadow: var(--shadow-sm);
+
+  /* ---------- Nav surface (PageHeader / SideNav / TabBar)
+     light 用实色 surface；dark 半透明 + 毛玻璃，让月夜从导航后透出 ---------- */
+  --nav-bg: var(--color-bg-surface);
+  --nav-border: var(--color-border-subtle);
+  --nav-backdrop: none;
 }
 
 /* ============================================================
@@ -165,6 +178,17 @@
   /* ---------- Shell 透明，让 body::before 星空层透出 ---------- */
   --shell-bg: transparent;
 
+  /* ---------- Feature card 毛玻璃：surface 半透明 + backdrop blur ---------- */
+  --feature-card-bg: rgba(26, 34, 64, 0.42);
+  --feature-card-border: rgba(199, 210, 254, 0.10);
+  --feature-card-backdrop: blur(18px) saturate(140%);
+  --feature-card-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.45);
+
+  /* ---------- Nav surface 毛玻璃（半透明 + blur）：导航后透出月夜 ---------- */
+  --nav-bg: rgba(20, 27, 51, 0.55);
+  --nav-border: rgba(199, 210, 254, 0.08);
+  --nav-backdrop: blur(20px) saturate(140%);
+
   /* 系统级 color-scheme，让浏览器内置 UI（滚动条/输入光标/原生 select）跟着变深 */
   color-scheme: dark;
 }
@@ -184,25 +208,34 @@
   pointer-events: none;
   z-index: 0;
   background-image:
-    /* 远景柔光 · 右上月光（暖银紫，像月亮挂在那个角） */
-    radial-gradient(ellipse 55% 35% at 88% 6%, rgba(199, 210, 254, 0.10), transparent 65%),
-    /* 远景柔光 · 左下紫晕（更暖一点，远山的轮廓感） */
-    radial-gradient(ellipse 60% 40% at 8% 92%, rgba(165, 180, 252, 0.07), transparent 70%),
+    /* 银河带 · 斜穿上半天的微亮指状光（增加层次） */
+    radial-gradient(ellipse 75% 16% at 60% 28%, rgba(199, 210, 254, 0.07), transparent 65%),
+    /* 远景柔光 · 右上月光（暖银紫，月亮所在的角微亮） */
+    radial-gradient(ellipse 35% 28% at 90% 12%, rgba(245, 230, 200, 0.10), transparent 70%),
+    /* 远景柔光 · 左下紫晕（远山轮廓的余晖） */
+    radial-gradient(ellipse 70% 45% at 8% 95%, rgba(165, 180, 252, 0.08), transparent 70%),
     /* 远景柔光 · 中心微亮（让空旷区不那么死） */
-    radial-gradient(ellipse 45% 60% at 50% 50%, rgba(232, 228, 240, 0.025), transparent 75%),
-    /* 静态星点（12 颗，随机大小） */
-    radial-gradient(1.4px 1.4px at 12% 18%, rgba(255,255,255,0.55), transparent 50%),
-    radial-gradient(1px 1px   at 24% 8%,  rgba(255,255,255,0.40), transparent 50%),
-    radial-gradient(1.6px 1.6px at 38% 32%, rgba(255,255,255,0.55), transparent 50%),
-    radial-gradient(1px 1px   at 52% 12%, rgba(255,255,255,0.40), transparent 50%),
-    radial-gradient(1.2px 1.2px at 76% 52%, rgba(255,255,255,0.40), transparent 50%),
-    radial-gradient(1.5px 1.5px at 84% 76%, rgba(255,255,255,0.50), transparent 50%),
-    radial-gradient(1px 1px   at 92% 38%, rgba(255,255,255,0.45), transparent 50%),
-    radial-gradient(1.3px 1.3px at 8% 58%, rgba(255,255,255,0.45), transparent 50%),
-    radial-gradient(1px 1px   at 18% 72%, rgba(255,255,255,0.35), transparent 50%),
-    radial-gradient(1.3px 1.3px at 32% 88%, rgba(255,255,255,0.50), transparent 50%),
-    radial-gradient(1px 1px   at 46% 64%, rgba(255,255,255,0.40), transparent 50%),
-    radial-gradient(1.5px 1.5px at 58% 84%, rgba(255,255,255,0.50), transparent 50%);
+    radial-gradient(ellipse 45% 60% at 50% 45%, rgba(232, 228, 240, 0.025), transparent 75%),
+    /* 静态星点 · 上半区密集（"银河"区域附近，撒 18 颗） */
+    radial-gradient(1.4px 1.4px at 6% 8%,   rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1px 1px   at 14% 16%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1.2px 1.2px at 22% 6%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1.6px 1.6px at 32% 14%, rgba(255,255,255,0.60), transparent 50%),
+    radial-gradient(1px 1px   at 40% 24%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1.3px 1.3px at 48% 10%, rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.1px 1.1px at 56% 22%, rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1.5px 1.5px at 64% 6%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1px 1px   at 72% 18%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1.4px 1.4px at 80% 12%, rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1px 1px   at 50% 32%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1.2px 1.2px at 28% 28%, rgba(255,255,255,0.45), transparent 50%),
+    /* 中下区星点稍稀 */
+    radial-gradient(1.3px 1.3px at 12% 42%, rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px   at 78% 38%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1.2px 1.2px at 92% 44%, rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px   at 4% 36%,   rgba(255,255,255,0.35), transparent 50%),
+    radial-gradient(1.4px 1.4px at 88% 28%, rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px   at 58% 38%,  rgba(255,255,255,0.40), transparent 50%);
 }
 
 .dark body::after {
@@ -230,6 +263,74 @@
 .dark #app {
   position: relative;
   z-index: 1;
+}
+
+/* ============================================================
+   月夜装饰层 (sky-decor) · 弯月 + 远山剪影
+   App.vue 中渲染 <div class="sky-decor">；仅 dark 显示。
+   位于 body::before 星空层之上、#app 之下（z-index 0）。
+   ============================================================ */
+.dark main > .sky-decor {
+  display: block;
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 弯月：用 box-shadow inset 切割圆盘形成新月。
+   两层 outer glow 模拟月晕。位置选在右上较高处，留出 PageHeader / 子标题空间。 */
+.dark .sky-moon {
+  position: absolute;
+  top: 2.2%;
+  right: 5%;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 38%, #FAF1D4 0%, #EAD4A0 55%, #C9A876 100%);
+  box-shadow:
+    /* 内阴影切出新月形（向左偏，留右侧月牙） */
+    inset 20px -4px 0 -2px #0E1426,
+    /* 月晕：近内层 + 远外层 */
+    0 0 24px 4px rgba(245, 230, 200, 0.28),
+    0 0 56px 10px rgba(245, 230, 200, 0.14),
+    0 0 110px 24px rgba(199, 210, 254, 0.06);
+}
+
+/* 移动端月亮缩小 */
+@media (max-width: 640px) {
+  .dark .sky-moon {
+    top: 2%;
+    right: 7%;
+    width: 52px;
+    height: 52px;
+    box-shadow:
+      inset 13px -3px 0 -2px #0E1426,
+      0 0 16px 3px rgba(245, 230, 200, 0.28),
+      0 0 38px 8px rgba(245, 230, 200, 0.14);
+  }
+}
+
+/* 远山剪影：两层 SVG 路径，叠加产生"远雾近实"层次。
+   SVG 在 viewBox 内用 preserveAspectRatio='none' 拉伸适配。 */
+.dark .sky-mountains {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 32%;
+  background-repeat: no-repeat;
+  background-position: bottom;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 400' preserveAspectRatio='none'%3E%3Cpath fill='%231a2240' opacity='0.55' d='M0 400L0 240Q120 180 240 220T480 200T720 230T960 180T1200 220T1440 195T1680 230T1920 200L1920 400Z'/%3E%3Cpath fill='%230a0f1e' d='M0 400L0 320L150 250L300 300L440 220L580 290L740 200L880 280L1040 240L1200 300L1360 245L1520 290L1680 235L1830 280L1920 260L1920 400Z'/%3E%3C/svg%3E");
+  opacity: 0.85;
+}
+
+@media (max-width: 640px) {
+  .dark .sky-mountains {
+    height: 22%;
+    opacity: 0.75;
+  }
 }
 
 /* ============================================================

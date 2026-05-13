@@ -108,3 +108,54 @@
   font-weight: 500;
   margin-top: var(--space-2);
 }
+
+/* ============================================================
+   Dark mode · EP filled warning/danger/success → ghost (outlined)
+   实心彩色按钮在深紫蓝底上"贴纸感"很重；改成 1px 边框 + 状态色文字 +
+   透明底（hover 时填 soft 底），融入夜色不出戏。Light 模式不动。
+   ============================================================ */
+html.dark .el-button--warning:not(.is-plain):not(.is-link):not(.is-text),
+html.dark .el-button--danger:not(.is-plain):not(.is-link):not(.is-text),
+html.dark .el-button--success:not(.is-plain):not(.is-link):not(.is-text) {
+  background: rgba(20, 27, 51, 0.40) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-width: 1px;
+}
+html.dark .el-button--warning:not(.is-plain):not(.is-link):not(.is-text) {
+  border-color: var(--color-warning) !important;
+  color: var(--color-warning) !important;
+}
+html.dark .el-button--warning:not(.is-plain):not(.is-link):not(.is-text):not(.is-disabled):hover,
+html.dark .el-button--warning:not(.is-plain):not(.is-link):not(.is-text):not(.is-disabled):focus {
+  background: var(--color-warning-soft) !important;
+  border-color: var(--color-warning) !important;
+  color: var(--color-warning) !important;
+}
+html.dark .el-button--danger:not(.is-plain):not(.is-link):not(.is-text) {
+  border-color: var(--color-danger) !important;
+  color: var(--color-danger) !important;
+}
+html.dark .el-button--danger:not(.is-plain):not(.is-link):not(.is-text):not(.is-disabled):hover,
+html.dark .el-button--danger:not(.is-plain):not(.is-link):not(.is-text):not(.is-disabled):focus {
+  background: var(--color-danger-soft) !important;
+  border-color: var(--color-danger) !important;
+  color: var(--color-danger) !important;
+}
+html.dark .el-button--success:not(.is-plain):not(.is-link):not(.is-text) {
+  border-color: var(--color-success) !important;
+  color: var(--color-success) !important;
+}
+html.dark .el-button--success:not(.is-plain):not(.is-link):not(.is-text):not(.is-disabled):hover,
+html.dark .el-button--success:not(.is-plain):not(.is-link):not(.is-text):not(.is-disabled):focus {
+  background: var(--color-success-soft) !important;
+  border-color: var(--color-success) !important;
+  color: var(--color-success) !important;
+}
+html.dark .el-button--warning.is-disabled,
+html.dark .el-button--danger.is-disabled,
+html.dark .el-button--success.is-disabled {
+  border-color: var(--color-border-subtle) !important;
+  color: var(--color-text-disabled) !important;
+  background: transparent !important;
+}

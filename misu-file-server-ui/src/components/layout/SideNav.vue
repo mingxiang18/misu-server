@@ -159,8 +159,10 @@ const handleLogout = () => {
   display: flex;
   flex-direction: column;
   width: var(--layout-side-nav-width);
-  background: var(--color-bg-surface);
-  border-right: 1px solid var(--color-border-subtle);
+  background: var(--nav-bg);
+  backdrop-filter: var(--nav-backdrop);
+  -webkit-backdrop-filter: var(--nav-backdrop);
+  border-right: 1px solid var(--nav-border);
   padding: var(--space-5) var(--space-3) var(--space-4);
   flex-shrink: 0;
 }

@@ -75,8 +75,10 @@ const handleLogout = () => {
   justify-content: space-between;
   height: var(--layout-page-header-height);
   padding: 0 var(--space-6);
-  background: var(--color-bg-surface);
-  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--nav-bg);
+  backdrop-filter: var(--nav-backdrop);
+  -webkit-backdrop-filter: var(--nav-backdrop);
+  border-bottom: 1px solid var(--nav-border);
   flex-shrink: 0;
 }
 
