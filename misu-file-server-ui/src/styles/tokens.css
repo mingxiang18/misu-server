@@ -151,10 +151,10 @@
   --color-text-disabled: #6B708A;
   --color-text-on-accent: #0E1426;  /* 月光紫上叠深底文字 */
 
-  /* ---------- Color · Accent (Moonlight) ---------- */
-  --accent: #A5B4FC;                /* 月光紫 */
+  /* ---------- Color · Accent (Moonlight，压一档不刺眼) ---------- */
+  --accent: #8B9DF0;                /* 月光紫（压暗，主按钮填色不再过亮） */
   --accent-soft: #2A3060;           /* 弱版本：ghost button / tag 底 */
-  --accent-strong: #8B9DF0;         /* 加深版：hover */
+  --accent-strong: #6F86E5;         /* 加深版：hover */
 
   /* ---------- Color · Semantic State (深夜适配 · 哑光压暗，避免按钮"贴纸感") ---------- */
   --color-success: #5FA379;      /* 柔森林绿 (原 #86EFAC 过亮) */
