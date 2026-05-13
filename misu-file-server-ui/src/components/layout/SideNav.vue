@@ -14,6 +14,8 @@ import {
   Share,
   Histogram,
   User,
+  Files,
+  Box,
   ArrowRight,
   SwitchButton
 } from '@element-plus/icons-vue'
@@ -39,6 +41,12 @@ const nav = computed(() => {
     })
     filesChildren.push({
       key: 'audit', label: '审计日志', icon: Histogram, to: '/fileServer/audit', match: ['fileServer/audit']
+    })
+    filesChildren.push({
+      key: 'userDirectory', label: '用户目录浏览', icon: Files, to: '/admin/userDirectory', match: ['admin/userDirectory']
+    })
+    filesChildren.push({
+      key: 'staging', label: '预置目录', icon: Box, to: '/admin/staging', match: ['admin/staging']
     })
   }
 

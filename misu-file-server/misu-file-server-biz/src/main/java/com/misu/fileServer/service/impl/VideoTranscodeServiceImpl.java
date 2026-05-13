@@ -4,18 +4,25 @@ import com.alibaba.fastjson2.JSON;
 import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.fileServer.constant.VideoTranscodeState;
+import com.misu.fileServer.domain.dto.VideoTranscodeJobDto;
 import com.misu.fileServer.domain.dto.VideoTranscodeStatusDto;
 import com.misu.fileServer.domain.dto.VideoTranscodeTaskAdminDto;
 import com.misu.fileServer.domain.dto.VideoTranscodeTaskAdminSummaryDto;
+import com.misu.fileServer.domain.entity.VideoTranscodeJob;
+import com.misu.fileServer.repository.VideoTranscodeJobRepository;
 import com.misu.fileServer.service.VideoTranscodeService;
 import com.misu.security.constant.UserRole;
 import com.misu.security.utils.AuthorityUtil;
+import jakarta.annotation.Resource;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,12 +30,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -37,6 +48,12 @@ import java.util.stream.Stream;
 public class VideoTranscodeServiceImpl implements VideoTranscodeService {
 
     private static final Pattern TASK_ID_PATTERN = Pattern.compile("[0-9a-fA-F]{32}");
+
+    /**
+     * 最优先任务文件名前缀。worker 按 .task 文件名 ASCII 升序 (sort | head -n 1) 领取，'!' 0x21 排在
+     * '0' 0x30 与字母之前，因此带此前缀的任务永远优先被领取。
+     */
+    private static final String PRIORITY_FILENAME_PREFIX = "!priority-";
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -80,8 +97,19 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
     @Value("${video.transcode.maxQueueLength:50}")
     private int maxQueueLength;
 
+    @Resource
+    private VideoTranscodeJobRepository videoTranscodeJobRepository;
+
     @Override
     public VideoTranscodeStatusDto getOrCreateTranscodeStatus(File sourceFile) {
+        return getOrCreateTranscodeStatus(sourceFile, null, null, null);
+    }
+
+    @Override
+    public VideoTranscodeStatusDto getOrCreateTranscodeStatus(File sourceFile,
+                                                              Integer sourceOpenType,
+                                                              String sourceUserId,
+                                                              String sourceVirtualPath) {
         VideoTranscodeStatusDto status = new VideoTranscodeStatusDto();
         status.setTaskId(getTaskId(sourceFile));
         status.setProgress(0);
@@ -106,6 +134,7 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
         if (diskStatus != null && StringUtils.isNotBlank(diskStatus.getState())) {
             if (!VideoTranscodeState.SUCCESS.equals(diskStatus.getState()) || getTranscodedFile(sourceFile).exists()) {
                 fillDefaultPaths(sourceFile, diskStatus);
+                persistJobFromStatus(sourceFile, diskStatus, sourceOpenType, sourceUserId, sourceVirtualPath, null);
                 return diskStatus;
             }
         }
@@ -117,6 +146,7 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
             status.setMessage("转码完成");
             fillDefaultPaths(sourceFile, status);
             writeStatus(sourceFile, status);
+            persistJobFromStatus(sourceFile, status, sourceOpenType, sourceUserId, sourceVirtualPath, "DONE");
             return status;
         }
 
@@ -133,6 +163,7 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
         status.setMessage("等待转码");
         fillDefaultPaths(sourceFile, status);
         writeStatus(sourceFile, status);
+        persistJobFromStatus(sourceFile, status, sourceOpenType, sourceUserId, sourceVirtualPath, "WAITING");
         return status;
     }
 
@@ -214,25 +245,370 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
     }
 
     @Override
+    @Transactional("fileServerTransactionManager")
     public void retryFailedTask(String taskId) {
         checkAdmin();
-        Path failedTask = resolveQueueTaskPath("failed", taskId);
-        if (!Files.exists(failedTask) || !Files.isRegularFile(failedTask)) {
+        if (!TASK_ID_PATTERN.matcher(StringUtils.defaultString(taskId)).matches()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "任务ID不合法");
+        }
+        Path failedTask = findTaskFile(getQueueDirectory().resolve("failed"), taskId);
+        if (failedTask == null) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "失败任务不存在");
         }
         moveTaskToQueue(failedTask);
+        updateJobAfterRetry(taskId);
     }
 
     @Override
+    @Transactional("fileServerTransactionManager")
     public int retryAllFailedTasks() {
         checkAdmin();
-        return moveDirectoryTasksToQueue(getQueueDirectory().resolve("failed"));
+        List<String> movedTaskIds = new ArrayList<>();
+        int count = moveDirectoryTasksToQueue(getQueueDirectory().resolve("failed"), movedTaskIds);
+        movedTaskIds.forEach(this::updateJobAfterRetry);
+        return count;
     }
 
     @Override
+    @Transactional("fileServerTransactionManager")
     public int recoverRunningTasks() {
         checkAdmin();
-        return moveDirectoryTasksToQueue(getQueueDirectory().resolve("running"));
+        List<String> movedTaskIds = new ArrayList<>();
+        int count = moveDirectoryTasksToQueue(getQueueDirectory().resolve("running"), movedTaskIds);
+        movedTaskIds.forEach(this::updateJobAfterRetry);
+        return count;
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public Page<VideoTranscodeJobDto> queryJobs(String state, String queueState, String keyword, Pageable pageable) {
+        checkAdmin();
+        reconcileFromDisk();
+
+        String stateFilter = StringUtils.isBlank(state) ? null : state.trim();
+        String queueStateFilter = StringUtils.isBlank(queueState) ? null : queueState.trim();
+        String keywordFilter = StringUtils.isBlank(keyword)
+                ? null
+                : "%" + keyword.trim().toLowerCase() + "%";
+
+        return videoTranscodeJobRepository.searchJobs(stateFilter, queueStateFilter, keywordFilter, pageable)
+                .map(this::toJobDto);
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public int retryJobsBatch(List<String> taskIds) {
+        checkAdmin();
+        if (taskIds == null || taskIds.isEmpty()) {
+            return 0;
+        }
+        int success = 0;
+        Path failedDir = getQueueDirectory().resolve("failed");
+        for (String taskId : taskIds) {
+            if (!TASK_ID_PATTERN.matcher(StringUtils.defaultString(taskId)).matches()) {
+                continue;
+            }
+            Path failedTask = findTaskFile(failedDir, taskId);
+            if (failedTask == null) {
+                continue;
+            }
+            try {
+                moveTaskToQueue(failedTask);
+                updateJobAfterRetry(taskId);
+                success++;
+            } catch (Exception e) {
+                log.warn("批量重试失败任务异常 taskId={}", taskId, e);
+            }
+        }
+        return success;
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public int prioritizeJobsBatch(List<String> taskIds) {
+        checkAdmin();
+        if (taskIds == null || taskIds.isEmpty()) {
+            return 0;
+        }
+        Path queueDir = getQueueDirectory();
+        int success = 0;
+        for (String taskId : taskIds) {
+            if (!TASK_ID_PATTERN.matcher(StringUtils.defaultString(taskId)).matches()) {
+                continue;
+            }
+            try {
+                if (prioritizeOne(queueDir, taskId)) {
+                    success++;
+                }
+            } catch (Exception e) {
+                log.warn("提升任务优先级异常 taskId={}", taskId, e);
+            }
+        }
+        return success;
+    }
+
+    /**
+     * 把单个 taskId 的 .task 文件改名为 priority 前缀，使其在 worker 的 sort | head 中排到最前。
+     * 若 task 当前还在 RUNNING（已被 worker 抢走），返回 false 表示无法抢占；
+     * 若处于 FAILED / DONE 子目录，先 move 回顶层 queue 再 prioritize。
+     */
+    private boolean prioritizeOne(Path queueDir, String taskId) throws IOException {
+        Path running = findTaskFile(queueDir.resolve("running"), taskId);
+        if (running != null) {
+            return false;
+        }
+        Path pending = findTaskFile(queueDir, taskId);
+        if (pending == null) {
+            Path failed = findTaskFile(queueDir.resolve("failed"), taskId);
+            Path done = findTaskFile(queueDir.resolve("done"), taskId);
+            Path moveSource = failed != null ? failed : done;
+            if (moveSource == null) {
+                return false;
+            }
+            moveTaskToQueue(moveSource);
+            pending = findTaskFile(queueDir, taskId);
+            if (pending == null) {
+                return false;
+            }
+        }
+        if (pending.getFileName().toString().startsWith(PRIORITY_FILENAME_PREFIX)) {
+            // 已经是 priority 文件，仍刷新 DB 标志 + updateTime
+            updateJobAfterPrioritize(taskId);
+            return true;
+        }
+        Path target = queueDir.resolve(PRIORITY_FILENAME_PREFIX + taskId + ".task");
+        Files.move(pending, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        updateJobAfterPrioritize(taskId);
+        return true;
+    }
+
+    private void updateJobAfterPrioritize(String taskId) {
+        videoTranscodeJobRepository.findByTaskId(taskId).ifPresent(job -> {
+            LocalDateTime now = LocalDateTime.now();
+            job.setPriority(Boolean.TRUE);
+            job.setQueueState("WAITING");
+            if (StringUtils.isBlank(job.getState())
+                    || VideoTranscodeState.SUCCESS.equals(job.getState())
+                    || VideoTranscodeState.FAILED.equals(job.getState())) {
+                job.setState(VideoTranscodeState.WAITING);
+            }
+            job.setMessage("已置最优先");
+            job.setLastEnqueuedAt(now);
+            job.setUpdateTime(now);
+            videoTranscodeJobRepository.save(job);
+        });
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public int reTranscodeJobsBatch(List<String> taskIds) {
+        checkAdmin();
+        if (taskIds == null || taskIds.isEmpty()) {
+            return 0;
+        }
+        int success = 0;
+        for (String taskId : taskIds) {
+            if (!TASK_ID_PATTERN.matcher(StringUtils.defaultString(taskId)).matches()) {
+                continue;
+            }
+            Optional<VideoTranscodeJob> opt = videoTranscodeJobRepository.findByTaskId(taskId);
+            if (opt.isEmpty()) {
+                continue;
+            }
+            VideoTranscodeJob job = opt.get();
+            File sourceFile = new File(job.getSourcePath());
+            if (!sourceFile.exists() || sourceFile.isDirectory()) {
+                continue;
+            }
+            try {
+                cleanupTranscodeArtifacts(taskId, sourceFile);
+                enqueueTask(sourceFile);
+
+                LocalDateTime now = LocalDateTime.now();
+                job.setState(VideoTranscodeState.WAITING);
+                job.setQueueState("WAITING");
+                job.setProgress(0);
+                job.setMessage("等待重转");
+                job.setEnqueueCount(Objects.requireNonNullElse(job.getEnqueueCount(), 0) + 1);
+                job.setLastEnqueuedAt(now);
+                job.setUpdateTime(now);
+                // 重转生成的是无前缀的新 task 文件；显式清掉旧的 priority 标志，避免 UI 误显示为最优先
+                job.setPriority(Boolean.FALSE);
+                videoTranscodeJobRepository.save(job);
+                success++;
+            } catch (Exception e) {
+                log.warn("重新转码任务异常 taskId={}", taskId, e);
+            }
+        }
+        return success;
+    }
+
+    private void cleanupTranscodeArtifacts(String taskId, File sourceFile) throws IOException {
+        Files.deleteIfExists(getTranscodedFile(sourceFile).toPath());
+        Files.deleteIfExists(getVideoPreviewFile(sourceFile).toPath());
+        Files.deleteIfExists(getStatusFile(sourceFile).toPath());
+        Path queueDirectory = getQueueDirectory();
+        for (String sub : new String[]{".", "running", "failed", "done"}) {
+            Path subDir = sub.equals(".") ? queueDirectory : queueDirectory.resolve(sub);
+            Files.deleteIfExists(subDir.resolve(taskId + ".task"));
+            Files.deleteIfExists(subDir.resolve(PRIORITY_FILENAME_PREFIX + taskId + ".task"));
+        }
+    }
+
+    /**
+     * 将磁盘上 task / status 最新态同步回 DB。新发现的 taskId 会插入新行；已有行则更新 state / queueState / progress / message / updateTime。
+     */
+    void reconcileFromDisk() {
+        Map<String, VideoTranscodeTaskAdminDto> taskMap = new HashMap<>();
+        collectTaskFiles(taskMap, getQueueDirectory(), "WAITING");
+        collectTaskFiles(taskMap, getQueueDirectory().resolve("running"), "RUNNING");
+        collectTaskFiles(taskMap, getQueueDirectory().resolve("failed"), "FAILED");
+        collectTaskFiles(taskMap, getQueueDirectory().resolve("done"), "DONE");
+        collectStatusFiles(taskMap);
+
+        if (taskMap.isEmpty()) {
+            return;
+        }
+
+        Map<String, VideoTranscodeJob> existing = new HashMap<>();
+        videoTranscodeJobRepository.findByTaskIdIn(new ArrayList<>(taskMap.keySet()))
+                .forEach(job -> existing.put(job.getTaskId(), job));
+
+        List<VideoTranscodeJob> toSave = new ArrayList<>(taskMap.size());
+        LocalDateTime now = LocalDateTime.now();
+        for (Map.Entry<String, VideoTranscodeTaskAdminDto> entry : taskMap.entrySet()) {
+            String taskId = entry.getKey();
+            VideoTranscodeTaskAdminDto dto = entry.getValue();
+            VideoTranscodeJob job = existing.get(taskId);
+            if (job == null) {
+                job = new VideoTranscodeJob();
+                job.setTaskId(taskId);
+                job.setSourcePath(StringUtils.defaultString(dto.getSourcePath()));
+                job.setProfileVersion(profileVersion);
+                job.setCreateTime(now);
+                job.setEnqueueCount(1);
+            }
+            job.setQueueState(StringUtils.defaultIfBlank(dto.getQueueState(), "UNKNOWN"));
+            if (StringUtils.isNotBlank(dto.getState())) {
+                job.setState(dto.getState());
+            } else if (StringUtils.isBlank(job.getState())) {
+                job.setState(VideoTranscodeState.NONE);
+            }
+            if (dto.getProgress() != null) {
+                job.setProgress(dto.getProgress());
+            }
+            if (StringUtils.isNotBlank(dto.getMessage())) {
+                job.setMessage(dto.getMessage());
+            }
+            if (StringUtils.isNotBlank(dto.getOutputPath())) {
+                job.setOutputPath(dto.getOutputPath());
+            }
+            if (StringUtils.isNotBlank(dto.getPreviewPath())) {
+                job.setPreviewPath(dto.getPreviewPath());
+            }
+            if (StringUtils.isNotBlank(dto.getSourcePath()) && StringUtils.isBlank(job.getSourcePath())) {
+                job.setSourcePath(dto.getSourcePath());
+            }
+            if (dto.getPriority() != null) {
+                job.setPriority(dto.getPriority());
+            }
+            job.setUpdateTime(now);
+            toSave.add(job);
+        }
+        videoTranscodeJobRepository.saveAll(toSave);
+    }
+
+    private VideoTranscodeJobDto toJobDto(VideoTranscodeJob job) {
+        VideoTranscodeJobDto dto = new VideoTranscodeJobDto();
+        dto.setTaskId(job.getTaskId());
+        dto.setState(job.getState());
+        dto.setQueueState(job.getQueueState());
+        dto.setProgress(job.getProgress());
+        dto.setMessage(job.getMessage());
+        dto.setSourcePath(job.getSourcePath());
+        dto.setSourceOpenType(job.getSourceOpenType());
+        dto.setSourceUserId(job.getSourceUserId());
+        dto.setSourceVirtualPath(job.getSourceVirtualPath());
+        dto.setOutputPath(job.getOutputPath());
+        dto.setPreviewPath(job.getPreviewPath());
+        dto.setProfileVersion(job.getProfileVersion());
+        dto.setRetryCount(job.getRetryCount());
+        dto.setEnqueueCount(job.getEnqueueCount());
+        dto.setLastEnqueuedAt(job.getLastEnqueuedAt());
+        dto.setCreateTime(job.getCreateTime());
+        dto.setUpdateTime(job.getUpdateTime());
+        dto.setRetryable("FAILED".equals(job.getQueueState()));
+        boolean hasSource = StringUtils.isNotBlank(job.getSourcePath()) && new File(job.getSourcePath()).exists();
+        dto.setReTranscodeable(hasSource);
+        dto.setPriority(Boolean.TRUE.equals(job.getPriority()));
+        return dto;
+    }
+
+    private void persistJobFromStatus(File sourceFile,
+                                      VideoTranscodeStatusDto status,
+                                      Integer sourceOpenType,
+                                      String sourceUserId,
+                                      String sourceVirtualPath,
+                                      String queueStateHint) {
+        try {
+            String taskId = StringUtils.defaultIfBlank(status.getTaskId(), getTaskId(sourceFile));
+            VideoTranscodeJob job = videoTranscodeJobRepository.findByTaskId(taskId)
+                    .orElseGet(VideoTranscodeJob::new);
+            boolean isNew = job.getTaskId() == null;
+            LocalDateTime now = LocalDateTime.now();
+            if (isNew) {
+                job.setTaskId(taskId);
+                job.setCreateTime(now);
+                job.setEnqueueCount(1);
+                job.setLastEnqueuedAt(now);
+            }
+            job.setSourcePath(sourceFile.getAbsolutePath());
+            if (sourceOpenType != null) {
+                job.setSourceOpenType(sourceOpenType);
+            }
+            if (StringUtils.isNotBlank(sourceUserId)) {
+                job.setSourceUserId(sourceUserId);
+            }
+            if (StringUtils.isNotBlank(sourceVirtualPath)) {
+                job.setSourceVirtualPath(sourceVirtualPath);
+            }
+            if (StringUtils.isNotBlank(status.getTranscodedPath())) {
+                job.setOutputPath(status.getTranscodedPath());
+            }
+            if (StringUtils.isNotBlank(status.getPreviewPath())) {
+                job.setPreviewPath(status.getPreviewPath());
+            }
+            job.setProfileVersion(profileVersion);
+            job.setState(StringUtils.defaultIfBlank(status.getState(), VideoTranscodeState.NONE));
+            if (StringUtils.isNotBlank(queueStateHint)) {
+                job.setQueueState(queueStateHint);
+            } else if (StringUtils.isBlank(job.getQueueState())) {
+                job.setQueueState("UNKNOWN");
+            }
+            job.setProgress(Objects.requireNonNullElse(status.getProgress(), 0));
+            if (StringUtils.isNotBlank(status.getMessage())) {
+                job.setMessage(status.getMessage());
+            }
+            job.setUpdateTime(now);
+            videoTranscodeJobRepository.save(job);
+        } catch (Exception e) {
+            // DB 镜像失败不应影响转码主流程
+            log.warn("写入 video_transcode_job 失败，taskId={}", status.getTaskId(), e);
+        }
+    }
+
+    private void updateJobAfterRetry(String taskId) {
+        videoTranscodeJobRepository.findByTaskId(taskId).ifPresent(job -> {
+            LocalDateTime now = LocalDateTime.now();
+            job.setQueueState("WAITING");
+            job.setState(VideoTranscodeState.WAITING);
+            job.setProgress(0);
+            job.setMessage("等待重试");
+            job.setRetryCount(Objects.requireNonNullElse(job.getRetryCount(), 0) + 1);
+            job.setLastEnqueuedAt(now);
+            job.setUpdateTime(now);
+            videoTranscodeJobRepository.save(job);
+        });
     }
 
     private VideoTranscodeStatusDto readStatus(File sourceFile) {
@@ -277,17 +653,47 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
     }
 
     private void mergeTaskFile(Map<String, VideoTranscodeTaskAdminDto> taskMap, Path taskPath, String queueState) {
-        String taskId = StringUtils.removeEnd(taskPath.getFileName().toString(), ".task");
+        String fileName = taskPath.getFileName().toString();
+        boolean priorityFile = fileName.startsWith(PRIORITY_FILENAME_PREFIX);
+        String taskId = stripTaskFileName(fileName);
         VideoTranscodeTaskAdminDto taskDto = taskMap.computeIfAbsent(taskId, this::createAdminTaskDto);
         taskDto.setQueueState(queueState);
         taskDto.setTaskPath(taskPath.toAbsolutePath().normalize().toString());
         taskDto.setUpdateTime(formatLastModifiedTime(taskPath));
+        if (priorityFile) {
+            taskDto.setPriority(Boolean.TRUE);
+        } else if (taskDto.getPriority() == null) {
+            taskDto.setPriority(Boolean.FALSE);
+        }
 
         Map<String, String> taskVariables = readTaskVariables(taskPath);
         taskDto.setSourcePath(StringUtils.defaultIfBlank(taskDto.getSourcePath(), taskVariables.get("SOURCE")));
         taskDto.setOutputPath(StringUtils.defaultIfBlank(taskDto.getOutputPath(), taskVariables.get("OUTPUT")));
         taskDto.setPreviewPath(StringUtils.defaultIfBlank(taskDto.getPreviewPath(), taskVariables.get("PREVIEW")));
         taskDto.setStatusPath(StringUtils.defaultIfBlank(taskDto.getStatusPath(), taskVariables.get("STATUS")));
+    }
+
+    private static String stripTaskFileName(String fileName) {
+        String name = StringUtils.removeEnd(fileName, ".task");
+        if (name.startsWith(PRIORITY_FILENAME_PREFIX)) {
+            name = name.substring(PRIORITY_FILENAME_PREFIX.length());
+        }
+        return name;
+    }
+
+    /**
+     * 在指定子目录下查找 taskId 对应的 .task 文件，兼容是否带 priority 前缀；找不到返回 null。
+     */
+    private Path findTaskFile(Path subDirectory, String taskId) {
+        Path plain = subDirectory.resolve(taskId + ".task");
+        if (Files.exists(plain) && Files.isRegularFile(plain)) {
+            return plain;
+        }
+        Path prio = subDirectory.resolve(PRIORITY_FILENAME_PREFIX + taskId + ".task");
+        if (Files.exists(prio) && Files.isRegularFile(prio)) {
+            return prio;
+        }
+        return null;
     }
 
     private void collectStatusFiles(Map<String, VideoTranscodeTaskAdminDto> taskMap) {
@@ -390,14 +796,18 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
         Files.move(taskPath, targetPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 
-    private int moveDirectoryTasksToQueue(Path directory) {
+    private int moveDirectoryTasksToQueue(Path directory, List<String> movedTaskIdsOut) {
         if (!Files.exists(directory) || !Files.isDirectory(directory)) {
             return 0;
         }
         try (Stream<Path> stream = Files.list(directory)) {
             return stream.filter(path -> Files.isRegularFile(path) && path.getFileName().toString().endsWith(".task"))
                     .mapToInt(taskPath -> {
+                        String taskId = stripTaskFileName(taskPath.getFileName().toString());
                         moveTaskToQueue(taskPath);
+                        if (movedTaskIdsOut != null) {
+                            movedTaskIdsOut.add(taskId);
+                        }
                         return 1;
                     })
                     .sum();

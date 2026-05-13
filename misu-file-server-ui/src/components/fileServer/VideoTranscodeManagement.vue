@@ -6,14 +6,11 @@
       <div class="toolbar">
         <div>
           <h2>视频转码管理</h2>
-          <div class="subtitle">查看队列状态、失败原因，并重试失败或中断的转码任务</div>
+          <div class="subtitle">DB 镜像 + 磁盘 reconcile：分页查看任务、批量重试失败 / 重新转码已完成视频</div>
         </div>
         <div class="actions">
-          <el-button :icon="Refresh" @click="loadTasks" :loading="loading">刷新</el-button>
+          <el-button :icon="Refresh" @click="loadJobs" :loading="loading">刷新</el-button>
           <el-button type="warning" :icon="RefreshLeft" @click="recoverRunning" :loading="recovering">恢复 running</el-button>
-          <el-button type="primary" :icon="RefreshRight" @click="retryAllFailed" :loading="retryingAll" :disabled="summary.failedCount === 0">
-            重试全部失败
-          </el-button>
         </div>
       </div>
 
@@ -76,11 +73,82 @@
         </div>
       </div>
 
-      <el-table :data="tasks" v-loading="loading" class="task-table" :max-height="tableMaxHeight" empty-text="暂无转码任务">
-        <el-table-column prop="taskId" label="任务ID" width="250" show-overflow-tooltip />
-        <el-table-column label="队列" width="110">
+      <el-card class="filter-card" shadow="never">
+        <el-form :inline="!isMobile" :model="filter" class="filter-form" @submit.prevent>
+          <el-form-item label="状态">
+            <el-select v-model="filter.state" placeholder="全部状态" clearable class="filter-input">
+              <el-option v-for="opt in STATE_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="队列">
+            <el-select v-model="filter.queueState" placeholder="全部队列" clearable class="filter-input">
+              <el-option v-for="opt in QUEUE_STATE_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="关键字">
+            <el-input v-model="filter.keyword" placeholder="路径 / 任务ID 关键字" clearable class="filter-input filter-input-wide" @keyup.enter="applyFilter" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :icon="Search" @click="applyFilter">查询</el-button>
+            <el-button @click="resetFilter">重置</el-button>
+          </el-form-item>
+        </el-form>
+      </el-card>
+
+      <div class="batch-actions">
+        <span class="batch-summary muted">已选 {{ selectedIds.length }} 项</span>
+        <el-button
+          type="danger"
+          :icon="Top"
+          :disabled="selectedIds.length === 0"
+          :loading="prioritizing"
+          @click="prioritizeBatchHandler"
+        >
+          设为最优先
+        </el-button>
+        <el-button
+          type="primary"
+          :icon="RefreshRight"
+          :disabled="selectedIds.length === 0"
+          :loading="retryingBatch"
+          @click="retryBatchHandler"
+        >
+          批量重试失败
+        </el-button>
+        <el-button
+          type="warning"
+          :icon="VideoCamera"
+          :disabled="selectedIds.length === 0"
+          :loading="reTranscoding"
+          @click="reTranscodeHandler"
+        >
+          重新转码所选
+        </el-button>
+      </div>
+
+      <el-table
+        :data="jobs"
+        v-loading="loading"
+        class="task-table"
+        :max-height="tableMaxHeight"
+        empty-text="暂无转码任务"
+        @selection-change="onSelectionChange"
+        row-key="taskId"
+      >
+        <el-table-column type="selection" width="48" reserve-selection />
+        <el-table-column label="任务ID" width="130">
           <template #default="{ row }">
-            <el-tag :type="queueTagType(row.queueState)">{{ row.queueState || 'UNKNOWN' }}</el-tag>
+            <el-tooltip :content="row.taskId" placement="top">
+              <span class="mono">{{ shortTaskId(row.taskId) }}</span>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+        <el-table-column label="队列" width="140">
+          <template #default="{ row }">
+            <div class="queue-cell">
+              <el-tag :type="queueTagType(row.queueState)">{{ row.queueState || 'UNKNOWN' }}</el-tag>
+              <el-tag v-if="row.priority" type="danger" size="small" effect="dark">最优先</el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="120">
@@ -88,23 +156,78 @@
             <el-tag :type="stateTagType(row)">{{ displayState(row) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="进度" width="150">
+        <el-table-column label="进度" width="160">
           <template #default="{ row }">
             <el-progress :percentage="row.progress || 0" :status="progressStatus(row)" />
           </template>
         </el-table-column>
-        <el-table-column prop="message" label="原因 / 消息" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="sourcePath" label="源文件" min-width="320" show-overflow-tooltip />
-        <el-table-column prop="updateTime" label="更新时间" width="170" />
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="源文件" min-width="260" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-button v-if="row.retryable" type="primary" link :icon="RefreshRight" @click="retryOne(row)">
-              重试
-            </el-button>
+            <div class="path-cell">
+              <span>{{ row.sourceVirtualPath || row.sourcePath || '-' }}</span>
+              <el-button
+                v-if="row.sourcePath"
+                size="small"
+                link
+                :icon="CopyDocument"
+                @click="copyPath(row.sourcePath)"
+              />
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="输出 mp4" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div class="path-cell" v-if="row.outputPath">
+              <span>{{ row.outputPath }}</span>
+              <el-button size="small" link :icon="CopyDocument" @click="copyPath(row.outputPath)" />
+            </div>
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
+        <el-table-column prop="message" label="消息" min-width="180" show-overflow-tooltip />
+        <el-table-column label="尝试" width="90">
+          <template #default="{ row }">
+            <span class="muted">{{ (row.enqueueCount || 1) }}× / 重 {{ row.retryCount || 0 }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="updateTime" label="更新时间" width="170">
+          <template #default="{ row }">
+            <span class="muted">{{ formatTime(row.updateTime) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="220" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="canPrioritize(row)"
+              type="danger"
+              link
+              :icon="Top"
+              @click="prioritizeOne(row)"
+            >置顶</el-button>
+            <el-button v-if="row.retryable" type="primary" link :icon="RefreshRight" @click="retryOne(row)">重试</el-button>
+            <el-button
+              v-if="row.reTranscodeable"
+              type="warning"
+              link
+              :icon="VideoCamera"
+              @click="reTranscodeOne(row)"
+            >重转</el-button>
+            <span v-if="!row.retryable && !row.reTranscodeable && !canPrioritize(row)" class="muted">-</span>
+          </template>
+        </el-table-column>
       </el-table>
+
+      <el-pagination
+        class="pager"
+        v-model:current-page="pagination.page"
+        v-model:page-size="pagination.size"
+        :total="pagination.total"
+        :page-sizes="[10, 20, 50, 100]"
+        layout="total, sizes, prev, pager, next, jumper"
+        background
+        @current-change="loadJobs"
+        @size-change="loadJobs"
+      />
 
       <el-card class="backfill-card" shadow="never">
         <template #header>
@@ -147,19 +270,40 @@
 </template>
 
 <script setup>
-import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
-import {ElMessage, ElMessageBox} from 'element-plus'
-import {CaretRight, Refresh, RefreshLeft, RefreshRight} from '@element-plus/icons-vue'
-import {getUserInfo} from '@/api/user/user'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { CaretRight, CopyDocument, Refresh, RefreshLeft, RefreshRight, Search, Top, VideoCamera } from '@element-plus/icons-vue'
+import { getUserInfo } from '@/api/user/user'
 import {
+  getTranscodeJobs,
   getTranscodeTaskSummary,
+  prioritizeTranscodeBatch,
   recoverRunningTasks,
-  retryAllFailedTasks,
-  retryFailedTask
+  reTranscodeBatch,
+  retryFailedTask,
+  retryTranscodeBatch
 } from '@/api/fileServer/videoTranscodeAdmin'
-import {getFileMappingBackfillStatus, startFileMappingBackfill} from '@/api/fileServer/fileAdmin'
-import {getWorkerState} from '@/api/fileServer/transcodeWorker'
+import { getFileMappingBackfillStatus, startFileMappingBackfill } from '@/api/fileServer/fileAdmin'
+import { getWorkerState } from '@/api/fileServer/transcodeWorker'
 import { useBreakpoint } from '@/composables/useBreakpoint'
+
+const STATE_OPTIONS = [
+  { value: 'WAITING', label: 'WAITING' },
+  { value: 'PROCESSING', label: 'PROCESSING' },
+  { value: 'SUCCESS', label: 'SUCCESS' },
+  { value: 'FAILED', label: 'FAILED' },
+  { value: 'TOO_LARGE', label: 'TOO_LARGE' },
+  { value: 'UNSUPPORTED', label: 'UNSUPPORTED' },
+  { value: 'NONE', label: 'NONE' }
+]
+
+const QUEUE_STATE_OPTIONS = [
+  { value: 'WAITING', label: 'WAITING' },
+  { value: 'RUNNING', label: 'RUNNING' },
+  { value: 'FAILED', label: 'FAILED' },
+  { value: 'DONE', label: 'DONE' },
+  { value: 'UNKNOWN', label: 'UNKNOWN' }
+]
 
 const { isMobile } = useBreakpoint()
 const tableMaxHeight = computed(() => (isMobile.value ? '50vh' : '60vh'))
@@ -167,9 +311,18 @@ const currentUserInfo = ref(getUserInfo())
 const isAdmin = computed(() => (currentUserInfo.value.authorities || []).includes('ADMIN'))
 const loading = ref(false)
 const recovering = ref(false)
-const retryingAll = ref(false)
+const retryingBatch = ref(false)
+const reTranscoding = ref(false)
+const prioritizing = ref(false)
+
 const summary = ref({})
-const tasks = computed(() => summary.value.tasks || [])
+const jobs = ref([])
+const selectedRows = ref([])
+const selectedIds = computed(() => selectedRows.value.map((r) => r.taskId))
+
+const filter = reactive({ state: '', queueState: '', keyword: '' })
+const pagination = reactive({ page: 1, size: 20, total: 0 })
+
 const backfillLoading = ref(false)
 const startingBackfill = ref(false)
 const backfillStatus = ref({})
@@ -178,6 +331,7 @@ let backfillTimer = null
 const workerState = ref({})
 const workerOnline = ref(false)
 let workerTimer = null
+let jobsTimer = null
 
 const loadWorkerState = async () => {
   try {
@@ -190,26 +344,71 @@ const loadWorkerState = async () => {
   }
 }
 
+const loadSummary = async () => {
+  try {
+    const response = await getTranscodeTaskSummary()
+    summary.value = response.data || {}
+  } catch (e) {
+    // summary 异常不阻塞主表
+  }
+}
+
+const loadJobs = async () => {
+  loading.value = true
+  try {
+    const response = await getTranscodeJobs({
+      state: filter.state || undefined,
+      queueState: filter.queueState || undefined,
+      keyword: filter.keyword || undefined,
+      page: pagination.page - 1,
+      size: pagination.size
+    })
+    const page = response.data || {}
+    // 后端 AjaxResult.success(Page) 走 PageResult.buildPageResult 包装：{ list, total, totalPages, pageSize, pageNumber }
+    jobs.value = page.list || page.content || []
+    pagination.total = page.total ?? page.totalElements ?? 0
+  } finally {
+    loading.value = false
+  }
+}
+
+const applyFilter = () => {
+  pagination.page = 1
+  loadJobs()
+}
+
+const resetFilter = () => {
+  filter.state = ''
+  filter.queueState = ''
+  filter.keyword = ''
+  pagination.page = 1
+  loadJobs()
+}
+
 onMounted(() => {
   if (isAdmin.value) {
-    loadTasks()
+    loadJobs()
+    loadSummary()
     loadBackfillStatus()
     loadWorkerState()
     backfillTimer = setInterval(loadBackfillStatus, 3000)
     workerTimer = setInterval(loadWorkerState, 5000)
+    jobsTimer = setInterval(() => {
+      loadSummary()
+      loadJobs()
+    }, 8000)
   }
 })
 
 onBeforeUnmount(() => {
-  if (backfillTimer) {
-    clearInterval(backfillTimer)
-    backfillTimer = null
-  }
-  if (workerTimer) {
-    clearInterval(workerTimer)
-    workerTimer = null
-  }
+  if (backfillTimer) { clearInterval(backfillTimer); backfillTimer = null }
+  if (workerTimer) { clearInterval(workerTimer); workerTimer = null }
+  if (jobsTimer) { clearInterval(jobsTimer); jobsTimer = null }
 })
+
+const onSelectionChange = (rows) => {
+  selectedRows.value = rows
+}
 
 const workerStatusLabel = computed(() => {
   if (!workerOnline.value) return 'OFFLINE'
@@ -236,32 +435,96 @@ const workerStatusDotClass = computed(() => {
 
 const workerCardClass = computed(() => (workerOnline.value ? '' : 'worker-card-offline'))
 
-const loadTasks = async () => {
-  loading.value = true
+const retryOne = async (row) => {
+  await ElMessageBox.confirm(`确认重试任务 ${shortTaskId(row.taskId)}？`, '重试转码任务', { type: 'warning' })
+  await retryFailedTask(row.taskId)
+  ElMessage.success('已移回等待队列')
+  loadJobs()
+}
+
+const retryBatchHandler = async () => {
+  const ids = selectedIds.value
+  if (ids.length === 0) return
+  await ElMessageBox.confirm(`确认批量重试 ${ids.length} 个任务？仅处于 FAILED 队列的会被移回等待队列。`, '批量重试', { type: 'warning' })
+  retryingBatch.value = true
   try {
-    const response = await getTranscodeTaskSummary()
-    summary.value = response.data || {}
+    const response = await retryTranscodeBatch(ids)
+    ElMessage.success(`已重试 ${response.data || 0} 个失败任务`)
+    loadJobs()
   } finally {
-    loading.value = false
+    retryingBatch.value = false
   }
 }
 
-const retryOne = async (row) => {
-  await ElMessageBox.confirm(`确认重试任务 ${row.taskId}？`, '重试转码任务', { type: 'warning' })
-  await retryFailedTask(row.taskId)
-  ElMessage.success('已移回等待队列')
-  loadTasks()
+const reTranscodeOne = async (row) => {
+  await ElMessageBox.confirm(`确认对 ${shortTaskId(row.taskId)} 重新转码？现有输出 mp4 / 预览 / 状态文件将被清理。`, '重新转码', { type: 'warning' })
+  reTranscoding.value = true
+  try {
+    const response = await reTranscodeBatch([row.taskId])
+    ElMessage.success(`已重排 ${response.data || 0} 个任务`)
+    loadJobs()
+  } finally {
+    reTranscoding.value = false
+  }
 }
 
-const retryAllFailed = async () => {
-  await ElMessageBox.confirm('确认重试全部失败任务？', '重试全部失败任务', { type: 'warning' })
-  retryingAll.value = true
+const reTranscodeHandler = async () => {
+  const ids = selectedIds.value
+  if (ids.length === 0) return
+  await ElMessageBox.confirm(`确认对所选 ${ids.length} 个任务重新转码？现有输出文件将被清理后重排到队列。`, '批量重新转码', { type: 'warning' })
+  reTranscoding.value = true
   try {
-    const response = await retryAllFailedTasks()
-    ElMessage.success(`已重试 ${response.data || 0} 个失败任务`)
-    loadTasks()
+    const response = await reTranscodeBatch(ids)
+    ElMessage.success(`已重排 ${response.data || 0} 个任务`)
+    loadJobs()
   } finally {
-    retryingAll.value = false
+    reTranscoding.value = false
+  }
+}
+
+const canPrioritize = (row) => {
+  if (!row) return false
+  // RUNNING 已被 worker 抢走、TOO_LARGE / UNSUPPORTED 没有可调度的 task 文件，都不允许置顶
+  if (row.queueState === 'RUNNING') return false
+  if (row.state === 'TOO_LARGE' || row.state === 'UNSUPPORTED' || row.state === 'NONE') return false
+  return true
+}
+
+const prioritizeOne = async (row) => {
+  await ElMessageBox.confirm(
+      `确认把 ${shortTaskId(row.taskId)} 提到队列最前？已运行的任务不会被抢占，DONE / FAILED 会先重排到等待队列。`,
+      '设为最优先',
+      { type: 'warning' }
+  )
+  prioritizing.value = true
+  try {
+    const response = await prioritizeTranscodeBatch([row.taskId])
+    if (response.data) {
+      ElMessage.success('已置顶')
+    } else {
+      ElMessage.warning('未能置顶（任务可能已在运行）')
+    }
+    loadJobs()
+  } finally {
+    prioritizing.value = false
+  }
+}
+
+const prioritizeBatchHandler = async () => {
+  const ids = selectedIds.value
+  if (ids.length === 0) return
+  await ElMessageBox.confirm(
+      `确认把所选 ${ids.length} 个任务提到队列最前？已运行的任务不会被抢占；DONE / FAILED 会先重排到等待队列。`,
+      '批量设为最优先',
+      { type: 'warning' }
+  )
+  prioritizing.value = true
+  try {
+    const response = await prioritizeTranscodeBatch(ids)
+    ElMessage.success(`已置顶 ${response.data || 0} 个任务`)
+    loadJobs()
+  } finally {
+    prioritizing.value = false
   }
 }
 
@@ -271,9 +534,18 @@ const recoverRunning = async () => {
   try {
     const response = await recoverRunningTasks()
     ElMessage.success(`已恢复 ${response.data || 0} 个任务`)
-    loadTasks()
+    loadJobs()
   } finally {
     recovering.value = false
+  }
+}
+
+const copyPath = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制路径')
+  } catch (e) {
+    ElMessage.warning('复制失败，请手动选择')
   }
 }
 
@@ -297,6 +569,14 @@ const startBackfill = async () => {
   } finally {
     startingBackfill.value = false
   }
+}
+
+const shortTaskId = (id) => (id ? id.slice(0, 8) : '-')
+
+const formatTime = (value) => {
+  if (!value) return '-'
+  if (typeof value === 'string') return value.replace('T', ' ').slice(0, 19)
+  return String(value)
 }
 
 const displayState = (row) => {
@@ -480,8 +760,65 @@ h2 {
   color: var(--color-warning);
 }
 
+.filter-card {
+  margin-bottom: var(--space-3);
+}
+
+.filter-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+}
+
+.filter-input { min-width: 160px; }
+.filter-input-wide { min-width: 240px; }
+
+@media (max-width: 640px) {
+  .filter-input, .filter-input-wide { min-width: 0; width: 100%; }
+  .filter-form :deep(.el-form-item) { width: 100%; margin-right: 0; margin-bottom: var(--space-2); }
+  .filter-form :deep(.el-form-item__content) { width: 100%; }
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.batch-summary {
+  margin-right: var(--space-2);
+}
+
 .task-table {
   width: 100%;
+}
+
+.mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--font-size-sm);
+}
+
+.path-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  word-break: break-all;
+}
+
+.queue-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.pager {
+  margin-top: var(--space-3);
+  display: flex;
+  justify-content: flex-end;
 }
 
 .backfill-card {

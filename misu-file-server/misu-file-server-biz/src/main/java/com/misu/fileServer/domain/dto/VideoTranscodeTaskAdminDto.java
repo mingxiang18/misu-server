@@ -28,4 +28,6 @@ public class VideoTranscodeTaskAdminDto {
     private String updateTime;
 
     private Boolean retryable;
+
+    private Boolean priority;
 }

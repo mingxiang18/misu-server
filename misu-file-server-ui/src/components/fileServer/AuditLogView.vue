@@ -12,38 +12,40 @@
     </div>
 
     <div class="audit-filter">
-      <el-select v-model="filter.actionType" placeholder="操作类型" clearable style="width: 200px;">
+      <el-select v-model="filter.actionType" placeholder="操作类型" clearable class="audit-filter-input audit-filter-type">
         <el-option v-for="opt in actionOptions" :key="opt.value" :label="opt.label" :value="opt.value"/>
       </el-select>
-      <el-input v-model="filter.userId" placeholder="操作者 userId" clearable style="width: 180px;"/>
+      <el-input v-model="filter.userId" placeholder="操作者 userId" clearable class="audit-filter-input audit-filter-user"/>
       <el-date-picker
           v-model="filter.range"
-          type="datetimerange"
+          :type="isMobile ? 'daterange' : 'datetimerange'"
           range-separator="至"
           start-placeholder="开始时间"
           end-placeholder="结束时间"
           value-format="YYYY-MM-DDTHH:mm:ss"
-          style="width: 360px;"/>
-      <el-button type="primary" @click="loadList(1)" :loading="loading">查询</el-button>
-      <el-button @click="resetFilter">重置</el-button>
+          class="audit-filter-input audit-filter-date"/>
+      <div class="audit-filter-actions">
+        <el-button type="primary" @click="loadList(1)" :loading="loading">查询</el-button>
+        <el-button @click="resetFilter">重置</el-button>
+      </div>
     </div>
 
     <div class="audit-body" v-loading="loading">
       <el-table :data="items" stripe class="audit-table" :empty-text="loading ? '加载中...' : '暂无日志'">
-        <el-table-column prop="createTime" label="时间" width="180">
+        <el-table-column prop="createTime" label="时间" :width="isMobile ? 140 : 180">
           <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
         </el-table-column>
-        <el-table-column prop="actionType" label="操作" width="160">
+        <el-table-column prop="actionType" label="操作" :width="isMobile ? 96 : 160">
           <template #default="{ row }">
             <el-tag size="small" :type="actionTagType(row.actionType)">{{ actionLabel(row.actionType) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="userName" label="用户" width="140">
+        <el-table-column v-if="!isMobile" prop="userName" label="用户" width="140">
           <template #default="{ row }">
             <span :title="`userId=${row.userId}`">{{ row.userName || row.userId || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="targetVirtualPath" label="目标" min-width="240">
+        <el-table-column prop="targetVirtualPath" label="目标" min-width="200">
           <template #default="{ row }">
             <span class="audit-cell-target">
               <span v-if="row.targetOpenType != null" class="audit-scope">
@@ -53,20 +55,20 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="结果" width="120">
+        <el-table-column v-if="!isMobile" label="结果" width="120">
           <template #default="{ row }">
             <el-tag size="small" :type="row.statusCode === 200 ? 'success' : 'danger'">
               {{ row.statusCode === 200 ? '成功' : (row.statusCode + ' 失败') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="errorMessage" label="错误信息" min-width="200">
+        <el-table-column v-if="!isMobile" prop="errorMessage" label="错误信息" min-width="200">
           <template #default="{ row }">
             <span style="color: var(--color-danger);" v-if="row.errorMessage">{{ row.errorMessage }}</span>
             <span style="color: var(--color-text-tertiary);" v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column prop="ip" label="IP" width="140"/>
+        <el-table-column v-if="!isMobile" prop="ip" label="IP" width="140"/>
       </el-table>
 
       <div v-if="total > 0" class="audit-pagination">
@@ -86,6 +88,9 @@
 import { ref, onMounted } from 'vue';
 import { Histogram } from '@element-plus/icons-vue';
 import { listAuditLogs } from '@/api/fileServer/auditLogApi';
+import { useBreakpoint } from '@/composables/useBreakpoint';
+
+const { isMobile } = useBreakpoint();
 
 const items = ref([]);
 const total = ref(0);
@@ -201,6 +206,30 @@ onMounted(() => loadList(1));
   align-items: center;
   border-bottom: 1px solid var(--color-border-subtle);
   flex-wrap: wrap;
+}
+
+.audit-filter-input { width: 200px; }
+.audit-filter-user { width: 180px; }
+.audit-filter-date { width: 360px; }
+.audit-filter-actions { display: flex; gap: var(--space-2); }
+
+@media (max-width: 640px) {
+  .audit-header {
+    padding: var(--space-3);
+    flex-wrap: wrap;
+  }
+  .audit-title-icon { width: 22px; height: 22px; }
+  .audit-title-text { font-size: var(--font-size-base); }
+  .audit-title-hint { display: none; }
+  .audit-filter {
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-2);
+  }
+  .audit-filter-input,
+  .audit-filter-user,
+  .audit-filter-date { width: 100% !important; }
+  .audit-filter-actions { width: 100%; justify-content: flex-end; }
+  .audit-body { padding: var(--space-2) var(--space-3) var(--space-12); }
 }
 
 .audit-body {
