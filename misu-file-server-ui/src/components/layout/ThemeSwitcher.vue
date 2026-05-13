@@ -1,13 +1,13 @@
 <script setup>
 import { computed } from 'vue'
-import { Sunny, Moon, Monitor } from '@element-plus/icons-vue'
+import { Sunny, Moon, Monitor, Close } from '@element-plus/icons-vue'
 import { useTheme } from '@/composables/useTheme'
 
 defineProps({
   variant: { type: String, default: 'compact' }   // 'compact' | 'segmented'
 })
 
-const { pref, setPref } = useTheme()
+const { pref, setPref, autoSwitchHint, dismissHint } = useTheme()
 
 const options = [
   { value: 'light',  label: '浅色',     icon: Sunny },
@@ -19,29 +19,51 @@ const current = computed(() => options.find(o => o.value === pref.value) || opti
 </script>
 
 <template>
-  <!-- 紧凑：单图标 + 下拉（用于桌面 PageHeader） -->
-  <el-dropdown v-if="variant === 'compact'" trigger="click" placement="bottom-end">
-    <button
-        class="theme-trigger"
-        type="button"
-        :aria-label="`切换主题，当前：${current.label}`">
-      <component :is="current.icon" class="theme-trigger-icon" />
-    </button>
-    <template #dropdown>
-      <el-dropdown-menu>
-        <el-dropdown-item
-            v-for="o in options"
-            :key="o.value"
-            @click="setPref(o.value)">
-          <span class="opt" :class="{ 'opt-active': pref === o.value }">
-            <component :is="o.icon" class="opt-icon" />
-            <span class="opt-label">{{ o.label }}</span>
-            <span v-if="pref === o.value" class="opt-check" aria-hidden="true">✓</span>
-          </span>
-        </el-dropdown-item>
-      </el-dropdown-menu>
-    </template>
-  </el-dropdown>
+  <!-- 紧凑：单图标 + 下拉（用于桌面 PageHeader）。
+       autoSwitchHint=true 时旁边定位"已自动切换到深色"小角标。 -->
+  <div v-if="variant === 'compact'" class="theme-switcher-wrap">
+    <el-dropdown trigger="click" placement="bottom-end">
+      <button
+          class="theme-trigger"
+          :class="{ 'has-hint': autoSwitchHint }"
+          type="button"
+          :aria-label="`切换主题，当前：${current.label}`">
+        <component :is="current.icon" class="theme-trigger-icon" />
+        <span v-if="autoSwitchHint" class="hint-dot" aria-hidden="true"></span>
+      </button>
+      <template #dropdown>
+        <el-dropdown-menu>
+          <el-dropdown-item
+              v-for="o in options"
+              :key="o.value"
+              @click="setPref(o.value)">
+            <span class="opt" :class="{ 'opt-active': pref === o.value }">
+              <component :is="o.icon" class="opt-icon" />
+              <span class="opt-label">{{ o.label }}</span>
+              <span v-if="pref === o.value" class="opt-check" aria-hidden="true">✓</span>
+            </span>
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
+
+    <transition name="hint-fade">
+      <div
+          v-if="autoSwitchHint"
+          class="auto-switch-hint"
+          role="status">
+        <span class="hint-arrow" aria-hidden="true"></span>
+        <span class="hint-text">已自动切换到深色 · 这里可以切回</span>
+        <button
+            type="button"
+            class="hint-close"
+            aria-label="关闭提示"
+            @click.stop="dismissHint">
+          <Close />
+        </button>
+      </div>
+    </transition>
+  </div>
 
   <!-- 段控：三档并排（用于移动端"更多" sheet） -->
   <div v-else class="theme-segmented" role="group" aria-label="主题">
@@ -60,7 +82,12 @@ const current = computed(() => options.find(o => o.value === pref.value) || opti
 
 <style scoped>
 /* ---------- compact (icon-only trigger) ---------- */
+.theme-switcher-wrap {
+  position: relative;
+  display: inline-flex;
+}
 .theme-trigger {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -77,9 +104,99 @@ const current = computed(() => options.find(o => o.value === pref.value) || opti
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
+.theme-trigger.has-hint {
+  color: var(--accent);
+}
 .theme-trigger-icon {
   width: 18px;
   height: 18px;
+}
+.hint-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px 2px rgba(139, 157, 240, 0.45);
+}
+
+/* ---------- 自动切换提示角标（定位在按钮下方，箭头指向按钮） ---------- */
+.auto-switch-hint {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  z-index: var(--z-overlay);
+}
+.hint-arrow {
+  position: absolute;
+  top: -5px;
+  right: 13px;
+  width: 9px;
+  height: 9px;
+  background: var(--color-bg-surface);
+  border-left: 1px solid var(--color-border-default);
+  border-top: 1px solid var(--color-border-default);
+  transform: rotate(45deg);
+}
+.hint-text {
+  letter-spacing: 0.1px;
+}
+.hint-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard),
+              color var(--duration-fast) var(--ease-standard);
+}
+.hint-close :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
+.hint-close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+/* 进入/退出动画 */
+.hint-fade-enter-active,
+.hint-fade-leave-active {
+  transition: opacity 180ms var(--ease-standard),
+              transform 180ms var(--ease-standard);
+}
+.hint-fade-enter-from,
+.hint-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* 移动端：badge 可能超出右边界，限宽 + 缩字 */
+@media (max-width: 640px) {
+  .auto-switch-hint {
+    max-width: calc(100vw - 24px);
+    white-space: normal;
+    line-height: 1.4;
+    font-size: var(--font-size-xs);
+  }
 }
 
 /* ---------- dropdown option ---------- */

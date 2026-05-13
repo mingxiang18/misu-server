@@ -16,9 +16,11 @@ import { useMediaQuery, useStorage } from '@vueuse/core'
 const STORAGE_KEY = 'misu-theme-pref'
 const TRANSITION_CLASS = 'theme-transitioning'
 const TRANSITION_MS = 250
+const HINT_AUTO_DISMISS_MS = 8000
 
 const pref = useStorage(STORAGE_KEY, 'system')
 const routeOverride = ref(null)
+const autoSwitchHint = ref(false)        // 进入 dark 路由时弹"已自动切换"角标
 const systemDark = useMediaQuery('(prefers-color-scheme: dark)')
 
 const effective = computed(() => {
@@ -29,6 +31,7 @@ const effective = computed(() => {
 
 let initialized = false
 let transitionTimer = null
+let hintTimer = null
 
 function applyTheme (theme) {
   const html = document.documentElement
@@ -44,6 +47,20 @@ function applyTheme (theme) {
   initialized = true
 }
 
+function setHint (on) {
+  autoSwitchHint.value = on
+  if (hintTimer) {
+    clearTimeout(hintTimer)
+    hintTimer = null
+  }
+  if (on) {
+    hintTimer = window.setTimeout(() => {
+      autoSwitchHint.value = false
+      hintTimer = null
+    }, HINT_AUTO_DISMISS_MS)
+  }
+}
+
 applyTheme(effective.value)
 watch(effective, applyTheme)
 
@@ -51,14 +68,31 @@ export function useTheme () {
   return {
     pref,                                // 'light' | 'dark' | 'system'
     effective,                           // computed 'light' | 'dark'
+    autoSwitchHint,                      // 'router 自动切到 dark' 的提示 ref（ThemeSwitcher 监听）
     isSystemForced: computed(() => routeOverride.value !== null),
     setPref (value) {
       if (value === 'light' || value === 'dark' || value === 'system') {
         pref.value = value
+        // 用户主动选择主题 → 撤销自动切换覆盖，并清掉提示
+        routeOverride.value = null
+        setHint(false)
       }
     },
     setRouteOverride (theme) {
-      routeOverride.value = theme === 'dark' ? 'dark' : null
+      const newOverride = theme === 'dark' ? 'dark' : null
+      // 进入 dark 路由前，effective 是不是已经是 dark？
+      const wasAlreadyDark = effective.value === 'dark'
+      routeOverride.value = newOverride
+      if (newOverride === 'dark' && !wasAlreadyDark) {
+        // 真正发生了"自动切换" → 提示
+        setHint(true)
+      } else if (newOverride === null) {
+        // 离开 dark 路由 → 提示消失（无论 effective 怎么变）
+        setHint(false)
+      }
+    },
+    dismissHint () {
+      setHint(false)
     },
   }
 }
