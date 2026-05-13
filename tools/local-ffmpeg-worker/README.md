@@ -65,25 +65,84 @@ kubectl apply -f networkpolicy.yaml
 
 ### 1.4 启用硬编
 
-要让 VAAPI / NVENC 真的生效，需要把对应设备挂进容器。**默认 deployment.yaml 已为
-`supplementalGroups: 44`（video gid）准备，但 `/dev/dri` mount 被注释掉了，
-节点没 iGPU 时挂进去会报错**。打开 VAAPI 的步骤：
+`deployment.yaml` 默认就把 `/dev/dri` 挂进了容器；镜像里也已经装好 mesa-va-gallium
+（含 AMD radeonsi 驱动 + Intel iris 驱动）。节点上只要有对应 GPU，启动后
+`detect-encoder.sh` 会自动选用，没 GPU 就退回 libx265，零干预。
+
+#### AMD Radeon (iGPU / dGPU, VAAPI)
+
+适用：Ryzen APU、独立 Radeon、嵌入式 G-series。要求 GPU 支持 HEVC encode
+（RDNA / VCN 2.0+ 全系都行，Polaris/Vega 10 只能 H.264）。
+
+1. **节点准备**（misu-maco 上执行一次，确认 kernel 加载了 amdgpu）：
+
+   ```bash
+   ls -l /dev/dri/renderD128                    # 应能看到字符设备，权限组通常是 render
+   ls -ln /dev/dri/renderD128 | awk '{print $4}'  # 拿到实际 gid（109 / 989 / 27 等）
+   lsmod | grep amdgpu                          # 确认驱动加载
+   ```
+
+   deployment.yaml 的 `supplementalGroups: [44, 27, 107, 109, 110, 989]` 已经覆盖
+   主流发行版的 video/render gid。如果你的 gid 不在这个列表里，把它加进去即可。
+
+2. **apply 后验证容器侧能看到 GPU**：
+
+   ```bash
+   kubectl -n misu-server exec deploy/misu-ffmpeg-worker -- vainfo
+   # 期望看到 VAEntrypointEncSlice 列在 HEVCMain / HEVCMain10 下，说明 HEVC encode 可用
+   ```
+
+3. **看 worker 启动时选了什么 encoder**：
+
+   ```bash
+   kubectl -n misu-server logs deploy/misu-ffmpeg-worker | grep '\[detect-encoder\]'
+   # 期望: "picked hevc_vaapi (Intel/AMD iGPU via /dev/dri/renderD128)"
+   # 如果 dry-encode 失败，会看到 "hevc_vaapi listed but dry-encode failed, cascading"
+   # 然后回退到 libx265。
+   ```
+
+4. **故障排除**：
+
+   | 现象 | 原因 | 处理 |
+   |---|---|---|
+   | `vainfo: VA-API version 1.X.X ... unsupported display` | `/dev/dri` 没挂进来 | 检查 deployment.yaml 的 volumes 段 |
+   | `vainfo: ... failed to initialize: unknown libva error` | 驱动找不到 GPU | 节点 `lsmod \| grep amdgpu`；旧卡可能不在 mesa 支持列表 |
+   | `vainfo: VAEntrypointEncSlice` 只列在 H264，HEVC 没有 | GPU 老（VCN 1.0 之前） | 接受现状,只能 H.264 硬编;或回退 libx265 |
+   | `Failed to call vaCreateBuffer: 7` (out of memory) | GPU 显存被占满 | 看节点 `radeontop` / 同时跑多任务时降并发 |
+
+#### Intel iGPU (VAAPI)
+
+Gen8+ (Broadwell 起) 都行，新的 Gen11+ (Ice Lake 起) 性能更好。一样挂 `/dev/dri`，
+但驱动名要切换：
 
 ```yaml
-# deployment.yaml
-volumeMounts:
-  - { name: dri, mountPath: /dev/dri }
-volumes:
-  - name: dri
-    hostPath:
-      path: /dev/dri
-      type: Directory
+# k8s/configmap.yaml
+LIBVA_DRIVER_NAME: iHD   # Gen11+ (Ice Lake 起，推荐)
+# 或:
+LIBVA_DRIVER_NAME: i965  # 老的 Intel (Broadwell~Coffee Lake)
 ```
 
-NVENC 类似：节点装 `nvidia-container-toolkit`，pod 加 `runtimeClassName: nvidia`，
-然后让 `detect-encoder.sh` 探测时能 `nvidia-smi` 成功。
+`iHD` 驱动来自 alpine 的 `intel-media-driver` 包，本镜像默认不装（misu-maco 是 AMD），
+要 Intel 加进 Dockerfile 重新 build：
 
-要 **强制** 用某一档编码器（跳过自动探测），在 `configmap.yaml` 里设：
+```dockerfile
+RUN apk add intel-media-driver libva-intel-driver
+```
+
+#### NVIDIA NVENC
+
+跟 VAAPI 完全不同的路径。需要：
+
+1. 节点装 `nvidia-container-toolkit`（让 containerd 能给容器注入 GPU）
+2. pod spec 加 `runtimeClassName: nvidia`
+3. 镜像里需要 NVIDIA 私有 CUDA / video SDK（alpine ffmpeg 没编 nvenc 支持），通常要
+   切换 base 镜像到 `nvidia/cuda:*-ubuntu*` 并自己编 ffmpeg。
+
+成本较高，AMD/Intel iGPU 够用时不建议走这条。
+
+#### 强制指定 encoder
+
+跳过自动探测：在 `k8s/configmap.yaml` 里设：
 
 ```yaml
 VIDEO_ENCODER_ARGS: "-c:v hevc_vaapi -qp 23"          # 强制 VAAPI

@@ -452,13 +452,39 @@ run_ffmpeg_task() {
 
   # shellcheck disable=SC2206
   local video_args=($VIDEO_ENCODER_ARGS)
+  # shellcheck disable=SC2206
+  local hwaccel_args=(${HWACCEL_INPUT_ARGS:-})
+  local scale_type="${SCALE_FILTER_TYPE:-cpu}"
 
-  log "Task $TASK_ID: transcoding with $ENCODER_NAME (${video_args[*]})"
-  publish_status "PROCESSING" "5" "容器内转码中 ($ENCODER_NAME)" "TRANSCODING" || return 1
+  # 按 scale_type 构建对应 scale 滤镜：
+  #   - vaapi             : 整条 GPU pipeline (env override 强开 hevc_vaapi 时使用)
+  #   - cuda              : 整条 NVENC pipeline
+  #   - cpu (默认)        : libx265 软编，最大兼容性
+  # 关于 VAAPI 硬解兼容性（AMD VCN 仅 4:2:0、Safari SPS flag 兼容性等）
+  # 详见 detect-encoder.sh 注释。
+  local vf
+  case "$scale_type" in
+    vaapi)
+      vf="scale_vaapi=w='if(gt(ih\\,${MAX_HEIGHT})\\,trunc(iw*${MAX_HEIGHT}/ih/2)*2\\,iw)':h='if(gt(ih\\,${MAX_HEIGHT})\\,${MAX_HEIGHT}\\,ih)':format=nv12"
+      ;;
+    cuda)
+      vf="scale_cuda=w='if(gt(ih\\,${MAX_HEIGHT})\\,trunc(iw*${MAX_HEIGHT}/ih/2)*2\\,iw)':h='if(gt(ih\\,${MAX_HEIGHT})\\,${MAX_HEIGHT}\\,ih)'"
+      ;;
+    cpu|*)
+      vf="scale='if(gt(ih,${MAX_HEIGHT}),-2,iw)':'if(gt(ih,${MAX_HEIGHT}),${MAX_HEIGHT},ih)'"
+      ;;
+  esac
 
-  ffmpeg -y -i "$LOCAL_SOURCE" \
-    -map 0:v:0 -map 0:a? \
-    -vf "scale='if(gt(ih,$MAX_HEIGHT),-2,iw)':'if(gt(ih,$MAX_HEIGHT),$MAX_HEIGHT,ih)'" \
+  log "Task $TASK_ID: transcoding with $ENCODER_NAME (scale=$scale_type)"
+  publish_status "PROCESSING" "5" "容器内转码中 ($ENCODER_NAME, scale=$scale_type)" "TRANSCODING" || return 1
+
+  # 注意 hwaccel 必须放 -i 之前（input options），${hwaccel_args[@]:+...} 让空数组安全展开。
+  # -ignore_unknown 跳过 ffmpeg 不认识的流（iPhone 17 Pro / iOS 26 录像里的 apac 空间音频、
+  # mebx 元数据等），否则 ffmpeg 会因为找不到 decoder for "none" 而整段失败。
+  # -map 0:a:0? 只取第一条音频（最常用的 AAC），避免误抓到不识别的辅音轨。
+  ffmpeg -y "${hwaccel_args[@]}" -ignore_unknown -i "$LOCAL_SOURCE" \
+    -map 0:v:0 -map 0:a:0? \
+    -vf "$vf" \
     "${video_args[@]}" \
     -c:a aac -b:a "$AUDIO_BITRATE" \
     -movflags +faststart \
@@ -524,7 +550,7 @@ main() {
   log "In-cluster ffmpeg worker started, encoder=$ENCODER_NAME, root=$USER_FILE_ROOT"
   log "Task path map: $CONTAINER_USER_FILE_ROOT -> $USER_FILE_ROOT"
   log "Dashboard state: $STATE_FILE"
-  log "ffmpeg args: $VIDEO_ENCODER_ARGS"
+  log "ffmpeg args: hwaccel='${HWACCEL_INPUT_ARGS:-}' scale=${SCALE_FILTER_TYPE:-cpu} encoder='${VIDEO_ENCODER_ARGS}'"
 
   if [[ "$RECOVER_RUNNING" == "1" ]]; then
     log "Recover running tasks back to queue"
