@@ -35,28 +35,28 @@
             <el-tag v-else type="success" size="small">有效</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="保护" width="100">
+        <el-table-column v-if="!isMobile" label="保护" width="100">
           <template #default="{ row }">
             <el-tag v-if="row.hasPassword" size="small" type="primary">需要密码</el-tag>
             <span v-else style="color:var(--color-text-tertiary);">无</span>
           </template>
         </el-table-column>
-        <el-table-column label="下载次数" width="120">
+        <el-table-column v-if="!isMobile" label="下载次数" width="120">
           <template #default="{ row }">
             <span>{{ row.downloadCount }}</span>
             <span v-if="row.maxDownloads != null" style="color:var(--color-text-tertiary);"> / {{ row.maxDownloads }}</span>
             <span v-else style="color:var(--color-text-tertiary);"> / ∞</span>
           </template>
         </el-table-column>
-        <el-table-column prop="expireTime" label="过期时间" width="180">
+        <el-table-column v-if="!isMobile" prop="expireTime" label="过期时间" width="180">
           <template #default="{ row }">{{ formatTime(row.expireTime) }}</template>
         </el-table-column>
-        <el-table-column prop="createTime" label="创建时间" width="180">
+        <el-table-column v-if="!isMobile" prop="createTime" label="创建时间" width="180">
           <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" :width="isMobile ? 130 : 200" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="primary" link @click="copyLink(row)">复制链接</el-button>
+            <el-button size="small" type="primary" link @click="copyLink(row)">复制</el-button>
             <el-button size="small" type="danger" link @click="revoke(row)">撤销</el-button>
           </template>
         </el-table-column>
@@ -80,6 +80,9 @@ import { ref, onMounted } from 'vue';
 import { Share, Folder, Picture, Film, Document } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { listShares, revokeShare } from '@/api/fileServer/fileShareApi';
+import { useBreakpoint } from '@/composables/useBreakpoint';
+
+const { isMobile } = useBreakpoint();
 
 const items = ref([]);
 const total = ref(0);
@@ -148,6 +151,17 @@ onMounted(() => loadList(1));
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border-subtle);
+}
+
+@media (max-width: 640px) {
+  .shares-header {
+    padding: var(--space-3);
+    flex-wrap: wrap;
+  }
+  .shares-title-icon { width: 22px; height: 22px; }
+  .shares-title-text { font-size: var(--font-size-base); }
+  .shares-title-hint { display: none; }
+  .shares-body { padding: var(--space-2) var(--space-3) var(--space-12); }
 }
 
 .shares-title {

@@ -11,6 +11,11 @@ import {
   Memo,
   Download,
   User,
+  Delete,
+  Share,
+  Histogram,
+  Files,
+  Box,
   Menu as IconMenu,
   SwitchButton
 } from '@element-plus/icons-vue'
@@ -29,10 +34,15 @@ const filesItems = computed(() => {
   const base = [
     { key: 'private', label: '私人目录', icon: Folder,            to: '/fileServer/privateDirectory' },
     { key: 'public',  label: '公共目录', icon: FolderOpened,      to: '/fileServer/publicDirectory' },
-    { key: 'torrent', label: '磁力下载', icon: Download,          to: '/fileServer/torrentManagement' }
+    { key: 'torrent', label: '磁力下载', icon: Download,          to: '/fileServer/torrentManagement' },
+    { key: 'trash',   label: '回收站',   icon: Delete,            to: '/fileServer/trash' },
+    { key: 'shares',  label: '我的分享', icon: Share,             to: '/fileServer/shares' }
   ]
   if (isAdmin.value) {
-    base.push({ key: 'transcode', label: '转码管理', icon: VideoCameraFilled, to: '/fileServer/videoTranscodeManagement' })
+    base.push({ key: 'transcode',  label: '转码管理',     icon: VideoCameraFilled, to: '/fileServer/videoTranscodeManagement' })
+    base.push({ key: 'audit',      label: '审计日志',     icon: Histogram,         to: '/fileServer/audit' })
+    base.push({ key: 'userDir',    label: '用户目录浏览', icon: Files,             to: '/admin/userDirectory' })
+    base.push({ key: 'staging',    label: '预置目录',     icon: Box,               to: '/admin/staging' })
   }
   return base
 })
@@ -49,7 +59,9 @@ const moreItems = computed(() => {
 
 const filesActive = computed(() => {
   const p = route.path
-  return ['privateDirectory', 'publicDirectory', 'torrentManagement', 'videoTranscodeManagement']
+  return ['privateDirectory', 'publicDirectory', 'torrentManagement', 'videoTranscodeManagement',
+          'fileServer/trash', 'fileServer/shares', 'fileServer/audit',
+          'admin/userDirectory', 'admin/staging']
       .some(m => p.includes(m))
 })
 

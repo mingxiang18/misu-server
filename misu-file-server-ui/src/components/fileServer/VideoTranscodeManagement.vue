@@ -76,17 +76,17 @@
       <el-card class="filter-card" shadow="never">
         <el-form :inline="!isMobile" :model="filter" class="filter-form" @submit.prevent>
           <el-form-item label="状态">
-            <el-select v-model="filter.state" placeholder="全部状态" clearable style="min-width: 160px">
+            <el-select v-model="filter.state" placeholder="全部状态" clearable class="filter-input">
               <el-option v-for="opt in STATE_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="队列">
-            <el-select v-model="filter.queueState" placeholder="全部队列" clearable style="min-width: 160px">
+            <el-select v-model="filter.queueState" placeholder="全部队列" clearable class="filter-input">
               <el-option v-for="opt in QUEUE_STATE_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="关键字">
-            <el-input v-model="filter.keyword" placeholder="路径 / 任务ID 关键字" clearable style="min-width: 240px" @keyup.enter="applyFilter" />
+            <el-input v-model="filter.keyword" placeholder="路径 / 任务ID 关键字" clearable class="filter-input filter-input-wide" @keyup.enter="applyFilter" />
           </el-form-item>
           <el-form-item>
             <el-button type="primary" :icon="Search" @click="applyFilter">查询</el-button>
@@ -769,6 +769,15 @@ h2 {
   align-items: center;
   flex-wrap: wrap;
   row-gap: var(--space-2);
+}
+
+.filter-input { min-width: 160px; }
+.filter-input-wide { min-width: 240px; }
+
+@media (max-width: 640px) {
+  .filter-input, .filter-input-wide { min-width: 0; width: 100%; }
+  .filter-form :deep(.el-form-item) { width: 100%; margin-right: 0; margin-bottom: var(--space-2); }
+  .filter-form :deep(.el-form-item__content) { width: 100%; }
 }
 
 .batch-actions {
