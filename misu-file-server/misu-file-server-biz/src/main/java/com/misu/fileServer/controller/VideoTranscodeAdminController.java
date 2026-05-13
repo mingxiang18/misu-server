@@ -77,6 +77,12 @@ public class VideoTranscodeAdminController {
         return AjaxResult.success(videoTranscodeService.prioritizeJobsBatch(requestDto.getTaskIds()));
     }
 
+    @PostMapping("/cancelBatch")
+    @ApiOperation(value = "按 taskId 列表移除任务：等待中删 .task，运行中写 cancel-marker 让脚本主动 kill，所有状态都清 DB + 产物")
+    public AjaxResult cancelBatch(@Valid @RequestBody VideoTranscodeBatchRequestDto requestDto) {
+        return AjaxResult.success(videoTranscodeService.cancelJobsBatch(requestDto.getTaskIds()));
+    }
+
     @PostMapping("/recoverRunningTasks")
     @ApiOperation(value = "恢复运行中断的视频转码任务")
     public AjaxResult recoverRunningTasks() {

@@ -124,6 +124,15 @@
         >
           重新转码所选
         </el-button>
+        <el-button
+          type="danger"
+          :icon="Delete"
+          :disabled="selectedIds.length === 0"
+          :loading="cancelling"
+          @click="cancelBatchHandler"
+        >
+          移除所选
+        </el-button>
       </div>
 
       <!-- 移动端：卡片列表（避免横向滚动） -->
@@ -256,7 +265,7 @@
             <span class="muted">{{ formatTime(row.updateTime) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="canPrioritize(row)"
@@ -273,7 +282,7 @@
               :icon="VideoCamera"
               @click="reTranscodeOne(row)"
             >重转</el-button>
-            <span v-if="!row.retryable && !row.reTranscodeable && !canPrioritize(row)" class="muted">-</span>
+            <el-button type="danger" link :icon="Delete" @click="cancelOne(row)">移除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -333,9 +342,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CaretRight, CopyDocument, Refresh, RefreshLeft, RefreshRight, Search, Top, VideoCamera } from '@element-plus/icons-vue'
+import { CaretRight, CopyDocument, Delete, Refresh, RefreshLeft, RefreshRight, Search, Top, VideoCamera } from '@element-plus/icons-vue'
 import { getUserInfo } from '@/api/user/user'
 import {
+  cancelTranscodeBatch,
   getTranscodeJobs,
   getTranscodeTaskSummary,
   prioritizeTranscodeBatch,
@@ -376,6 +386,7 @@ const recovering = ref(false)
 const retryingBatch = ref(false)
 const reTranscoding = ref(false)
 const prioritizing = ref(false)
+const cancelling = ref(false)
 
 const summary = ref({})
 const jobs = ref([])
@@ -587,6 +598,48 @@ const prioritizeBatchHandler = async () => {
     loadJobs()
   } finally {
     prioritizing.value = false
+  }
+}
+
+const cancelOne = async (row) => {
+  if (!row) return
+  const runningHint = row.queueState === 'RUNNING' ? '；当前是 RUNNING 状态，会向 worker 发取消信号（最多几秒内 ffmpeg 中止）' : ''
+  await ElMessageBox.confirm(
+      `确认移除 ${shortTaskId(row.taskId)}？将清理 .task / 产物 mp4 / 封面 / 状态文件 + DB 行${runningHint}。`,
+      '移除任务',
+      { type: 'warning', confirmButtonText: '移除', confirmButtonClass: 'el-button--danger' }
+  )
+  cancelling.value = true
+  try {
+    const response = await cancelTranscodeBatch([row.taskId])
+    if (response.data) {
+      ElMessage.success('已移除')
+    } else {
+      ElMessage.warning('未能移除')
+    }
+    loadJobs()
+  } finally {
+    cancelling.value = false
+  }
+}
+
+const cancelBatchHandler = async () => {
+  const ids = selectedIds.value
+  if (ids.length === 0) return
+  const runningCount = selectedRows.value.filter(r => r.queueState === 'RUNNING').length
+  const runningHint = runningCount > 0 ? `（含 ${runningCount} 个 RUNNING，会向 worker 发取消信号）` : ''
+  await ElMessageBox.confirm(
+      `确认移除所选 ${ids.length} 个任务${runningHint}？将清理 .task / 产物 mp4 / 封面 / 状态文件 + DB 行。`,
+      '批量移除',
+      { type: 'warning', confirmButtonText: '移除', confirmButtonClass: 'el-button--danger' }
+  )
+  cancelling.value = true
+  try {
+    const response = await cancelTranscodeBatch(ids)
+    ElMessage.success(`已移除 ${response.data || 0} 个任务`)
+    loadJobs()
+  } finally {
+    cancelling.value = false
   }
 }
 

@@ -68,4 +68,12 @@ public interface VideoTranscodeService {
      * @return 实际提升优先级的任务数量
      */
     int prioritizeJobsBatch(List<String> taskIds);
+
+    /**
+     * 移除任务：等待中的直接删除 .task；运行中的写 cancel marker 文件让 worker 脚本主动 kill 自己的 ffmpeg；
+     * 所有状态都会清产物 + status + DB 行，使任务从管理界面消失。
+     *
+     * @return 实际移除数量
+     */
+    int cancelJobsBatch(List<String> taskIds);
 }
