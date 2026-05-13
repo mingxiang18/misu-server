@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { getRefreshToken, getToken } from '@/api/auth/token'
+import { useTheme } from '@/composables/useTheme'
 import Index from '@/components/Index.vue';
 import Home from '@/components/Home.vue';
 import Login from '@/components/login/Login.vue';
@@ -31,8 +32,8 @@ const routes = [
             { path: 'languageLearn', component: LanguageLearn, name: 'LanguageLearn' },
             { path: 'fileServer/publicDirectory/:path*', component: PublicFileServer, name: 'PublicFileServer' },
             { path: 'fileServer/privateDirectory/:path*', component: PrivateFileServer, name: 'PrivateFileServer' },
-            { path: 'fileServer/videoRoom/:roomId', component: VideoRoom, name: 'VideoRoomFromId' },
-            { path: 'fileServer/videoRoom', component: VideoRoom, name: 'VideoRoomFromHistory' },
+            { path: 'fileServer/videoRoom/:roomId', component: VideoRoom, name: 'VideoRoomFromId', meta: { theme: 'dark' } },
+            { path: 'fileServer/videoRoom', component: VideoRoom, name: 'VideoRoomFromHistory', meta: { theme: 'dark' } },
             { path: 'fileServer/torrentManagement', component: TorrentManagement, name: 'TorrentManagement' },
             { path: 'fileServer/videoTranscodeManagement', component: VideoTranscodeManagement, name: 'VideoTranscodeManagement' },
             { path: 'fileServer/trash', component: TrashView, name: 'TrashView' },
@@ -57,6 +58,10 @@ const router = createRouter({
 
 // 路由守卫
 router.beforeEach((to, from, next) => {
+    // 主题覆盖：放映室 meta.theme === 'dark' 强制深色；其他路由还原用户偏好
+    const themeFromMeta = to.matched.reduce((acc, r) => (r.meta && r.meta.theme) || acc, null);
+    useTheme().setRouteOverride(themeFromMeta);
+
     const isAuthenticated = getToken() || getRefreshToken()
     const isAnonymous = to.matched.some(r => r.meta && r.meta.anonymous);
 
