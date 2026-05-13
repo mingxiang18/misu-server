@@ -12,7 +12,7 @@
 /* ---------- App-level layout helpers ---------- */
 #app {
   min-height: 100svh;
-  background: var(--color-bg-base);
+  background: var(--shell-bg);
 }
 
 /* 全屏居中容器（Login / 错误页用） */

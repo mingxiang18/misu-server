@@ -109,6 +109,10 @@
   /* ---------- Mask (供 EP overlay / Dialog 半透明遮罩用) ---------- */
   --color-mask: rgba(250, 248, 245, 0.72);
   --color-mask-light: rgba(250, 248, 245, 0.45);
+
+  /* ---------- Shell 背景 (#app / .app-shell 用)
+     light 直接复用 base；dark 让其透明，露出 body 的星空层 ---------- */
+  --shell-bg: var(--color-bg-base);
 }
 
 /* ============================================================
@@ -139,13 +143,13 @@
   --accent-soft: #2A3060;           /* 弱版本：ghost button / tag 底 */
   --accent-strong: #8B9DF0;         /* 加深版：hover */
 
-  /* ---------- Color · Semantic State (深夜适配) ---------- */
-  --color-success: #86EFAC;
+  /* ---------- Color · Semantic State (深夜适配 · 哑光压暗，避免按钮"贴纸感") ---------- */
+  --color-success: #5FA379;      /* 柔森林绿 (原 #86EFAC 过亮) */
   --color-success-soft: #1C3329;
-  --color-warning: #FCD34D;
-  --color-warning-soft: #3A2E0E;
-  --color-danger: #F87171;
-  --color-danger-soft: #3A1A1A;
+  --color-warning: #B58E33;      /* 哑光琥珀金 (原 #FCD34D 太刺眼) */
+  --color-warning-soft: #2E2410;
+  --color-danger: #B85050;       /* 砖红 (原 #F87171 偏粉刺) */
+  --color-danger-soft: #321818;
   --color-info: var(--accent);
   --color-info-soft: var(--accent-soft);
 
@@ -158,8 +162,74 @@
   --color-mask: rgba(14, 20, 38, 0.72);
   --color-mask-light: rgba(14, 20, 38, 0.45);
 
+  /* ---------- Shell 透明，让 body::before 星空层透出 ---------- */
+  --shell-bg: transparent;
+
   /* 系统级 color-scheme，让浏览器内置 UI（滚动条/输入光标/原生 select）跟着变深 */
   color-scheme: dark;
+}
+
+/* ============================================================
+   星空 + 月光氛围背景 (仅 dark 模式)
+   两层固定背景：
+     · body::before — 静态星点 + 远景柔光（紫晕 + 月光），不随滚动
+     · body::after  — 3 颗大星缓慢呼吸闪烁，节制点缀
+   都用 pointer-events:none、z-index:0，不干扰交互；
+   solid surface 卡片在其上正常显示，星空只在主背景空白处透出。
+   ============================================================ */
+.dark body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    /* 远景柔光 · 右上月光（暖银紫，像月亮挂在那个角） */
+    radial-gradient(ellipse 55% 35% at 88% 6%, rgba(199, 210, 254, 0.10), transparent 65%),
+    /* 远景柔光 · 左下紫晕（更暖一点，远山的轮廓感） */
+    radial-gradient(ellipse 60% 40% at 8% 92%, rgba(165, 180, 252, 0.07), transparent 70%),
+    /* 远景柔光 · 中心微亮（让空旷区不那么死） */
+    radial-gradient(ellipse 45% 60% at 50% 50%, rgba(232, 228, 240, 0.025), transparent 75%),
+    /* 静态星点（12 颗，随机大小） */
+    radial-gradient(1.4px 1.4px at 12% 18%, rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1px 1px   at 24% 8%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1.6px 1.6px at 38% 32%, rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1px 1px   at 52% 12%, rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1.2px 1.2px at 76% 52%, rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1.5px 1.5px at 84% 76%, rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px   at 92% 38%, rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1.3px 1.3px at 8% 58%, rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px   at 18% 72%, rgba(255,255,255,0.35), transparent 50%),
+    radial-gradient(1.3px 1.3px at 32% 88%, rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px   at 46% 64%, rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1.5px 1.5px at 58% 84%, rgba(255,255,255,0.50), transparent 50%);
+}
+
+.dark body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    /* 3 颗稍亮的"主角星"，呼吸闪烁 */
+    radial-gradient(2.4px 2.4px at 67% 24%, rgba(255,255,255,0.85), transparent 55%),
+    radial-gradient(2px 2px     at 22% 42%, rgba(232,228,240,0.75), transparent 55%),
+    radial-gradient(2.2px 2.2px at 82% 64%, rgba(252,211,77,0.55), transparent 55%);  /* 1 颗带暖意 */
+  animation: twinkle 8s ease-in-out infinite;
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.35; }
+  25%      { opacity: 0.85; }
+  50%      { opacity: 0.45; }
+  75%      { opacity: 0.75; }
+}
+
+/* 确保实际内容浮在星空之上 */
+.dark #app {
+  position: relative;
+  z-index: 1;
 }
 
 /* ============================================================
