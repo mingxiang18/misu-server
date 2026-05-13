@@ -105,4 +105,299 @@
   --layout-side-nav-width: 200px;
   --layout-page-header-height: 56px;
   --layout-tab-bar-height: 56px;
+
+  /* ---------- Mask (供 EP overlay / Dialog 半透明遮罩用) ---------- */
+  --color-mask: rgba(250, 248, 245, 0.72);
+  --color-mask-light: rgba(250, 248, 245, 0.45);
+
+  /* ---------- Shell 背景 (#app / .app-shell 用)
+     light 直接复用 base；dark 让其透明，露出 body 的星空层 ---------- */
+  --shell-bg: var(--color-bg-base);
+
+  /* ---------- Feature card (首页大卡片 / 同等氛围位)
+     light 用实色 surface；dark 切毛玻璃，让月夜透出 ---------- */
+  --feature-card-bg: var(--color-bg-surface);
+  --feature-card-border: var(--color-border-subtle);
+  --feature-card-backdrop: none;
+  --feature-card-shadow: var(--shadow-sm);
+
+  /* ---------- Nav surface (PageHeader / SideNav / TabBar)
+     light 用实色 surface；dark 半透明 + 毛玻璃，让月夜从导航后透出 ---------- */
+  --nav-bg: var(--color-bg-surface);
+  --nav-border: var(--color-border-subtle);
+  --nav-backdrop: none;
+}
+
+/* ============================================================
+   Dark Theme · A · Moonlit Twilight (月光紫蓝 · 童话深夜)
+   通过 .dark class 挂在根元素切换；变量名与 light 完全一致，
+   组件代码无需改动，仅靠 token 覆盖即可整页换肤。
+   ============================================================ */
+.dark {
+  /* ---------- Color · Neutral (Moonlit) ---------- */
+  --color-bg-base: #0E1426;         /* 深紫蓝夜空 */
+  --color-bg-surface: #1A2240;      /* 微抬升表面（卡片、Dialog 内） */
+  --color-bg-muted: #141B33;        /* 比 base 略亮一点的填充（条纹背景、悬浮区） */
+  --color-bg-hover: #232C4E;
+  --color-bg-pressed: #2B355C;
+
+  --color-border-subtle: #1F2A47;
+  --color-border-default: #2A3658;
+  --color-border-strong: #404D78;
+
+  --color-text-primary: #E8E4F0;    /* 月光白·带一丝紫晕 */
+  --color-text-secondary: #B8BDD8;
+  --color-text-tertiary: #9CA0BE;   /* 雾蓝灰 */
+  --color-text-disabled: #6B708A;
+  --color-text-on-accent: #0E1426;  /* 月光紫上叠深底文字 */
+
+  /* ---------- Color · Accent (Moonlight，压一档不刺眼) ---------- */
+  --accent: #8B9DF0;                /* 月光紫（压暗，主按钮填色不再过亮） */
+  --accent-soft: #2A3060;           /* 弱版本：ghost button / tag 底 */
+  --accent-strong: #6F86E5;         /* 加深版：hover */
+
+  /* ---------- Color · Semantic State (深夜适配 · 哑光压暗，避免按钮"贴纸感") ---------- */
+  --color-success: #5FA379;      /* 柔森林绿 (原 #86EFAC 过亮) */
+  --color-success-soft: #1C3329;
+  --color-warning: #B58E33;      /* 哑光琥珀金 (原 #FCD34D 太刺眼) */
+  --color-warning-soft: #2E2410;
+  --color-danger: #B85050;       /* 砖红 (原 #F87171 偏粉刺) */
+  --color-danger-soft: #321818;
+  --color-info: var(--accent);
+  --color-info-soft: var(--accent-soft);
+
+  /* ---------- Shadow（深色下需要更黑、更柔） ---------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 14px 38px rgba(0, 0, 0, 0.55);
+
+  /* ---------- Mask（匹配 dark 底色，避免 overlay 看起来漏出浅色） ---------- */
+  --color-mask: rgba(14, 20, 38, 0.72);
+  --color-mask-light: rgba(14, 20, 38, 0.45);
+
+  /* ---------- Shell 透明，让 body::before 星空层透出 ---------- */
+  --shell-bg: transparent;
+
+  /* ---------- Feature card 毛玻璃：surface 半透明 + backdrop blur ---------- */
+  --feature-card-bg: rgba(26, 34, 64, 0.42);
+  --feature-card-border: rgba(199, 210, 254, 0.10);
+  --feature-card-backdrop: blur(18px) saturate(140%);
+  --feature-card-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.45);
+
+  /* ---------- Nav surface 毛玻璃（半透明 + blur）：导航后透出月夜 ---------- */
+  --nav-bg: rgba(20, 27, 51, 0.55);
+  --nav-border: rgba(199, 210, 254, 0.08);
+  --nav-backdrop: blur(20px) saturate(140%);
+
+  /* 系统级 color-scheme，让浏览器内置 UI（滚动条/输入光标/原生 select）跟着变深 */
+  color-scheme: dark;
+}
+
+/* ============================================================
+   星空 + 月光氛围背景 (仅 dark 模式)
+   两层固定背景：
+     · body::before — 静态星点 + 远景柔光（紫晕 + 月光），不随滚动
+     · body::after  — 3 颗大星缓慢呼吸闪烁，节制点缀
+   都用 pointer-events:none、z-index:0，不干扰交互；
+   solid surface 卡片在其上正常显示，星空只在主背景空白处透出。
+   ============================================================ */
+.dark body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    /* 银河带 · 斜穿上半天的微亮指状光（增加层次） */
+    radial-gradient(ellipse 75% 16% at 60% 28%, rgba(199, 210, 254, 0.07), transparent 65%),
+    /* 远景柔光 · 右上 */
+    radial-gradient(ellipse 35% 28% at 90% 12%, rgba(245, 230, 200, 0.08), transparent 70%),
+    /* 远景柔光 · 左下紫晕 */
+    radial-gradient(ellipse 70% 45% at 8% 95%, rgba(165, 180, 252, 0.07), transparent 70%),
+    /* 远景柔光 · 中心微亮 */
+    radial-gradient(ellipse 45% 60% at 50% 45%, rgba(232, 228, 240, 0.025), transparent 75%),
+
+    /* ===== 主角大星（亮，14 颗，散布全屏） ===== */
+    radial-gradient(1.8px 1.8px at 7% 12%,   rgba(255,255,255,0.85), transparent 55%),
+    radial-gradient(2px 2px     at 17% 6%,   rgba(255,255,255,0.85), transparent 55%),
+    radial-gradient(1.8px 1.8px at 28% 18%,  rgba(255,255,255,0.80), transparent 55%),
+    radial-gradient(2px 2px     at 42% 8%,   rgba(255,255,255,0.85), transparent 55%),
+    radial-gradient(1.9px 1.9px at 55% 22%,  rgba(255,255,255,0.80), transparent 55%),
+    radial-gradient(1.8px 1.8px at 64% 14%,  rgba(255,255,255,0.85), transparent 55%),
+    radial-gradient(2px 2px     at 78% 6%,   rgba(255,255,255,0.80), transparent 55%),
+    radial-gradient(1.8px 1.8px at 88% 22%,  rgba(255,255,255,0.85), transparent 55%),
+    radial-gradient(2px 2px     at 12% 38%,  rgba(255,255,255,0.80), transparent 55%),
+    radial-gradient(1.8px 1.8px at 36% 46%,  rgba(255,255,255,0.75), transparent 55%),
+    radial-gradient(1.9px 1.9px at 60% 50%,  rgba(255,255,255,0.80), transparent 55%),
+    radial-gradient(1.8px 1.8px at 82% 42%,  rgba(255,255,255,0.80), transparent 55%),
+    radial-gradient(1.8px 1.8px at 22% 68%,  rgba(255,255,255,0.75), transparent 55%),
+    radial-gradient(1.9px 1.9px at 70% 78%,  rgba(255,255,255,0.75), transparent 55%),
+
+    /* ===== 中等亮度星（中亮，40 颗） ===== */
+    radial-gradient(1.4px 1.4px at 2% 4%,    rgba(255,255,255,0.68), transparent 50%),
+    radial-gradient(1.3px 1.3px at 5% 22%,   rgba(255,255,255,0.62), transparent 50%),
+    radial-gradient(1.5px 1.5px at 11% 28%,  rgba(255,255,255,0.65), transparent 50%),
+    radial-gradient(1.4px 1.4px at 14% 4%,   rgba(255,255,255,0.65), transparent 50%),
+    radial-gradient(1.3px 1.3px at 19% 16%,  rgba(255,255,255,0.60), transparent 50%),
+    radial-gradient(1.5px 1.5px at 24% 26%,  rgba(255,255,255,0.68), transparent 50%),
+    radial-gradient(1.4px 1.4px at 31% 8%,   rgba(255,255,255,0.62), transparent 50%),
+    radial-gradient(1.3px 1.3px at 34% 30%,  rgba(255,255,255,0.62), transparent 50%),
+    radial-gradient(1.5px 1.5px at 38% 16%,  rgba(255,255,255,0.65), transparent 50%),
+    radial-gradient(1.4px 1.4px at 46% 26%,  rgba(255,255,255,0.65), transparent 50%),
+    radial-gradient(1.3px 1.3px at 50% 4%,   rgba(255,255,255,0.60), transparent 50%),
+    radial-gradient(1.5px 1.5px at 56% 14%,  rgba(255,255,255,0.68), transparent 50%),
+    radial-gradient(1.4px 1.4px at 62% 32%,  rgba(255,255,255,0.62), transparent 50%),
+    radial-gradient(1.3px 1.3px at 70% 22%,  rgba(255,255,255,0.62), transparent 50%),
+    radial-gradient(1.5px 1.5px at 73% 4%,   rgba(255,255,255,0.65), transparent 50%),
+    radial-gradient(1.4px 1.4px at 76% 30%,  rgba(255,255,255,0.65), transparent 50%),
+    radial-gradient(1.3px 1.3px at 84% 8%,   rgba(255,255,255,0.62), transparent 50%),
+    radial-gradient(1.5px 1.5px at 86% 36%,  rgba(255,255,255,0.65), transparent 50%),
+    radial-gradient(1.4px 1.4px at 91% 16%,  rgba(255,255,255,0.62), transparent 50%),
+    radial-gradient(1.3px 1.3px at 95% 28%,  rgba(255,255,255,0.62), transparent 50%),
+
+    radial-gradient(1.4px 1.4px at 3% 38%,   rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.3px 1.3px at 8% 56%,   rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.5px 1.5px at 18% 44%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.4px 1.4px at 27% 56%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.3px 1.3px at 30% 38%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.5px 1.5px at 40% 56%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.4px 1.4px at 44% 38%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.3px 1.3px at 52% 44%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.5px 1.5px at 56% 56%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.4px 1.4px at 66% 38%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.3px 1.3px at 71% 56%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.5px 1.5px at 77% 44%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.4px 1.4px at 82% 56%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.3px 1.3px at 88% 50%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.5px 1.5px at 94% 38%,  rgba(255,255,255,0.55), transparent 50%),
+    radial-gradient(1.4px 1.4px at 15% 64%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1.3px 1.3px at 38% 70%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1.5px 1.5px at 52% 76%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1.4px 1.4px at 78% 64%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1.3px 1.3px at 92% 72%,  rgba(255,255,255,0.50), transparent 50%),
+
+    /* ===== 小星点（弱亮，66 颗，铺满全屏） ===== */
+    radial-gradient(1px 1px at 1% 14%,   rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 4% 8%,    rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 9% 18%,   rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 13% 32%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 16% 12%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 20% 24%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 23% 2%,   rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 26% 12%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 30% 22%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 34% 2%,   rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 37% 12%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 40% 24%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 44% 4%,   rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 48% 22%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 52% 10%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 54% 28%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 58% 6%,   rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 61% 18%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 65% 28%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 68% 6%,   rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 72% 16%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 75% 24%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 80% 2%,   rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 83% 14%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 86% 28%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 90% 4%,   rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 93% 24%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 96% 14%,  rgba(255,255,255,0.50), transparent 50%),
+    radial-gradient(1px 1px at 99% 6%,   rgba(255,255,255,0.45), transparent 50%),
+
+    radial-gradient(1px 1px at 2% 42%,   rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 6% 50%,   rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 11% 38%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 15% 52%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 21% 40%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 25% 48%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 31% 52%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 36% 40%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 41% 50%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 45% 42%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 50% 52%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 54% 40%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 59% 50%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 64% 42%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 68% 52%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 74% 38%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 79% 52%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 84% 42%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 89% 52%,  rgba(255,255,255,0.45), transparent 50%),
+    radial-gradient(1px 1px at 94% 44%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 98% 50%,  rgba(255,255,255,0.45), transparent 50%),
+
+    radial-gradient(1px 1px at 5% 62%,   rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 12% 70%,  rgba(255,255,255,0.35), transparent 50%),
+    radial-gradient(1px 1px at 20% 60%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 28% 72%,  rgba(255,255,255,0.35), transparent 50%),
+    radial-gradient(1px 1px at 35% 64%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 42% 78%,  rgba(255,255,255,0.35), transparent 50%),
+    radial-gradient(1px 1px at 48% 62%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 55% 70%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 62% 64%,  rgba(255,255,255,0.35), transparent 50%),
+    radial-gradient(1px 1px at 68% 76%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 74% 60%,  rgba(255,255,255,0.35), transparent 50%),
+    radial-gradient(1px 1px at 80% 72%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 86% 64%,  rgba(255,255,255,0.35), transparent 50%),
+    radial-gradient(1px 1px at 93% 76%,  rgba(255,255,255,0.40), transparent 50%),
+    radial-gradient(1px 1px at 8% 86%,   rgba(255,255,255,0.35), transparent 50%),
+    radial-gradient(1px 1px at 32% 88%,  rgba(255,255,255,0.35), transparent 50%);
+}
+
+.dark body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    /* 3 颗稍亮的"主角星"，呼吸闪烁 */
+    radial-gradient(2.4px 2.4px at 67% 24%, rgba(255,255,255,0.85), transparent 55%),
+    radial-gradient(2px 2px     at 22% 42%, rgba(232,228,240,0.75), transparent 55%),
+    radial-gradient(2.2px 2.2px at 82% 64%, rgba(252,211,77,0.55), transparent 55%);  /* 1 颗带暖意 */
+  animation: twinkle 8s ease-in-out infinite;
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.35; }
+  25%      { opacity: 0.85; }
+  50%      { opacity: 0.45; }
+  75%      { opacity: 0.75; }
+}
+
+/* 确保实际内容浮在星空之上 */
+.dark #app {
+  position: relative;
+  z-index: 1;
+}
+
+
+/* ============================================================
+   主题切换过渡 · 200ms 颜色淡入淡出
+   useTheme.js 在切换瞬间给 <html> 加 `.theme-transitioning` 类，
+   250ms 后摘除 —— 仅在切换窗口期间生效，平时零成本、不影响 hover/focus 过渡。
+   ============================================================ */
+html.theme-transitioning,
+html.theme-transitioning *,
+html.theme-transitioning *::before,
+html.theme-transitioning *::after {
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    fill 200ms ease,
+    stroke 200ms ease,
+    box-shadow 200ms ease !important;
+  transition-delay: 0s !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.theme-transitioning,
+  html.theme-transitioning *,
+  html.theme-transitioning *::before,
+  html.theme-transitioning *::after {
+    transition: none !important;
+  }
 }

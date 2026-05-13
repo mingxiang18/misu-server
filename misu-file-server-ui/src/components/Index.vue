@@ -44,7 +44,7 @@ onMounted(() => {
   min-height: 100svh;
   /* Prefer dvh on supported devices for keyboard safety */
   min-height: 100dvh;
-  background: var(--color-bg-base);
+  background: var(--shell-bg);
 }
 
 .app-shell-mobile {

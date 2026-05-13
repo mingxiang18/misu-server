@@ -3,6 +3,7 @@ import { computed, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown } from '@element-plus/icons-vue'
 import { logOut } from '@/api/auth/auth'
+import ThemeSwitcher from '@/components/layout/ThemeSwitcher.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -47,6 +48,9 @@ const handleLogout = () => {
   <header class="page-header">
     <h1 class="page-header-title">{{ pageTitle }}</h1>
 
+    <div class="page-header-actions">
+      <ThemeSwitcher variant="compact" />
+
     <el-dropdown trigger="click" placement="bottom-end">
       <button class="user-trigger" type="button">
         <span class="user-avatar" aria-hidden="true">{{ initial }}</span>
@@ -60,6 +64,7 @@ const handleLogout = () => {
         </el-dropdown-menu>
       </template>
     </el-dropdown>
+    </div>
   </header>
 </template>
 
@@ -70,8 +75,10 @@ const handleLogout = () => {
   justify-content: space-between;
   height: var(--layout-page-header-height);
   padding: 0 var(--space-6);
-  background: var(--color-bg-surface);
-  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--nav-bg);
+  backdrop-filter: var(--nav-backdrop);
+  -webkit-backdrop-filter: var(--nav-backdrop);
+  border-bottom: 1px solid var(--nav-border);
   flex-shrink: 0;
 }
 
@@ -81,6 +88,12 @@ const handleLogout = () => {
   color: var(--color-text-primary);
   letter-spacing: -0.01em;
   line-height: 1;
+}
+
+.page-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .user-trigger {

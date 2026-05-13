@@ -5,6 +5,23 @@
     <link rel="icon" href="/favicon.ico">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Misu App</title>
+    <script>
+      // 黑夜模式 · 防 FOUC · 在 Vue 启动前就同步给 <html> 加 .dark 类
+      // 三态偏好 + 放映室深链接两路兜底；与 useTheme.js 共用同一 storage key。
+      (function () {
+        try {
+          var pref = localStorage.getItem('misu-theme-pref') || 'system';
+          var systemDark = window.matchMedia &&
+                           window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var routeForceDark = /\/fileServer\/videoRoom(\/|$|\?)/.test(window.location.pathname);
+          var dark = routeForceDark
+                  || pref === 'dark'
+                  || (pref === 'system' && systemDark);
+          if (dark) document.documentElement.classList.add('dark');
+          if (dark) document.documentElement.style.colorScheme = 'dark';
+        } catch (_) { /* localStorage 被禁用时静默回退到 light */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
