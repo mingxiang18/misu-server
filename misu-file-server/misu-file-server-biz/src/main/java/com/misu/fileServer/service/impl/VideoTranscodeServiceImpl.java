@@ -97,6 +97,14 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
     @Value("${video.transcode.maxQueueLength:50}")
     private int maxQueueLength;
 
+    /** 直通探测开关。开启后 worker 领到任务先 ffprobe 一遍，源文件满足直通条件就跳过 libx265 转码。 */
+    @Value("${video.transcode.passthrough.enabled:true}")
+    private boolean passthroughEnabled;
+
+    /** 直通码率上限（bps）；源文件超过此值即使其他条件满足也强制转码。默认 5 Mbps。 */
+    @Value("${video.transcode.passthrough.max-bitrate:5000000}")
+    private long passthroughMaxBitrate;
+
     @Resource
     private VideoTranscodeJobRepository videoTranscodeJobRepository;
 
@@ -132,7 +140,15 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
 
         VideoTranscodeStatusDto diskStatus = readStatus(sourceFile);
         if (diskStatus != null && StringUtils.isNotBlank(diskStatus.getState())) {
-            if (!VideoTranscodeState.SUCCESS.equals(diskStatus.getState()) || getTranscodedFile(sourceFile).exists()) {
+            String diskState = diskStatus.getState();
+            // 终态判断：
+            //  - SUCCESS 还要再验产物文件存在（防止外部清理产物后状态文件残留误导）；
+            //  - PASSTHROUGH 不产生 transcoded mp4，源文件存在即视为终态；
+            //  - 其它非 SUCCESS 状态（WAITING / PROCESSING / FAILED / …）直接透传。
+            boolean isTerminalSuccess = VideoTranscodeState.SUCCESS.equals(diskState) && getTranscodedFile(sourceFile).exists();
+            boolean isPassthrough = VideoTranscodeState.PASSTHROUGH.equals(diskState);
+            boolean isNonSuccess = !VideoTranscodeState.SUCCESS.equals(diskState) && !VideoTranscodeState.PASSTHROUGH.equals(diskState);
+            if (isTerminalSuccess || isPassthrough || isNonSuccess) {
                 fillDefaultPaths(sourceFile, diskStatus);
                 persistJobFromStatus(sourceFile, diskStatus, sourceOpenType, sourceUserId, sourceVirtualPath, null);
                 return diskStatus;
@@ -864,6 +880,8 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
                 CRF=%s
                 PRESET=%s
                 AUDIO_BITRATE=%s
+                PASSTHROUGH_ENABLED=%s
+                PASSTHROUGH_MAX_BITRATE=%s
 
                 mkdir -p "$(dirname "$OUTPUT")" "$(dirname "$PREVIEW")" "$(dirname "$STATUS")"
 
@@ -884,6 +902,31 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
 
                 write_status PROCESSING 1 正在生成封面
                 ffmpeg -y -ss 5 -i "$SOURCE" -frames:v 1 -vf "scale='min(480,iw)':-2" "$PREVIEW" >/dev/null 2>&1 || true
+
+                # ---- 直通探测：源文件已是 HEVC+hvc1+AAC+MP4+<=MAX_HEIGHT+<=PASSTHROUGH_MAX_BITRATE → 跳过转码 ----
+                probe_passthrough() {
+                  if [ "$PASSTHROUGH_ENABLED" != "true" ]; then return 1; fi
+                  v_codec="$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$SOURCE" 2>/dev/null || true)"
+                  v_tag="$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$SOURCE" 2>/dev/null || true)"
+                  v_h_raw="$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=nw=1:nk=1 "$SOURCE" 2>/dev/null || true)"
+                  a_codec="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$SOURCE" 2>/dev/null || true)"
+                  fmt="$(ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 "$SOURCE" 2>/dev/null || true)"
+                  br_raw="$(ffprobe -v error -show_entries format=bit_rate -of default=nw=1:nk=1 "$SOURCE" 2>/dev/null || true)"
+                  v_h=$([ -n "$v_h_raw" ] && echo "$v_h_raw" || echo 0)
+                  br=$([ -n "$br_raw" ] && [ "$br_raw" != "N/A" ] && echo "$br_raw" || echo 0)
+                  case "$fmt" in *mp4*) ;; *) return 1 ;; esac
+                  [ "$v_codec" = "hevc" ] || return 1
+                  [ "$v_tag" = "hvc1" ] || return 1
+                  [ "$a_codec" = "aac" ] || return 1
+                  [ "$v_h" -le "$MAX_HEIGHT" ] || return 1
+                  [ "$br" -le "$PASSTHROUGH_MAX_BITRATE" ] || return 1
+                  return 0
+                }
+
+                if probe_passthrough; then
+                  write_status PASSTHROUGH 100 "源文件已满足播放条件，跳过转码"
+                  exit 0
+                fi
 
                 write_status PROCESSING 2 正在转码
                 rm -f "$PROGRESS_FILE"
@@ -920,7 +963,9 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
                 shellQuote(String.valueOf(maxHeight)),
                 shellQuote(String.valueOf(crf)),
                 shellQuote(preset),
-                shellQuote(audioBitrate)
+                shellQuote(audioBitrate),
+                shellQuote(passthroughEnabled ? "true" : "false"),
+                shellQuote(String.valueOf(passthroughMaxBitrate))
         );
     }
 

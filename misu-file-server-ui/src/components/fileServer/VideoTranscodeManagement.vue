@@ -291,6 +291,7 @@ const STATE_OPTIONS = [
   { value: 'WAITING', label: 'WAITING' },
   { value: 'PROCESSING', label: 'PROCESSING' },
   { value: 'SUCCESS', label: 'SUCCESS' },
+  { value: 'PASSTHROUGH', label: 'PASSTHROUGH' },
   { value: 'FAILED', label: 'FAILED' },
   { value: 'TOO_LARGE', label: 'TOO_LARGE' },
   { value: 'UNSUPPORTED', label: 'UNSUPPORTED' },
@@ -484,9 +485,9 @@ const reTranscodeHandler = async () => {
 
 const canPrioritize = (row) => {
   if (!row) return false
-  // RUNNING 已被 worker 抢走、TOO_LARGE / UNSUPPORTED 没有可调度的 task 文件，都不允许置顶
+  // RUNNING 已被 worker 抢走、TOO_LARGE / UNSUPPORTED / PASSTHROUGH 没有可调度的 task 文件，都不允许置顶
   if (row.queueState === 'RUNNING') return false
-  if (row.state === 'TOO_LARGE' || row.state === 'UNSUPPORTED' || row.state === 'NONE') return false
+  if (row.state === 'TOO_LARGE' || row.state === 'UNSUPPORTED' || row.state === 'NONE' || row.state === 'PASSTHROUGH') return false
   return true
 }
 
@@ -598,12 +599,14 @@ const stateTagType = (row) => {
   if (state === 'FAILED') return 'danger'
   if (state === 'SKIPPED') return 'warning'
   if (state === 'SUCCESS') return 'success'
+  if (state === 'PASSTHROUGH') return 'success'
   if (state === 'PROCESSING') return 'primary'
   return 'info'
 }
 
 const progressStatus = (row) => {
   if (displayState(row) === 'SUCCESS') return 'success'
+  if (displayState(row) === 'PASSTHROUGH') return 'success'
   if (displayState(row) === 'FAILED') return 'exception'
   return undefined
 }

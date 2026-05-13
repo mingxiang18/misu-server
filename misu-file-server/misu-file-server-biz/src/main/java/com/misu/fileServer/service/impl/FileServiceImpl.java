@@ -200,7 +200,11 @@ public class FileServiceImpl implements FileService {
             responseDto.setVideoPreviewLink(createUserFileAccessLink("/videoPreview",
                     responseDto.getFilePath() + responseDto.getFileName(), openType));
         }
-        if (VideoTranscodeState.SUCCESS.equals(status.getState())) {
+        if (VideoTranscodeState.SUCCESS.equals(status.getState())
+                || VideoTranscodeState.PASSTHROUGH.equals(status.getState())) {
+            // SUCCESS：拉转码产物 /transcodedVideo；
+            // PASSTHROUGH：源文件已满足 Safari 播放，/transcodedVideo 内部检测到 PASSTHROUGH 后会直接服务源文件，
+            // 所以这里两种状态都用同一个 link，前端无差别。
             String transcodedStreamLink = createUserFileAccessLink("/transcodedVideo",
                     responseDto.getFilePath() + responseDto.getFileName(), openType);
             responseDto.setTranscodedStreamLink(transcodedStreamLink);
@@ -383,6 +387,11 @@ public class FileServiceImpl implements FileService {
         }
 
         VideoTranscodeStatusDto status = videoTranscodeService.getOrCreateTranscodeStatus(originFile);
+        // PASSTHROUGH：源文件本身就是 Safari 可播放的 HEVC+hvc1+AAC+MP4，没有 transcoded 产物，直接拉源文件
+        if (VideoTranscodeState.PASSTHROUGH.equals(status.getState())) {
+            writeFileToResponse(response, request, originFile, false);
+            return;
+        }
         if (!VideoTranscodeState.SUCCESS.equals(status.getState())) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, StringUtils.defaultIfBlank(status.getMessage(), "视频尚未完成转码"));
         }
