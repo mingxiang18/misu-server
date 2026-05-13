@@ -24,6 +24,38 @@
         <p class="trash-empty-hint">删除的文件会先放在这里 {{ retentionDays }} 天，确认要清理时再永久删除。</p>
       </div>
 
+      <!-- 移动端：卡片列表 -->
+      <div v-else-if="isMobile" class="list-card-stack">
+        <div v-for="row in items" :key="row.id" class="list-card">
+          <div class="list-card-header">
+            <span class="list-card-title">
+              <component :is="iconFor(row.fileType)" class="list-card-title-icon"/>
+              {{ row.fileName }}
+            </span>
+            <el-tag size="small" type="info">{{ typeLabel(row.fileType) }}</el-tag>
+          </div>
+          <div class="list-card-meta">
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">原位置</span>
+              <span class="list-card-meta-value">/{{ row.originalParentPath || '' }}</span>
+            </div>
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">大小</span>
+              <span class="list-card-meta-value">{{ formatSize(row.fileSize) }}</span>
+            </div>
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">删除时间</span>
+              <span class="list-card-meta-value">{{ formatTime(row.deleteTime) }}</span>
+            </div>
+          </div>
+          <div class="list-card-actions">
+            <el-button size="small" type="primary" link @click="restoreItem(row)">还原</el-button>
+            <el-button size="small" type="danger" link @click="purgeItem(row)">永久删除</el-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 桌面：表格 -->
       <el-table v-else :data="items" stripe class="trash-table" empty-text="回收站是空的">
         <el-table-column prop="fileName" label="文件名" min-width="220">
           <template #default="{ row }">
@@ -73,7 +105,9 @@ import { ref, onMounted } from 'vue';
 import { Delete, Folder, Picture, Film, Document } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { listTrash, restoreTrash, purgeTrash } from '@/api/fileServer/fileServerMvp';
+import { useBreakpoint } from '@/composables/useBreakpoint';
 
+const { isMobile } = useBreakpoint();
 const retentionDays = 7;
 
 const openType = ref(0);

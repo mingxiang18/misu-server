@@ -18,6 +18,52 @@
         <p class="shares-empty-hint">在文件上右键 → 外链分享，可以创建公开链接，支持过期 / 密码 / 下载次数。</p>
       </div>
 
+      <!-- 移动端：卡片列表 -->
+      <div v-else-if="isMobile" class="list-card-stack">
+        <div v-for="row in items" :key="row.shareToken || row.id" class="list-card">
+          <div class="list-card-header">
+            <span class="list-card-title">
+              <component :is="iconFor(row.fileType)" class="list-card-title-icon"/>
+              {{ row.fileName }}
+            </span>
+            <el-tag v-if="row.revoked" type="info" size="small">已撤销</el-tag>
+            <el-tag v-else-if="row.expired" type="warning" size="small">已过期</el-tag>
+            <el-tag v-else-if="row.exhausted" type="warning" size="small">已用完</el-tag>
+            <el-tag v-else type="success" size="small">有效</el-tag>
+          </div>
+          <div class="list-card-meta">
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">保护</span>
+              <span class="list-card-meta-value">
+                <el-tag v-if="row.hasPassword" size="small" type="primary">需要密码</el-tag>
+                <span v-else>无</span>
+              </span>
+            </div>
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">下载次数</span>
+              <span class="list-card-meta-value">
+                {{ row.downloadCount }}
+                <span v-if="row.maxDownloads != null"> / {{ row.maxDownloads }}</span>
+                <span v-else> / ∞</span>
+              </span>
+            </div>
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">过期时间</span>
+              <span class="list-card-meta-value">{{ formatTime(row.expireTime) }}</span>
+            </div>
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">创建时间</span>
+              <span class="list-card-meta-value">{{ formatTime(row.createTime) }}</span>
+            </div>
+          </div>
+          <div class="list-card-actions">
+            <el-button size="small" type="primary" link @click="copyLink(row)">复制链接</el-button>
+            <el-button size="small" type="danger" link @click="revoke(row)">撤销</el-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 桌面：表格 -->
       <el-table v-else :data="items" stripe class="shares-table">
         <el-table-column prop="fileName" label="文件名" min-width="200">
           <template #default="{ row }">
@@ -35,26 +81,26 @@
             <el-tag v-else type="success" size="small">有效</el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isMobile" label="保护" width="100">
+        <el-table-column label="保护" width="100">
           <template #default="{ row }">
             <el-tag v-if="row.hasPassword" size="small" type="primary">需要密码</el-tag>
             <span v-else style="color:var(--color-text-tertiary);">无</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isMobile" label="下载次数" width="120">
+        <el-table-column label="下载次数" width="120">
           <template #default="{ row }">
             <span>{{ row.downloadCount }}</span>
             <span v-if="row.maxDownloads != null" style="color:var(--color-text-tertiary);"> / {{ row.maxDownloads }}</span>
             <span v-else style="color:var(--color-text-tertiary);"> / ∞</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isMobile" prop="expireTime" label="过期时间" width="180">
+        <el-table-column prop="expireTime" label="过期时间" width="180">
           <template #default="{ row }">{{ formatTime(row.expireTime) }}</template>
         </el-table-column>
-        <el-table-column v-if="!isMobile" prop="createTime" label="创建时间" width="180">
+        <el-table-column prop="createTime" label="创建时间" width="180">
           <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" :width="isMobile ? 130 : 200" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button size="small" type="primary" link @click="copyLink(row)">复制</el-button>
             <el-button size="small" type="danger" link @click="revoke(row)">撤销</el-button>

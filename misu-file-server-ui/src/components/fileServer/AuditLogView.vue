@@ -31,16 +31,56 @@
     </div>
 
     <div class="audit-body" v-loading="loading">
-      <el-table :data="items" stripe class="audit-table" :empty-text="loading ? '加载中...' : '暂无日志'">
-        <el-table-column prop="createTime" label="时间" :width="isMobile ? 140 : 180">
+      <!-- 移动端：卡片列表 -->
+      <div v-if="isMobile && items.length > 0" class="list-card-stack">
+        <div v-for="row in items" :key="row.id || (row.createTime + row.actionType)" class="list-card">
+          <div class="list-card-header">
+            <span class="list-card-title">
+              <el-tag size="small" :type="actionTagType(row.actionType)" style="margin-right: 6px;">
+                {{ actionLabel(row.actionType) }}
+              </el-tag>
+              <span v-if="row.targetOpenType != null" class="audit-scope">
+                {{ row.targetOpenType === 1 ? '公共' : '私人' }}
+              </span>
+              /{{ row.targetVirtualPath || '' }}
+            </span>
+            <el-tag size="small" :type="row.statusCode === 200 ? 'success' : 'danger'">
+              {{ row.statusCode === 200 ? '成功' : (row.statusCode + ' 失败') }}
+            </el-tag>
+          </div>
+          <div class="list-card-meta">
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">时间</span>
+              <span class="list-card-meta-value">{{ formatTime(row.createTime) }}</span>
+            </div>
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">用户</span>
+              <span class="list-card-meta-value">{{ row.userName || row.userId || '-' }}</span>
+            </div>
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">IP</span>
+              <span class="list-card-meta-value">{{ row.ip || '-' }}</span>
+            </div>
+            <div v-if="row.errorMessage" class="list-card-meta-row">
+              <span class="list-card-meta-label">错误</span>
+              <span class="list-card-meta-value" style="color: var(--color-danger);">{{ row.errorMessage }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-else-if="isMobile && !loading && items.length === 0" class="list-card-empty">暂无日志</div>
+
+      <!-- 桌面：表格 -->
+      <el-table v-else :data="items" stripe class="audit-table" :empty-text="loading ? '加载中...' : '暂无日志'">
+        <el-table-column prop="createTime" label="时间" width="180">
           <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
         </el-table-column>
-        <el-table-column prop="actionType" label="操作" :width="isMobile ? 96 : 160">
+        <el-table-column prop="actionType" label="操作" width="160">
           <template #default="{ row }">
             <el-tag size="small" :type="actionTagType(row.actionType)">{{ actionLabel(row.actionType) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isMobile" prop="userName" label="用户" width="140">
+        <el-table-column prop="userName" label="用户" width="140">
           <template #default="{ row }">
             <span :title="`userId=${row.userId}`">{{ row.userName || row.userId || '-' }}</span>
           </template>
@@ -55,20 +95,20 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isMobile" label="结果" width="120">
+        <el-table-column label="结果" width="120">
           <template #default="{ row }">
             <el-tag size="small" :type="row.statusCode === 200 ? 'success' : 'danger'">
               {{ row.statusCode === 200 ? '成功' : (row.statusCode + ' 失败') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isMobile" prop="errorMessage" label="错误信息" min-width="200">
+        <el-table-column prop="errorMessage" label="错误信息" min-width="200">
           <template #default="{ row }">
             <span style="color: var(--color-danger);" v-if="row.errorMessage">{{ row.errorMessage }}</span>
             <span style="color: var(--color-text-tertiary);" v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isMobile" prop="ip" label="IP" width="140"/>
+        <el-table-column prop="ip" label="IP" width="140"/>
       </el-table>
 
       <div v-if="total > 0" class="audit-pagination">

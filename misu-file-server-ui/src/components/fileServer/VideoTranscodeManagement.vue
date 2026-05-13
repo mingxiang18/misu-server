@@ -126,7 +126,68 @@
         </el-button>
       </div>
 
+      <!-- 移动端：卡片列表（避免横向滚动） -->
+      <div v-if="isMobile" v-loading="loading" class="list-card-stack">
+        <div v-for="row in jobs" :key="row.taskId" class="list-card">
+          <div class="list-card-header">
+            <span class="list-card-title">
+              <el-tooltip :content="row.taskId" placement="top">
+                <span class="mono">{{ shortTaskId(row.taskId) }}</span>
+              </el-tooltip>
+            </span>
+            <span style="display:inline-flex;gap:4px;flex-wrap:wrap;">
+              <el-tag size="small" :type="stateTagType(row)">{{ displayState(row) }}</el-tag>
+              <el-tag v-if="row.priority" size="small" type="danger" effect="dark">最优先</el-tag>
+            </span>
+          </div>
+          <el-progress :percentage="row.progress || 0" :status="progressStatus(row)" />
+          <div class="list-card-meta">
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">队列</span>
+              <el-tag size="small" :type="queueTagType(row.queueState)">{{ row.queueState || 'UNKNOWN' }}</el-tag>
+            </div>
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">源文件</span>
+              <span class="list-card-meta-value" style="word-break: break-all;">
+                {{ row.sourceVirtualPath || row.sourcePath || '-' }}
+                <el-button
+                  v-if="row.sourcePath"
+                  size="small" link :icon="CopyDocument"
+                  @click="copyPath(row.sourcePath)" />
+              </span>
+            </div>
+            <div v-if="row.outputPath" class="list-card-meta-row">
+              <span class="list-card-meta-label">输出 mp4</span>
+              <span class="list-card-meta-value" style="word-break: break-all;">
+                {{ row.outputPath }}
+                <el-button size="small" link :icon="CopyDocument" @click="copyPath(row.outputPath)" />
+              </span>
+            </div>
+            <div v-if="row.message" class="list-card-meta-row">
+              <span class="list-card-meta-label">消息</span>
+              <span class="list-card-meta-value">{{ row.message }}</span>
+            </div>
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">尝试</span>
+              <span class="list-card-meta-value">{{ (row.enqueueCount || 1) }}× / 重 {{ row.retryCount || 0 }}</span>
+            </div>
+            <div class="list-card-meta-row">
+              <span class="list-card-meta-label">更新</span>
+              <span class="list-card-meta-value">{{ formatTime(row.updateTime) }}</span>
+            </div>
+          </div>
+          <div class="list-card-actions" v-if="canPrioritize(row) || row.retryable || row.reTranscodeable">
+            <el-button v-if="canPrioritize(row)" type="danger" link :icon="Top" @click="prioritizeOne(row)">置顶</el-button>
+            <el-button v-if="row.retryable" type="primary" link :icon="RefreshRight" @click="retryOne(row)">重试</el-button>
+            <el-button v-if="row.reTranscodeable" type="warning" link :icon="VideoCamera" @click="reTranscodeOne(row)">重转</el-button>
+          </div>
+        </div>
+        <div v-if="!loading && jobs.length === 0" class="list-card-empty">暂无转码任务</div>
+      </div>
+
+      <!-- 桌面：表格 -->
       <el-table
+        v-else
         :data="jobs"
         v-loading="loading"
         class="task-table"
