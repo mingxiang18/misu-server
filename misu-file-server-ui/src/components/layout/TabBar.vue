@@ -20,6 +20,7 @@ import {
   SwitchButton
 } from '@element-plus/icons-vue'
 import { logOut } from '@/api/auth/auth'
+import ThemeSwitcher from '@/components/layout/ThemeSwitcher.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -185,6 +186,12 @@ const handleLogout = () => {
       </div>
 
       <div class="sheet-divider"></div>
+      <div class="sheet-section">
+        <div class="sheet-section-label">外观</div>
+        <ThemeSwitcher variant="segmented" />
+      </div>
+
+      <div class="sheet-divider"></div>
       <button class="sheet-row danger" @click="handleLogout">
         <span class="sheet-row-icon">
           <SwitchButton />
@@ -322,6 +329,19 @@ const handleLogout = () => {
   height: 1px;
   background: var(--color-border-subtle);
   margin: var(--space-1) 0;
+}
+
+.sheet-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+}
+
+.sheet-section-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  letter-spacing: 0.5px;
 }
 
 .sheet-row {
