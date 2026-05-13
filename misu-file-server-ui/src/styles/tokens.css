@@ -105,4 +105,86 @@
   --layout-side-nav-width: 200px;
   --layout-page-header-height: 56px;
   --layout-tab-bar-height: 56px;
+
+  /* ---------- Mask (供 EP overlay / Dialog 半透明遮罩用) ---------- */
+  --color-mask: rgba(250, 248, 245, 0.72);
+  --color-mask-light: rgba(250, 248, 245, 0.45);
+}
+
+/* ============================================================
+   Dark Theme · A · Moonlit Twilight (月光紫蓝 · 童话深夜)
+   通过 .dark class 挂在根元素切换；变量名与 light 完全一致，
+   组件代码无需改动，仅靠 token 覆盖即可整页换肤。
+   ============================================================ */
+.dark {
+  /* ---------- Color · Neutral (Moonlit) ---------- */
+  --color-bg-base: #0E1426;         /* 深紫蓝夜空 */
+  --color-bg-surface: #1A2240;      /* 微抬升表面（卡片、Dialog 内） */
+  --color-bg-muted: #141B33;        /* 比 base 略亮一点的填充（条纹背景、悬浮区） */
+  --color-bg-hover: #232C4E;
+  --color-bg-pressed: #2B355C;
+
+  --color-border-subtle: #1F2A47;
+  --color-border-default: #2A3658;
+  --color-border-strong: #404D78;
+
+  --color-text-primary: #E8E4F0;    /* 月光白·带一丝紫晕 */
+  --color-text-secondary: #B8BDD8;
+  --color-text-tertiary: #9CA0BE;   /* 雾蓝灰 */
+  --color-text-disabled: #6B708A;
+  --color-text-on-accent: #0E1426;  /* 月光紫上叠深底文字 */
+
+  /* ---------- Color · Accent (Moonlight) ---------- */
+  --accent: #A5B4FC;                /* 月光紫 */
+  --accent-soft: #2A3060;           /* 弱版本：ghost button / tag 底 */
+  --accent-strong: #8B9DF0;         /* 加深版：hover */
+
+  /* ---------- Color · Semantic State (深夜适配) ---------- */
+  --color-success: #86EFAC;
+  --color-success-soft: #1C3329;
+  --color-warning: #FCD34D;
+  --color-warning-soft: #3A2E0E;
+  --color-danger: #F87171;
+  --color-danger-soft: #3A1A1A;
+  --color-info: var(--accent);
+  --color-info-soft: var(--accent-soft);
+
+  /* ---------- Shadow（深色下需要更黑、更柔） ---------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 14px 38px rgba(0, 0, 0, 0.55);
+
+  /* ---------- Mask（匹配 dark 底色，避免 overlay 看起来漏出浅色） ---------- */
+  --color-mask: rgba(14, 20, 38, 0.72);
+  --color-mask-light: rgba(14, 20, 38, 0.45);
+
+  /* 系统级 color-scheme，让浏览器内置 UI（滚动条/输入光标/原生 select）跟着变深 */
+  color-scheme: dark;
+}
+
+/* ============================================================
+   主题切换过渡 · 200ms 颜色淡入淡出
+   useTheme.js 在切换瞬间给 <html> 加 `.theme-transitioning` 类，
+   250ms 后摘除 —— 仅在切换窗口期间生效，平时零成本、不影响 hover/focus 过渡。
+   ============================================================ */
+html.theme-transitioning,
+html.theme-transitioning *,
+html.theme-transitioning *::before,
+html.theme-transitioning *::after {
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    fill 200ms ease,
+    stroke 200ms ease,
+    box-shadow 200ms ease !important;
+  transition-delay: 0s !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.theme-transitioning,
+  html.theme-transitioning *,
+  html.theme-transitioning *::before,
+  html.theme-transitioning *::after {
+    transition: none !important;
+  }
 }
