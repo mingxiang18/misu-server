@@ -54,6 +54,14 @@ export function prioritizeTranscodeBatch(taskIds) {
     })
 }
 
+export function cancelTranscodeBatch(taskIds) {
+    return request({
+        url: '/fileServer/videoTranscodeAdmin/cancelBatch',
+        method: 'post',
+        data: { taskIds }
+    })
+}
+
 export function recoverRunningTasks() {
     return request({
         url: '/fileServer/videoTranscodeAdmin/recoverRunningTasks',

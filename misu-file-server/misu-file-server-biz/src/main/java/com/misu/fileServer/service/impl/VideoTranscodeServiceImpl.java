@@ -469,6 +469,65 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
             Files.deleteIfExists(subDir.resolve(taskId + ".task"));
             Files.deleteIfExists(subDir.resolve(PRIORITY_FILENAME_PREFIX + taskId + ".task"));
         }
+        // 取消标记文件不与上面的 cleanup 共用，因为 re-enqueue 后新任务也得清掉旧 marker
+        Files.deleteIfExists(getCancelMarkerFile(taskId));
+    }
+
+    private Path getCancelMarkerFile(String taskId) {
+        return getQueueDirectory().resolve(taskId + ".cancel");
+    }
+
+    @Override
+    @Transactional("fileServerTransactionManager")
+    public int cancelJobsBatch(List<String> taskIds) {
+        checkAdmin();
+        if (taskIds == null || taskIds.isEmpty()) {
+            return 0;
+        }
+        int success = 0;
+        Path queueDir = getQueueDirectory();
+        for (String taskId : taskIds) {
+            if (!TASK_ID_PATTERN.matcher(StringUtils.defaultString(taskId)).matches()) {
+                continue;
+            }
+            try {
+                // 1. 先写 cancel marker —— 如果有 running 脚本，它会在 progress 循环里看到，主动 kill ffmpeg。
+                Path marker = getCancelMarkerFile(taskId);
+                Files.createDirectories(marker.getParent());
+                Files.write(marker, new byte[]{(byte) 'x'});
+
+                // 2. 删除所有可能的 .task 文件副本（root + running / failed / done 子目录 + !priority- 前缀）。
+                for (String sub : new String[]{".", "running", "failed", "done"}) {
+                    Path subDir = sub.equals(".") ? queueDir : queueDir.resolve(sub);
+                    Files.deleteIfExists(subDir.resolve(taskId + ".task"));
+                    Files.deleteIfExists(subDir.resolve(PRIORITY_FILENAME_PREFIX + taskId + ".task"));
+                }
+
+                // 3. 清掉对应的产物 / 封面 / status JSON（基于 DB 行的 sourcePath 来定位）。
+                Optional<VideoTranscodeJob> opt = videoTranscodeJobRepository.findByTaskId(taskId);
+                if (opt.isPresent()) {
+                    String srcPath = opt.get().getSourcePath();
+                    if (StringUtils.isNotBlank(srcPath)) {
+                        File sourceFile = new File(srcPath);
+                        Files.deleteIfExists(getTranscodedFile(sourceFile).toPath());
+                        Files.deleteIfExists(getVideoPreviewFile(sourceFile).toPath());
+                        Files.deleteIfExists(getStatusFile(sourceFile).toPath());
+                    }
+                    // 兜底：直接按 taskId 删 status JSON（防止 sourcePath 改名后老 status 残留）
+                    Files.deleteIfExists(getStatusDirectory().resolve(taskId + ".json"));
+                    // 4. DB 行删除 —— 任务从管理界面消失
+                    videoTranscodeJobRepository.deleteById(taskId);
+                } else {
+                    // 没有 DB 行也按 taskId 兜底清 status
+                    Files.deleteIfExists(getStatusDirectory().resolve(taskId + ".json"));
+                }
+
+                success++;
+            } catch (Exception e) {
+                log.warn("移除任务异常 taskId={}", taskId, e);
+            }
+        }
+        return success;
     }
 
     /**
@@ -876,6 +935,7 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
                 PREVIEW=%s
                 STATUS=%s
                 PROGRESS_FILE=%s
+                CANCEL_MARKER=%s
                 MAX_HEIGHT=%s
                 CRF=%s
                 PRESET=%s
@@ -938,6 +998,16 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
                 ffmpeg_pid="$!"
 
                 while kill -0 "$ffmpeg_pid" 2>/dev/null; do
+                  if [ -f "$CANCEL_MARKER" ]; then
+                    kill -TERM "$ffmpeg_pid" 2>/dev/null || true
+                    sleep 1
+                    kill -KILL "$ffmpeg_pid" 2>/dev/null || true
+                    wait "$ffmpeg_pid" 2>/dev/null || true
+                    # 不写 status —— file-server 的 cancelJobsBatch 已经清理 DB / status JSON，
+                    # 这里再写会被下次 reconcile 当成 orphan 重新拉回 admin 列表。
+                    rm -f "$OUTPUT" "$CANCEL_MARKER" "$STATUS" "$PROGRESS_FILE"
+                    exit 1
+                  fi
                   if [ "$duration_us" -gt 0 ] && [ -f "$PROGRESS_FILE" ]; then
                     out_time_ms="$(awk -F= '/out_time_ms/ {v=$2} END {print v+0}' "$PROGRESS_FILE")"
                     progress="$(awk -v out="$out_time_ms" -v dur="$duration_us" 'BEGIN {p=int(out*100/dur); if (p < 2) p=2; if (p > 99) p=99; print p}')"
@@ -960,6 +1030,7 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
                 shellQuote(previewFile.getAbsolutePath()),
                 shellQuote(statusFile.getAbsolutePath()),
                 shellQuote(progressFile.getAbsolutePath()),
+                shellQuote(getCancelMarkerFile(taskId).toString()),
                 shellQuote(String.valueOf(maxHeight)),
                 shellQuote(String.valueOf(crf)),
                 shellQuote(preset),
