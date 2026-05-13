@@ -21,6 +21,9 @@ import {
 } from '@element-plus/icons-vue'
 import { logOut } from '@/api/auth/auth'
 import ThemeSwitcher from '@/components/layout/ThemeSwitcher.vue'
+import { useTheme } from '@/composables/useTheme'
+
+const { autoSwitchHint } = useTheme()
 
 const router = useRouter()
 const route = useRoute()
@@ -132,7 +135,10 @@ const handleLogout = () => {
         class="tab-bar-item"
         :class="{ active: moreOpen }"
         @click="moreOpen = true">
-      <IconMenu class="tab-bar-icon" />
+      <span class="tab-bar-icon-wrap">
+        <IconMenu class="tab-bar-icon" />
+        <span v-if="autoSwitchHint" class="tab-hint-dot" aria-hidden="true"></span>
+      </span>
       <span class="tab-bar-label">更多</span>
     </button>
   </nav>
@@ -239,10 +245,24 @@ const handleLogout = () => {
   color: var(--accent);
 }
 
+.tab-bar-icon-wrap {
+  position: relative;
+  display: inline-flex;
+}
 .tab-bar-icon {
   width: 22px;
   height: 22px;
   flex-shrink: 0;
+}
+.tab-hint-dot {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px 2px rgba(139, 157, 240, 0.55);
 }
 
 .tab-bar-label {

@@ -16,11 +16,10 @@ import { useMediaQuery, useStorage } from '@vueuse/core'
 const STORAGE_KEY = 'misu-theme-pref'
 const TRANSITION_CLASS = 'theme-transitioning'
 const TRANSITION_MS = 250
-const HINT_AUTO_DISMISS_MS = 8000
 
 const pref = useStorage(STORAGE_KEY, 'system')
 const routeOverride = ref(null)
-const autoSwitchHint = ref(false)        // 进入 dark 路由时弹"已自动切换"角标
+const autoSwitchHint = ref(false)        // 进入 dark 路由时弹"已自动切换"角标，持久至用户操作
 const systemDark = useMediaQuery('(prefers-color-scheme: dark)')
 
 const effective = computed(() => {
@@ -31,7 +30,6 @@ const effective = computed(() => {
 
 let initialized = false
 let transitionTimer = null
-let hintTimer = null
 
 function applyTheme (theme) {
   const html = document.documentElement
@@ -45,20 +43,6 @@ function applyTheme (theme) {
   }
   html.classList.toggle('dark', theme === 'dark')
   initialized = true
-}
-
-function setHint (on) {
-  autoSwitchHint.value = on
-  if (hintTimer) {
-    clearTimeout(hintTimer)
-    hintTimer = null
-  }
-  if (on) {
-    hintTimer = window.setTimeout(() => {
-      autoSwitchHint.value = false
-      hintTimer = null
-    }, HINT_AUTO_DISMISS_MS)
-  }
 }
 
 applyTheme(effective.value)
@@ -75,7 +59,7 @@ export function useTheme () {
         pref.value = value
         // 用户主动选择主题 → 撤销自动切换覆盖，并清掉提示
         routeOverride.value = null
-        setHint(false)
+        autoSwitchHint.value = false
       }
     },
     setRouteOverride (theme) {
@@ -84,15 +68,15 @@ export function useTheme () {
       const wasAlreadyDark = effective.value === 'dark'
       routeOverride.value = newOverride
       if (newOverride === 'dark' && !wasAlreadyDark) {
-        // 真正发生了"自动切换" → 提示
-        setHint(true)
+        // 真正发生了"自动切换" → 提示（持久至用户操作）
+        autoSwitchHint.value = true
       } else if (newOverride === null) {
-        // 离开 dark 路由 → 提示消失（无论 effective 怎么变）
-        setHint(false)
+        // 离开 dark 路由 → 提示消失
+        autoSwitchHint.value = false
       }
     },
     dismissHint () {
-      setHint(false)
+      autoSwitchHint.value = false
     },
   }
 }

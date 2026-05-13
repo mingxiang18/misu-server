@@ -65,18 +65,33 @@ const current = computed(() => options.find(o => o.value === pref.value) || opti
     </transition>
   </div>
 
-  <!-- 段控：三档并排（用于移动端"更多" sheet） -->
-  <div v-else class="theme-segmented" role="group" aria-label="主题">
-    <button
-        v-for="o in options"
-        :key="o.value"
-        type="button"
-        class="seg-item"
-        :class="{ 'seg-active': pref === o.value }"
-        @click="setPref(o.value)">
-      <component :is="o.icon" class="seg-icon" />
-      <span class="seg-label">{{ o.label }}</span>
-    </button>
+  <!-- 段控：三档并排（用于移动端"更多" sheet）。
+       autoSwitchHint=true 时在段控上方加 hint banner，说明是自动切换的。 -->
+  <div v-else class="theme-segmented-wrap">
+    <transition name="hint-fade">
+      <div v-if="autoSwitchHint" class="seg-hint-banner" role="status">
+        <span class="seg-hint-text">已自动切换到深色，可点这里切回</span>
+        <button
+            type="button"
+            class="seg-hint-close"
+            aria-label="关闭提示"
+            @click.stop="dismissHint">
+          <Close />
+        </button>
+      </div>
+    </transition>
+    <div class="theme-segmented" role="group" aria-label="主题">
+      <button
+          v-for="o in options"
+          :key="o.value"
+          type="button"
+          class="seg-item"
+          :class="{ 'seg-active': pref === o.value }"
+          @click="setPref(o.value)">
+        <component :is="o.icon" class="seg-icon" />
+        <span class="seg-label">{{ o.label }}</span>
+      </button>
+    </div>
   </div>
 </template>
 
@@ -227,6 +242,44 @@ const current = computed(() => options.find(o => o.value === pref.value) || opti
 }
 
 /* ---------- segmented (mobile sheet) ---------- */
+.theme-segmented-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.seg-hint-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+.seg-hint-text {
+  flex: 1;
+  letter-spacing: 0.1px;
+}
+.seg-hint-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.seg-hint-close :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
 .theme-segmented {
   display: flex;
   gap: var(--space-1);
