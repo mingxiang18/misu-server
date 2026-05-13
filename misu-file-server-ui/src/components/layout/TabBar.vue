@@ -19,8 +19,12 @@ import {
   Menu as IconMenu,
   SwitchButton
 } from '@element-plus/icons-vue'
+import { Close } from '@element-plus/icons-vue'
 import { logOut } from '@/api/auth/auth'
 import ThemeSwitcher from '@/components/layout/ThemeSwitcher.vue'
+import { useTheme } from '@/composables/useTheme'
+
+const { autoSwitchHint, dismissHint } = useTheme()
 
 const router = useRouter()
 const route = useRoute()
@@ -94,6 +98,29 @@ const handleLogout = () => {
 </script>
 
 <template>
+  <!-- 自动切换深色提示：TabBar 上方悬浮气泡，箭头指向"更多" -->
+  <transition name="tab-hint-fade">
+    <div
+        v-if="autoSwitchHint"
+        class="tab-auto-hint"
+        role="status">
+      <button
+          type="button"
+          class="tab-auto-hint-main"
+          @click="dismissHint(); moreOpen = true">
+        <span class="tab-auto-hint-text">已自动切换到深色 · 点"更多 → 外观"可切回</span>
+      </button>
+      <button
+          type="button"
+          class="tab-auto-hint-close"
+          aria-label="关闭提示"
+          @click.stop="dismissHint">
+        <Close />
+      </button>
+      <span class="tab-auto-hint-arrow" aria-hidden="true"></span>
+    </div>
+  </transition>
+
   <nav class="tab-bar" aria-label="底部导航">
     <button
         class="tab-bar-item"
@@ -132,7 +159,10 @@ const handleLogout = () => {
         class="tab-bar-item"
         :class="{ active: moreOpen }"
         @click="moreOpen = true">
-      <IconMenu class="tab-bar-icon" />
+      <span class="tab-bar-icon-wrap">
+        <IconMenu class="tab-bar-icon" />
+        <span v-if="autoSwitchHint" class="tab-hint-dot" aria-hidden="true"></span>
+      </span>
       <span class="tab-bar-label">更多</span>
     </button>
   </nav>
@@ -239,10 +269,98 @@ const handleLogout = () => {
   color: var(--accent);
 }
 
+.tab-bar-icon-wrap {
+  position: relative;
+  display: inline-flex;
+}
 .tab-bar-icon {
   width: 22px;
   height: 22px;
   flex-shrink: 0;
+}
+.tab-hint-dot {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px 2px rgba(139, 157, 240, 0.55);
+}
+
+/* 自动切换深色 · TabBar 上方悬浮气泡（箭头指向"更多"按钮） */
+.tab-auto-hint {
+  position: fixed;
+  right: 8px;
+  bottom: calc(var(--layout-tab-bar-height) + env(safe-area-inset-bottom) + 12px);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-1) 0 var(--space-3);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md), 0 0 24px -4px rgba(139, 157, 240, 0.35);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  z-index: var(--z-overlay);
+  max-width: calc(100vw - 16px);
+}
+.tab-auto-hint-main {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: inherit;
+  color: inherit;
+  text-align: left;
+}
+.tab-auto-hint-text {
+  line-height: 1.4;
+  word-break: break-all;
+}
+.tab-auto-hint-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.tab-auto-hint-close :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
+/* 箭头：贴底，指向"更多"按钮（最右 tab item 中心，约距右边 10vw） */
+.tab-auto-hint-arrow {
+  position: absolute;
+  bottom: -6px;
+  right: calc(10vw - 5px);
+  width: 10px;
+  height: 10px;
+  background: var(--color-bg-surface);
+  border-right: 1px solid var(--accent);
+  border-bottom: 1px solid var(--accent);
+  transform: rotate(45deg);
+}
+.tab-hint-fade-enter-active,
+.tab-hint-fade-leave-active {
+  transition: opacity 180ms var(--ease-standard),
+              transform 180ms var(--ease-standard);
+}
+.tab-hint-fade-enter-from,
+.tab-hint-fade-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
 }
 
 .tab-bar-label {

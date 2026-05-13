@@ -19,6 +19,7 @@ const TRANSITION_MS = 250
 
 const pref = useStorage(STORAGE_KEY, 'system')
 const routeOverride = ref(null)
+const autoSwitchHint = ref(false)        // 进入 dark 路由时弹"已自动切换"角标，持久至用户操作
 const systemDark = useMediaQuery('(prefers-color-scheme: dark)')
 
 const effective = computed(() => {
@@ -51,14 +52,31 @@ export function useTheme () {
   return {
     pref,                                // 'light' | 'dark' | 'system'
     effective,                           // computed 'light' | 'dark'
+    autoSwitchHint,                      // 'router 自动切到 dark' 的提示 ref（ThemeSwitcher 监听）
     isSystemForced: computed(() => routeOverride.value !== null),
     setPref (value) {
       if (value === 'light' || value === 'dark' || value === 'system') {
         pref.value = value
+        // 用户主动选择主题 → 撤销自动切换覆盖，并清掉提示
+        routeOverride.value = null
+        autoSwitchHint.value = false
       }
     },
     setRouteOverride (theme) {
-      routeOverride.value = theme === 'dark' ? 'dark' : null
+      const newOverride = theme === 'dark' ? 'dark' : null
+      // 进入 dark 路由前，effective 是不是已经是 dark？
+      const wasAlreadyDark = effective.value === 'dark'
+      routeOverride.value = newOverride
+      if (newOverride === 'dark' && !wasAlreadyDark) {
+        // 真正发生了"自动切换" → 提示（持久至用户操作）
+        autoSwitchHint.value = true
+      } else if (newOverride === null) {
+        // 离开 dark 路由 → 提示消失
+        autoSwitchHint.value = false
+      }
+    },
+    dismissHint () {
+      autoSwitchHint.value = false
     },
   }
 }

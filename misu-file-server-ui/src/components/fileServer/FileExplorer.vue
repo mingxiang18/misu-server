@@ -271,7 +271,28 @@
         <p style="color: var(--color-text-secondary); margin: 0 0 8px;">
           【{{ versionsTargetFileName }}】最近 {{ versionsList.length }} 个版本（每次覆盖前自动留底，超过 5 个删最旧；&gt;50 MB 不留版本）。
         </p>
-        <el-table v-if="versionsList.length > 0" :data="versionsList" stripe size="small">
+        <!-- 移动端：卡片 -->
+        <div v-if="isMobile && versionsList.length > 0" class="list-card-stack">
+          <div v-for="row in versionsList" :key="row.versionNo" class="list-card">
+            <div class="list-card-header">
+              <span class="list-card-title">v{{ row.versionNo }} · {{ formatVersionBytes(row.fileSize) }}</span>
+              <el-tag size="small" type="info">{{ versionReasonLabel(row.snapshotReason) }}</el-tag>
+            </div>
+            <div class="list-card-meta">
+              <div class="list-card-meta-row">
+                <span class="list-card-meta-label">时间</span>
+                <span class="list-card-meta-value">{{ formatVersionTime(row.createTime) }}</span>
+              </div>
+            </div>
+            <div class="list-card-actions">
+              <el-button size="small" type="primary" link @click="restoreVersionAction(row)">还原</el-button>
+              <el-button size="small" type="danger" link @click="purgeVersionAction(row)">删除</el-button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 桌面：表格 -->
+        <el-table v-else-if="versionsList.length > 0" :data="versionsList" stripe size="small">
           <el-table-column label="版本" width="80">
             <template #default="{ row }">v{{ row.versionNo }}</template>
           </el-table-column>
