@@ -278,58 +278,77 @@
   z-index: 0;
 }
 
-/* 弯月：用 box-shadow inset 切割圆盘形成新月。
-   两层 outer glow 模拟月晕。位置选在右上较高处，留出 PageHeader / 子标题空间。 */
+/* 弯月：双层 radial-gradient (本体球面 + 阴影渐变) 实现新月相，边缘柔和。
+   位置避开右侧用户菜单 (right: 12%)，让月亮独立挂在天上。 */
 .dark .sky-moon {
   position: absolute;
-  top: 2.2%;
-  right: 5%;
-  width: 80px;
-  height: 80px;
+  top: 5%;
+  right: 12%;
+  width: 92px;
+  height: 92px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 38%, #FAF1D4 0%, #EAD4A0 55%, #C9A876 100%);
+  background:
+    /* 阴影层：从右侧软渐变入侵（暗面，模拟月相） */
+    radial-gradient(circle at 125% 48%,
+      rgba(14, 20, 38, 0.95) 45%,
+      rgba(14, 20, 38, 0.60) 55%,
+      rgba(14, 20, 38, 0) 65%),
+    /* 本体层：球面渐变 (亮面在左上 30%) */
+    radial-gradient(circle at 30% 28%,
+      #FFF6D6 0%,
+      #F2DCA4 35%,
+      #D4B97A 65%,
+      #9A8350 100%);
+  /* 月晕：三层 outer glow（近实 → 远柔），仅光晕、无切割 */
   box-shadow:
-    /* 内阴影切出新月形（向左偏，留右侧月牙） */
-    inset 20px -4px 0 -2px #0E1426,
-    /* 月晕：近内层 + 远外层 */
-    0 0 24px 4px rgba(245, 230, 200, 0.28),
-    0 0 56px 10px rgba(245, 230, 200, 0.14),
-    0 0 110px 24px rgba(199, 210, 254, 0.06);
+    0 0 24px 4px rgba(245, 230, 200, 0.25),
+    0 0 56px 12px rgba(245, 230, 200, 0.14),
+    0 0 120px 28px rgba(199, 210, 254, 0.06);
 }
 
-/* 移动端月亮缩小 */
+/* 移动端月亮缩小，仍保持球面 + 软阴影写法 */
 @media (max-width: 640px) {
   .dark .sky-moon {
-    top: 2%;
-    right: 7%;
-    width: 52px;
-    height: 52px;
+    top: 3.5%;
+    right: 10%;
+    width: 56px;
+    height: 56px;
     box-shadow:
-      inset 13px -3px 0 -2px #0E1426,
-      0 0 16px 3px rgba(245, 230, 200, 0.28),
-      0 0 38px 8px rgba(245, 230, 200, 0.14);
+      0 0 16px 3px rgba(245, 230, 200, 0.25),
+      0 0 38px 8px rgba(245, 230, 200, 0.13),
+      0 0 80px 18px rgba(199, 210, 254, 0.05);
   }
 }
 
-/* 远山剪影：两层 SVG 路径，叠加产生"远雾近实"层次。
-   SVG 在 viewBox 内用 preserveAspectRatio='none' 拉伸适配。 */
+/* 远山剪影 · 三层（远雾 + 中山 + 近实）+ feGaussianBlur 模糊远层 +
+   CSS mask 让山顶淡入天空，化解原版"棱角分明"问题。
+   SVG 用 quadratic Bezier (Q) 让山势曲线柔和，preserveAspectRatio='none' 拉伸。 */
 .dark .sky-mountains {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 32%;
+  height: 38%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 400' preserveAspectRatio='none'%3E%3Cdefs%3E%3Cfilter id='b' x='-10%25' y='-10%25' width='120%25' height='120%25'%3E%3CfeGaussianBlur stdDeviation='3'/%3E%3C/filter%3E%3C/defs%3E%3Cpath filter='url(%23b)' fill='%232a3550' opacity='0.55' d='M0 380Q200 320 400 350T800 330T1200 340T1600 320T1920 340L1920 400Z'/%3E%3Cpath fill='%231a2240' opacity='0.82' d='M0 400L0 280Q120 250 200 270Q280 290 360 250Q440 230 520 280Q600 320 680 260Q760 220 840 270Q920 310 1000 240Q1080 200 1160 270Q1240 320 1320 250Q1400 210 1480 280Q1560 310 1640 250Q1720 220 1800 280Q1880 320 1920 290L1920 400Z'/%3E%3Cpath fill='%230a0f1e' d='M0 400L0 220Q100 180 180 230Q260 270 340 200Q420 150 500 230Q580 290 660 200Q740 150 820 220Q900 290 980 180Q1060 140 1140 230Q1220 290 1300 190Q1380 150 1460 230Q1540 280 1620 190Q1700 150 1780 230Q1860 290 1920 240L1920 400Z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: bottom;
   background-size: 100% 100%;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 400' preserveAspectRatio='none'%3E%3Cpath fill='%231a2240' opacity='0.55' d='M0 400L0 240Q120 180 240 220T480 200T720 230T960 180T1200 220T1440 195T1680 230T1920 200L1920 400Z'/%3E%3Cpath fill='%230a0f1e' d='M0 400L0 320L150 250L300 300L440 220L580 290L740 200L880 280L1040 240L1200 300L1360 245L1520 290L1680 235L1830 280L1920 260L1920 400Z'/%3E%3C/svg%3E");
-  opacity: 0.85;
+  /* mask 让山顶 40% 淡入天空 —— 远山"从夜雾中浮出" */
+  -webkit-mask: linear-gradient(to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.30) 15%,
+    rgba(0, 0, 0, 0.75) 32%,
+    black 50%);
+  mask: linear-gradient(to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.30) 15%,
+    rgba(0, 0, 0, 0.75) 32%,
+    black 50%);
 }
 
 @media (max-width: 640px) {
   .dark .sky-mountains {
-    height: 22%;
-    opacity: 0.75;
+    height: 26%;
   }
 }
 
