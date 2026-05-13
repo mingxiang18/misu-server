@@ -30,24 +30,43 @@ const isFBZ = ({ name, type }) =>
 // misu patch — non-UTF-8 EPUB（常见中文 GBK / GB18030 / Big5）启发式回退。
 // 现实场景：很多中文 EPUB 内部 xhtml 字节是 GB18030，但因为 ASCII 兼容部分太多，
 // UTF-8 严格解码不抛错；所以单看 strict 不够，要比较"哪种解码出的中日韩字符多"。
-const decodeBufferSmart = (buf) => {
-    const cjkRe = /[一-鿿぀-ヿ㐀-䶿]/g
-    const decodings = [
-        { label: 'utf-8',    s: new TextDecoder('utf-8',    { fatal: false }).decode(buf) },
-        { label: 'gb18030',  s: new TextDecoder('gb18030',  { fatal: false }).decode(buf) },
-        { label: 'big5',     s: new TextDecoder('big5',     { fatal: false }).decode(buf) },
-    ]
-    let best = decodings[0]
-    let bestCjk = (best.s.match(cjkRe) || []).length
-    for (let i = 1; i < decodings.length; i++) {
-        const cnt = (decodings[i].s.match(cjkRe) || []).length
-        // 至少 50 个 CJK 字符 + 比当前最优多 50% 才换；否则保留 utf-8（避免英文文档误判）
-        if (cnt >= 50 && cnt > bestCjk * 1.5) {
-            best = decodings[i]
-            bestCjk = cnt
+//
+// 注：原"≥ 50 CJK"阈值会让短章节（封面 / 扉页 / 短章节标题页）落不到非 UTF-8
+// 分支，导致 GB18030 EPUB"隔一章乱码一次"。修：阈值降到 20；并通过工厂闭包做
+// 跨章节 lock-in —— 第一章一旦确认 gb18030/big5，后续短章节直接复用，
+// 不再重新启发式投票。
+const cjkRe = /[一-鿿぀-ヿ㐀-䶿]/g
+const makeSmartDecoder = () => {
+    let locked = null   // 'gb18030' | 'big5' | null —— 首次确认后锁定，作用域 = 单本 EPUB
+    return (buf) => {
+        // 已锁定非 UTF-8：先尝试用 locked，能解出 CJK 字符则直接用（短章节也救得回）
+        if (locked) {
+            const lockedStr = new TextDecoder(locked, { fatal: false }).decode(buf)
+            const lockedCjk = (lockedStr.match(cjkRe) || []).length
+            if (lockedCjk > 0) return lockedStr
+            // locked 在该章节 0 CJK（如纯英文 cover）→ 让 UTF-8 接管
+            const utf8Str = new TextDecoder('utf-8', { fatal: false }).decode(buf)
+            return utf8Str
         }
+        // 未锁定 → 走完整启发式
+        const decodings = [
+            { label: 'utf-8',    s: new TextDecoder('utf-8',    { fatal: false }).decode(buf) },
+            { label: 'gb18030',  s: new TextDecoder('gb18030',  { fatal: false }).decode(buf) },
+            { label: 'big5',     s: new TextDecoder('big5',     { fatal: false }).decode(buf) },
+        ]
+        let best = decodings[0]
+        let bestCjk = (best.s.match(cjkRe) || []).length
+        for (let i = 1; i < decodings.length; i++) {
+            const cnt = (decodings[i].s.match(cjkRe) || []).length
+            // ≥ 20 个 CJK + 比当前最优多 50% 才换；避免英文文档误判，同时短章节也能切
+            if (cnt >= 20 && cnt > bestCjk * 1.5) {
+                best = decodings[i]
+                bestCjk = cnt
+            }
+        }
+        if (best.label !== 'utf-8') locked = best.label
+        return best.s
     }
-    return best.s
 }
 
 const makeZipLoader = async file => {
@@ -59,11 +78,13 @@ const makeZipLoader = async file => {
     const map = new Map(entries.map(entry => [entry.filename, entry]))
     const load = f => (name, ...args) =>
         map.has(name) ? f(map.get(name), ...args) : null
-    // misu patch — loadText 改为：先按二进制读，再做编码探测
+    // misu patch — loadText 改为：先按二进制读，再做编码探测；
+    // smartDecode 是 per-EPUB 闭包，第一章探测出的 gb18030/big5 会 lock-in 到后续章节
+    const smartDecode = makeSmartDecoder()
     const loadText = load(async entry => {
         const blob = await entry.getData(new BlobWriter())
         const buf = await blob.arrayBuffer()
-        return decodeBufferSmart(buf)
+        return smartDecode(buf)
     })
     const loadBlob = load((entry, type) => entry.getData(new BlobWriter(type)))
     const getSize = name => map.get(name)?.uncompressedSize ?? 0

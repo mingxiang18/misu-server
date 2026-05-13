@@ -43,6 +43,15 @@ button {
   border: none;
 }
 
+/* iOS Safari 输入框聚焦放大防御：原生 input/textarea/select 强制 ≥ 16px，
+   触发不到 Safari 的"font < 16px 自动 zoom"逻辑。EP 包装的 .el-input__inner
+   也在 element-overrides.css 设了 16px；这里覆盖所有原生 + native 类型。 */
+input,
+textarea,
+select {
+  font-size: 16px;
+}
+
 a {
   color: var(--accent);
   text-decoration: none;

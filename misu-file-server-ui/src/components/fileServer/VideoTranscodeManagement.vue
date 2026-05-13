@@ -293,7 +293,9 @@
         v-model:page-size="pagination.size"
         :total="pagination.total"
         :page-sizes="[10, 20, 50, 100]"
-        layout="total, sizes, prev, pager, next, jumper"
+        :layout="isMobile ? 'prev, pager, next' : 'total, sizes, prev, pager, next, jumper'"
+        :small="isMobile"
+        :pager-count="isMobile ? 5 : 7"
         background
         @current-change="loadJobs"
         @size-change="loadJobs"

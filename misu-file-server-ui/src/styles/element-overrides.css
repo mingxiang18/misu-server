@@ -87,11 +87,34 @@
     width: calc(100vw - 32px) !important;
     max-width: 420px;
   }
+
+  /* 分页：移动端隐藏 total / sizes / jumper，只保留 prev/pager/next；
+     允许整体超出时横向滚动而不撑破容器 */
+  .el-pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .el-pagination .el-pagination__total,
+  .el-pagination .el-pagination__sizes,
+  .el-pagination .el-pagination__jump,
+  .el-pagination .el-pagination__editor {
+    display: none !important;
+  }
+  .el-pagination .el-pager li {
+    min-width: 28px !important;
+    padding: 0 4px !important;
+  }
 }
 
 /* ---------- 输入框统一 16px 防 iOS 缩放 ---------- */
 .el-input__inner,
-.el-textarea__inner {
+.el-textarea__inner,
+.el-select__input,
+.el-autocomplete__inner,
+.el-cascader__search-input {
   font-size: var(--font-size-md);
 }
 
