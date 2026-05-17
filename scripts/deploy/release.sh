@@ -175,7 +175,8 @@ deploy_frontend() {
     { [ -d '${WORKER_HTML_DIR}' ] && cp -a '${WORKER_HTML_DIR}' '${WORKER_BACKUP_DIR}/${TS}/html' || true; }"
   log "工作节点：覆盖前端静态文件 → ${WORKER_HTML_DIR}"
   wssh "mkdir -p '${WORKER_HTML_DIR}'"
-  rsync -az --delete \
+  # --exclude .DS_Store：不推 macOS 垃圾文件；--delete-excluded：连带清掉服务器上已有的
+  rsync -az --delete --delete-excluded --exclude='.DS_Store' \
     -e "ssh -i ${SSH_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
     "${ROOT_DIR}/misu-file-server-ui/dist/" "${WORKER_SSH}:${WORKER_HTML_DIR}/"
 }
