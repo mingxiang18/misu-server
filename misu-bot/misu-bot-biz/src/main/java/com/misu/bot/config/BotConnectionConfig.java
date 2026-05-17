@@ -1,6 +1,7 @@
 package com.misu.bot.config;
 
 import com.bb.bot.client.BbWebSocketClient;
+import com.bb.bot.constant.BbCapability;
 import com.misu.bot.connection.BotConnectionManager;
 import com.misu.bot.connection.BotWebSocketServer;
 import com.misu.bot.handler.BbMessageHandler;
@@ -14,6 +15,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.net.URI;
+import java.util.List;
 
 /**
  * 机器人连接配置
@@ -43,12 +45,14 @@ public class BotConnectionConfig {
      */
     @PostConstruct
     public void registerBbWebSocket () {
-        //与bb-bot建立连接
+        //与bb-bot建立连接，握手上报 stream / file 能力位：
+        //服务端据此走 streamId/streamState 帧式真流式并下发 localFile/netFile 附件
         BbWebSocketClient bbWebSocketClient = new BbWebSocketClient("bb-bot",
                 bbConnectionConfig.getAppId(), bbConnectionConfig.getSecret(),
                 30000,
                 URI.create(bbConnectionConfig.getUrl()),
-                bbMessageHandler);
+                bbMessageHandler,
+                List.of(BbCapability.STREAM, BbCapability.FILE));
 
         //注册到连接管理器
         botConnectionManager.registerBbWebSocket(bbWebSocketClient);

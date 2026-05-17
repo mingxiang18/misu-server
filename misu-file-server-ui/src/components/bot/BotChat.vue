@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Service, Picture, Close, Promotion } from '@element-plus/icons-vue'
+import { Service, Picture, Close, Promotion, Document, Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { getBotAccessToken, getServerWebSocketUrl } from '@/api/bot/bot'
 import logger from '@/utils/logger'
@@ -16,8 +16,20 @@ const newMessage = ref('')
 const imageUpload = ref(null)
 const imageList = ref([])
 
+const fileUpload = ref(null)
+const fileList = ref([])
+
 const botAccessToken = ref(null)
 let socket = null
+
+// 单个附件上限 20MB
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+
+// 聊天记录本地留存：24 小时内重进页面恢复历史，超时则丢弃
+const CHAT_HISTORY_KEY = 'bot-chat-history'
+const CHAT_HISTORY_TTL = 24 * 60 * 60 * 1000
+// 最多留存的消息条数，避免 localStorage 无限增长
+const MAX_PERSISTED_MESSAGES = 200
 
 const suggestions = [
   '推荐一段冥想',
@@ -26,11 +38,35 @@ const suggestions = [
 ]
 
 const canSend = computed(() => {
-  return (newMessage.value && newMessage.value.trim().length > 0) || imageList.value.length > 0
+  return (newMessage.value && newMessage.value.trim().length > 0)
+      || imageList.value.length > 0
+      || fileList.value.length > 0
 })
 
 /* ------------------ Helpers ------------------ */
 const formatText = (text) => (text || '').replace(/\n/g, '<br>')
+
+// 把文件读成 base64（去掉 data:*;base64, 前缀）
+const readBase64 = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onloadend = () => resolve(reader.result.split(',')[1])
+  reader.onerror = reject
+  reader.readAsDataURL(file)
+})
+
+// 人类可读的文件大小
+const formatSize = (bytes) => {
+  if (!bytes && bytes !== 0) return ''
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB'
+}
+
+// 文件附件的下载地址：netFile 直接用 URL，localFile 拼成 base64 data URL
+const fileHref = (content) => {
+  if (content.type === 'netFile') return content.data
+  return 'data:' + (content.mimeType || 'application/octet-stream') + ';base64,' + content.data
+}
 
 const scrollToBottom = () => {
   // nextTick 等 Vue 完成 DOM patch；rAF 再让浏览器跑一帧 layout，
@@ -77,13 +113,33 @@ const handleImageExceed = (files) => {
   imageUpload.value.handleStart(file)
 }
 
+/* ------------------ File upload ------------------ */
+const handleFileRemove = () => {
+  fileList.value = []
+  if (fileUpload.value && fileUpload.value.clearFiles) {
+    fileUpload.value.clearFiles()
+  }
+}
+
+const handleFileExceed = (files) => {
+  if (fileUpload.value && fileUpload.value.clearFiles) {
+    fileUpload.value.clearFiles()
+  }
+  const file = files[0]
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    ElMessage.error('文件大小不能超过 20MB')
+    return
+  }
+  fileUpload.value.handleStart(file)
+}
+
 /* ------------------ Send ------------------ */
 const sendQuick = (text) => {
   newMessage.value = text
   sendSocketMessage()
 }
 
-const sendSocketMessage = () => {
+const sendSocketMessage = async () => {
   if (!canSend.value) return
 
   const message = {
@@ -95,19 +151,34 @@ const sendSocketMessage = () => {
     message.messageContentList.push({ type: 'text', data: newMessage.value })
   }
 
-  if (imageList.value.length > 0) {
-    const reader = new FileReader()
-    reader.onloadend = () => {
+  try {
+    if (imageList.value.length > 0) {
+      const raw = imageList.value[0].raw
       message.messageContentList.push({
         type: 'localImage',
-        data: reader.result.split(',')[1]
+        data: await readBase64(raw),
+        fileName: raw.name,
+        mimeType: raw.type,
+        size: raw.size
       })
-      sendMessage(message)
     }
-    reader.readAsDataURL(imageList.value[0].raw)
-  } else {
-    sendMessage(message)
+    if (fileList.value.length > 0) {
+      const raw = fileList.value[0].raw
+      message.messageContentList.push({
+        type: 'localFile',
+        data: await readBase64(raw),
+        fileName: raw.name,
+        mimeType: raw.type,
+        size: raw.size
+      })
+    }
+  } catch (err) {
+    logger.error('读取附件失败:', err)
+    ElMessage.error('附件读取失败，请重试')
+    return
   }
+
+  sendMessage(message)
 }
 
 const sendMessage = (message) => {
@@ -130,7 +201,8 @@ const sendMessage = (message) => {
   }
 
   newMessage.value = ''
-  imageList.value = []
+  handleImageRemove()
+  handleFileRemove()
 }
 
 /* ------------------ Socket with exponential backoff ------------------ */
@@ -199,11 +271,39 @@ const manualReconnect = () => {
 }
 
 const handleIncomingMessage = (event) => {
-  const message = {
-    content: JSON.parse(event.data).messageList,
-    isSelf: false
+  const payload = JSON.parse(event.data)
+  const list = payload.messageList || []
+
+  // 流式帧：同一 streamId 的 start/delta/end 续写到同一气泡
+  if (payload.streamId) {
+    const deltaText = list
+        .filter((c) => c.type === 'text')
+        .map((c) => c.data)
+        .join('')
+
+    let bubble = messages.value.find((m) => m.streamId === payload.streamId)
+    if (!bubble) {
+      bubble = {
+        streamId: payload.streamId,
+        streaming: true,
+        content: [{ type: 'text', data: '' }],
+        isSelf: false
+      }
+      messages.value.push(bubble)
+    }
+    const textItem = bubble.content.find((c) => c.type === 'text')
+    if (textItem) {
+      textItem.data += deltaText
+    }
+    if (payload.streamState === 'end') {
+      bubble.streaming = false
+    }
+    scrollToBottom()
+    return
   }
-  messages.value.push(message)
+
+  // 普通一次成型消息
+  messages.value.push({ content: list, isSelf: false })
   scrollToBottom()
 }
 
@@ -217,12 +317,75 @@ const closeSocket = () => {
   socket = null
 }
 
+/* ------------------ Chat history persistence ------------------ */
+// 读取本地留存的聊天记录；超过留存时长则丢弃
+const loadHistory = () => {
+  try {
+    const raw = localStorage.getItem(CHAT_HISTORY_KEY)
+    if (!raw) return null
+    const saved = JSON.parse(raw)
+    if (!saved || !saved.savedAt || !Array.isArray(saved.messages)) return null
+    if (Date.now() - saved.savedAt > CHAT_HISTORY_TTL) {
+      localStorage.removeItem(CHAT_HISTORY_KEY)
+      return null
+    }
+    // 恢复时清掉流式中间态，避免残留闪烁光标
+    return saved.messages.map((m) => ({ ...m, streaming: false }))
+  } catch (err) {
+    logger.error('读取聊天记录失败:', err)
+    return null
+  }
+}
+
+// 把当前聊天记录写入本地；localStorage 配额不足（多为附件 base64 过大）时
+// 丢掉最旧的四分之一再重试，保证文本记录尽量留存
+const persistHistory = () => {
+  let list = messages.value.slice(-MAX_PERSISTED_MESSAGES)
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify({
+        savedAt: Date.now(),
+        messages: list
+      }))
+      return
+    } catch (err) {
+      if (list.length <= 1) {
+        logger.error('聊天记录写入失败:', err)
+        return
+      }
+      list = list.slice(Math.ceil(list.length / 4))
+    }
+  }
+}
+
+let persistTimer = null
+// 流式 delta 会高频改动 messages，去抖后再落盘
+const schedulePersist = () => {
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => {
+    persistTimer = null
+    persistHistory()
+  }, 600)
+}
+
+watch(messages, schedulePersist, { deep: true })
+
 onMounted(() => {
+  const restored = loadHistory()
+  if (restored && restored.length > 0) {
+    messages.value = restored
+  }
   initSocket()
   scrollToBottom()
 })
 
 onUnmounted(() => {
+  // 离开页面时若仍有未落盘的去抖任务，立即补写一次
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+    persistHistory()
+  }
   closeSocket()
 })
 </script>
@@ -249,17 +412,32 @@ onUnmounted(() => {
               <span
                   v-if="content.type === 'text'"
                   class="bot-text"
+                  :class="{ 'bot-text-streaming': message.streaming }"
                   v-html="formatText(content.data)"></span>
               <img
                   v-else-if="content.type === 'localImage'"
                   class="bot-image"
-                  :src="'data:image/png;base64,' + content.data"
+                  :src="'data:' + (content.mimeType || 'image/png') + ';base64,' + content.data"
                   alt=""/>
               <img
                   v-else-if="content.type === 'netImage'"
                   class="bot-image"
                   :src="content.data"
                   alt=""/>
+              <a
+                  v-else-if="content.type === 'localFile' || content.type === 'netFile'"
+                  class="bot-file"
+                  :href="fileHref(content)"
+                  :download="content.fileName || 'file'"
+                  target="_blank"
+                  rel="noopener">
+                <span class="bot-file-icon" aria-hidden="true"><Document/></span>
+                <span class="bot-file-meta">
+                  <span class="bot-file-name">{{ content.fileName || '文件' }}</span>
+                  <span v-if="content.size" class="bot-file-size">{{ formatSize(content.size) }}</span>
+                </span>
+                <span class="bot-file-dl" aria-hidden="true"><Download/></span>
+              </a>
             </template>
           </div>
         </div>
@@ -284,11 +462,18 @@ onUnmounted(() => {
 
     <!-- Input -->
     <div class="bot-input-wrap">
-      <!-- Image preview chip -->
-      <div v-if="imageList.length > 0" class="bot-image-preview">
-        <div class="bot-image-thumb">
+      <!-- Attachment preview -->
+      <div v-if="imageList.length > 0 || fileList.length > 0" class="bot-attach-preview">
+        <div v-if="imageList.length > 0" class="bot-image-thumb">
           <img :src="imageList[0].url" alt=""/>
-          <button class="bot-image-remove" type="button" @click="handleImageRemove" aria-label="移除图片">
+          <button class="bot-attach-remove" type="button" @click="handleImageRemove" aria-label="移除图片">
+            <Close/>
+          </button>
+        </div>
+        <div v-if="fileList.length > 0" class="bot-file-chip">
+          <span class="bot-file-chip-icon" aria-hidden="true"><Document/></span>
+          <span class="bot-file-chip-name">{{ fileList[0].name }}</span>
+          <button class="bot-attach-remove static" type="button" @click="handleFileRemove" aria-label="移除文件">
             <Close/>
           </button>
         </div>
@@ -307,6 +492,20 @@ onUnmounted(() => {
             accept="image/png,image/jpeg">
           <button class="bot-input-btn" type="button" aria-label="上传图片">
             <Picture/>
+          </button>
+        </el-upload>
+
+        <el-upload
+            ref="fileUpload"
+            v-model:file-list="fileList"
+            class="bot-upload"
+            action="#"
+            :auto-upload="false"
+            :show-file-list="false"
+            :on-exceed="handleFileExceed"
+            :limit="1">
+          <button class="bot-input-btn" type="button" aria-label="上传文件">
+            <Document/>
           </button>
         </el-upload>
 
@@ -424,12 +623,90 @@ onUnmounted(() => {
   white-space: pre-wrap;
 }
 
+/* 流式回复进行中：文末闪烁光标 */
+.bot-text-streaming::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: bot-caret-blink 1s steps(1) infinite;
+}
+
+@keyframes bot-caret-blink {
+  50% { opacity: 0; }
+}
+
 .bot-image {
   max-width: 100%;
   height: auto;
   border-radius: var(--radius-md);
   display: block;
   margin-top: var(--space-1);
+}
+
+/* ---------- File card (in bubble) ---------- */
+.bot-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  max-width: 240px;
+}
+
+.bot-file:hover,
+.bot-file:active {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.bot-file-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.bot-file-icon :deep(svg) {
+  width: 22px;
+  height: 22px;
+}
+
+.bot-file-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.bot-file-name {
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-file-size {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.bot-file-dl {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--color-text-secondary);
+}
+
+.bot-file-dl :deep(svg) {
+  width: 16px;
+  height: 16px;
 }
 
 /* ---------- Suggestions ---------- */
@@ -480,8 +757,10 @@ onUnmounted(() => {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-.bot-image-preview {
+.bot-attach-preview {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   padding: var(--space-3) var(--space-3) 0;
 }
 
@@ -500,7 +779,7 @@ onUnmounted(() => {
   object-fit: cover;
 }
 
-.bot-image-remove {
+.bot-attach-remove {
   position: absolute;
   top: 2px;
   right: 2px;
@@ -513,11 +792,49 @@ onUnmounted(() => {
   color: #fff;
   border-radius: var(--radius-pill);
   cursor: pointer;
+  flex-shrink: 0;
 }
 
-.bot-image-remove :deep(svg) {
+.bot-attach-remove.static {
+  position: static;
+}
+
+.bot-attach-remove :deep(svg) {
   width: 12px;
   height: 12px;
+}
+
+.bot-file-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 220px;
+  height: 36px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-muted);
+}
+
+.bot-file-chip-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.bot-file-chip-icon :deep(svg) {
+  width: 16px;
+  height: 16px;
+}
+
+.bot-file-chip-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bot-input-row {

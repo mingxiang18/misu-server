@@ -27,7 +27,10 @@ public class BbMessageHandler implements BbClientMessageHandler {
         if (userBotClientWebSocket != null && userBotClientWebSocket.isOpen()) {
             BotResponseMessage botResponseMessage = new BotResponseMessage();
             botResponseMessage.setReceiveMessageId(message.getReceiveMessageId());
-            //去掉@消息
+            //透传流式帧元数据，前端据此 edit-in-place 续写同一气泡
+            botResponseMessage.setStreamId(message.getStreamId());
+            botResponseMessage.setStreamState(message.getStreamState());
+            //去掉@消息（localImage/netImage/localFile/netFile 原样透传）
             botResponseMessage.setMessageList(message.getMessageList()
                     .stream()
                     .filter(bbMessageContent -> !BbSendMessageType.AT.equals(bbMessageContent.getType()))
