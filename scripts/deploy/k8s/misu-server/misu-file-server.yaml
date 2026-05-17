@@ -55,6 +55,7 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - { containerPort: 30262 }
+            - { containerPort: 30263 }   # WebDAV 端口（独立 Tomcat 连接器）
             - { containerPort: 30201 }   # bot 端口（misu-file-server-prod.yml 里 bot.serverPort: 30201）
           env:
             - { name: JAVA_XMX, value: "768m" }
@@ -104,3 +105,15 @@ spec:
   selector: { app: misufileserver }
   ports:
     - { name: bot, port: 30201, targetPort: 30201, nodePort: 30201 }
+---
+# WebDAV：用户私有目录挂载端点，独立端口、不经网关，对外用 NodePort 暴露
+apiVersion: v1
+kind: Service
+metadata:
+  name: misu-file-server-webdav
+  namespace: misu-server
+spec:
+  type: NodePort
+  selector: { app: misufileserver }
+  ports:
+    - { name: webdav, port: 30263, targetPort: 30263, nodePort: 30263 }
