@@ -1,0 +1,106 @@
+---
+# misu-file-server: hostPath 数据在 misu-maco，必须 required
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: misu-file-server-config
+  namespace: misu-server
+data:
+  application-prod.yaml: |
+    spring:
+      config:
+        import: optional:nacos:misu-file-server-prod.yml
+      cloud:
+        nacos:
+          discovery:
+            server-addr: nacos.misu-server.svc.cluster.local:8848
+            namespace: prod
+            group: DEFAULT_GROUP
+          config:
+            import-check:
+              enabled: false
+            server-addr: nacos.misu-server.svc.cluster.local:8848
+            namespace: prod
+            group: DEFAULT_GROUP
+            file-extension: yml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: misu-file-server
+  namespace: misu-server
+  labels: { app: misufileserver }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # hostPath 数据不能多 pod 抢
+  selector:
+    matchLabels: { app: misufileserver }
+  template:
+    metadata:
+      labels: { app: misufileserver }
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [misu-maco]
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: misu-file-server
+          # 由 release.sh 用 envsubst 渲染 REGISTRY_PULL + IMAGE_TAG
+          image: ${REGISTRY_PULL}/misuaa/misu-file-server:${IMAGE_TAG}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { containerPort: 30262 }
+            - { containerPort: 30201 }   # bot 端口（misu-file-server-prod.yml 里 bot.serverPort: 30201）
+          env:
+            - { name: JAVA_XMX, value: "768m" }
+            - { name: JAVA_XMS, value: "384m" }
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits:   { cpu: 2,    memory: 1536Mi }
+          startupProbe:
+            tcpSocket: { port: 30262 }
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket: { port: 30262 }
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            tcpSocket: { port: 30262 }
+            periodSeconds: 10
+          volumeMounts:
+            - { name: config,    mountPath: /app/application-prod.yaml, subPath: application-prod.yaml }
+            - { name: user-file, mountPath: /app/user-file }
+      volumes:
+        - name: config
+          configMap: { name: misu-file-server-config }
+        - name: user-file
+          hostPath: { path: /mnt/misu/misu-server/user-file, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: misu-file-server
+  namespace: misu-server
+spec:
+  type: ClusterIP
+  selector: { app: misufileserver }
+  ports:
+    - { name: http, port: 30262, targetPort: 30262 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: misu-bot
+  namespace: misu-server
+spec:
+  type: NodePort
+  selector: { app: misufileserver }
+  ports:
+    - { name: bot, port: 30201, targetPort: 30201, nodePort: 30201 }

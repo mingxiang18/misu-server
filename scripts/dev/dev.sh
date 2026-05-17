@@ -2,21 +2,21 @@
 # misu-server 本地联调环境
 #
 # 用法：
-#   ./dev.sh up [--no-build] [--no-frontend]   启动中间件 + Java + 前端
-#   ./dev.sh down                               停掉前端 + Java + 中间件
-#   ./dev.sh status                             查看各组件状态
-#   ./dev.sh restart <service>                  重启单个服务（mw|all 或 gateway|account|file-server|frontend）
-#   ./dev.sh build [-DskipTests]                只 mvn package 三个 Java 模块
-#   ./dev.sh logs <service>                     tail -f 单个服务日志
-#   ./dev.sh seed-nacos                         把 scripts/dev/nacos/*.yml 重推到本地 Nacos
-#   ./dev.sh seed-sql                           执行 docs/*.sql 中的迁移脚本
-#   ./dev.sh nuke                               down + 删除 docker volume + 清空 .dev/
+#   scripts/dev/dev.sh up [--no-build] [--no-frontend]   启动中间件 + Java + 前端
+#   scripts/dev/dev.sh down                               停掉前端 + Java + 中间件
+#   scripts/dev/dev.sh status                             查看各组件状态
+#   scripts/dev/dev.sh restart <service>                  重启单个服务（mw|all 或 gateway|account|file-server|frontend）
+#   scripts/dev/dev.sh build [-DskipTests]                只 mvn package 三个 Java 模块
+#   scripts/dev/dev.sh logs <service>                     tail -f 单个服务日志
+#   scripts/dev/dev.sh seed-nacos                         把 scripts/dev/nacos/*.yml 重推到本地 Nacos
+#   scripts/dev/dev.sh seed-sql                           执行 docs/*.sql 中的迁移脚本
+#   scripts/dev/dev.sh nuke                               down + 删除 docker volume + 清空 .dev/
 #
 # 前置依赖：Docker Desktop / Maven / JDK17 / Node 18+
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export ROOT_DIR
 
 # shellcheck source=scripts/dev/lib/common.sh
@@ -58,7 +58,7 @@ service_mvn_pl() {
 FRONTEND_DIR="${ROOT_DIR}/misu-file-server-ui"
 FRONTEND_PORT="5173"
 
-COMPOSE_FILE="${ROOT_DIR}/docker-compose.local.yml"
+COMPOSE_FILE="${ROOT_DIR}/scripts/dev/docker-compose.local.yml"
 
 # ---------- 前置依赖检查 ----------
 check_prereqs() {
@@ -137,7 +137,7 @@ java_start_one() {
   local svc="$1"
   local jar; jar="$(service_jar_path "${svc}")"
   if [[ -z "${jar}" || ! -f "${jar}" ]]; then
-    err "${svc}: 找不到 jar，先跑 ./dev.sh build"; return 1
+    err "${svc}: 找不到 jar，先跑 scripts/dev/dev.sh build"; return 1
   fi
   local port; port="$(service_port "${svc}")"
   local pid; pid="$(read_pid "${svc}")"
@@ -288,7 +288,7 @@ cmd_up() {
   cmd_status
   echo
   ok "全部就绪。前端：http://localhost:${FRONTEND_PORT}  网关：http://localhost:30260"
-  ok "停止：./dev.sh down"
+  ok "停止：scripts/dev/dev.sh down"
 }
 
 cmd_down() {

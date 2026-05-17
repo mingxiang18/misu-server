@@ -1,6 +1,6 @@
 -- 本地开发：建库（不建表）
 -- JPA hibernate.ddl-auto=update 在 Java 服务首次启动时自动建表
--- 如需补充 docs/*.sql 中的迁移，启动后执行：./dev.sh seed-sql
+-- 如需补充 docs/*.sql 中的迁移，启动后执行：scripts/dev/dev.sh seed-sql
 
 CREATE DATABASE IF NOT EXISTS `misu_account`
   DEFAULT CHARACTER SET utf8mb4

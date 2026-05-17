@@ -1,5 +1,5 @@
 # Nacos 配置：dataId = misu-file-server-local.yml, namespace = local, group = DEFAULT_GROUP
-# 由 ./dev.sh seed-nacos 推送到本机 Nacos
+# 由 scripts/dev/dev.sh seed-nacos 推送到本机 Nacos
 # 仅供本地开发，账号密码均为弱口令
 
 logging:

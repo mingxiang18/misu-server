@@ -1,0 +1,92 @@
+---
+# misu-account: 无状态 Java 服务，配置走 nacos
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: misu-account-config
+  namespace: misu-server
+data:
+  application-prod.yaml: |
+    spring:
+      config:
+        import: optional:nacos:misu-account-prod.yml
+      cloud:
+        nacos:
+          discovery:
+            server-addr: nacos.misu-server.svc.cluster.local:8848
+            namespace: prod
+            group: DEFAULT_GROUP
+          config:
+            import-check:
+              enabled: false
+            server-addr: nacos.misu-server.svc.cluster.local:8848
+            namespace: prod
+            group: DEFAULT_GROUP
+            file-extension: yml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: misu-account
+  namespace: misu-server
+  labels: { app: misuaccount }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: misuaccount }
+  template:
+    metadata:
+      labels: { app: misuaccount }
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [misu-maco]
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: misu-account
+          # 由 release.sh 用 envsubst 渲染 REGISTRY_PULL + IMAGE_TAG
+          image: ${REGISTRY_PULL}/misuaa/misu-account:${IMAGE_TAG}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { containerPort: 30261 }
+          env:
+            - { name: JAVA_XMX, value: "512m" }
+            - { name: JAVA_XMS, value: "256m" }
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits:   { cpu: 2,    memory: 1Gi }
+          startupProbe:
+            tcpSocket: { port: 30261 }
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 30  # 容忍 nacos config 加载 + DB connect 慢
+          livenessProbe:
+            tcpSocket: { port: 30261 }
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            tcpSocket: { port: 30261 }
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - { name: config, mountPath: /app/application-prod.yaml, subPath: application-prod.yaml }
+      volumes:
+        - name: config
+          configMap: { name: misu-account-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: misu-account
+  namespace: misu-server
+spec:
+  type: ClusterIP
+  selector: { app: misuaccount }
+  ports:
+    - { port: 30261, targetPort: 30261 }

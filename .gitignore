@@ -37,6 +37,9 @@ electron-dist/
 # Environment-local overrides
 *.local
 
+# Deploy pipeline local config (含 SSH key 路径 / 内网 IP，不入库)
+/scripts/deploy/deploy.conf
+
 # Local dev runtime（dev.sh 产生的 PID / 日志 / 文件存储）
 /.dev/
 /.misu-dev/

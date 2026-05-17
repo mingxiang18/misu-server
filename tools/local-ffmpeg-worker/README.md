@@ -34,13 +34,13 @@
 
 ```bash
 # 推到默认仓库 misuaa/misu-ffmpeg-worker
-./scripts/build-push-ffmpeg-worker.sh 0.0.1
+./scripts/build/build-push-ffmpeg-worker.sh 0.0.1
 
 # 推到本地集群仓库
-REGISTRY=10.8.0.26:30500/ ./scripts/build-push-ffmpeg-worker.sh 0.0.1
+REGISTRY=10.8.0.26:30500/ ./scripts/build/build-push-ffmpeg-worker.sh 0.0.1
 
 # 单架构（misu-maco 是 arm64 mac mini 时）
-PLATFORMS=linux/arm64 ./scripts/build-push-ffmpeg-worker.sh 0.0.1
+PLATFORMS=linux/arm64 ./scripts/build/build-push-ffmpeg-worker.sh 0.0.1
 ```
 
 ### 1.3 部署

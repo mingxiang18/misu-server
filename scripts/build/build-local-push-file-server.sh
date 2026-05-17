@@ -8,7 +8,7 @@ if [[ -z "${VERSION}" ]]; then
   exit 1
 fi
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MVN="/Users/renyuming/Documents/develop/maven/apache-maven-3.6.3/bin/mvn"
 MAVEN_REPO="/Users/renyuming/Documents/develop/maven/repository"
 MODULE="misu-file-server/misu-file-server-biz"

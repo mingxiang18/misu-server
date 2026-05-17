@@ -16,7 +16,7 @@ if [[ -z "${VERSION}" ]]; then
   exit 1
 fi
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONTEXT="${ROOT_DIR}/tools/local-ffmpeg-worker"
 REGISTRY="${REGISTRY:-}"
 IMAGE="${REGISTRY}misuaa/misu-ffmpeg-worker:${VERSION}"
