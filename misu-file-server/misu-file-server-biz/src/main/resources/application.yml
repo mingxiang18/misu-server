@@ -37,6 +37,20 @@ file:
     maxBytesPerSnapshot: 52428800  # 50 MB
     maxVersionsPerFile: 5
 
+# WebDAV：用户私有目录（openType=0）的可读写挂载端点，跑在独立端口、不经网关
+webdav:
+  server:
+    # WebDAV 专用端口（独立 Tomcat 连接器）
+    port: 30263
+  auth:
+    # Basic Auth 凭证校验结果的本地缓存时长（秒），规避每请求 Feign + BCrypt 开销
+    cache-ttl-seconds: 300
+  lock:
+    # 内存写锁默认超时（秒）
+    timeout-seconds: 600
+  # 单次 PUT 上传字节上限（10 GB）
+  max-upload-bytes: 10737418240
+
 video:
   transcode:
     enabled: true
