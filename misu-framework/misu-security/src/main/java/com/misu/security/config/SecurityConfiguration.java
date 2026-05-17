@@ -56,6 +56,8 @@ public class SecurityConfiguration {
                 auth.requestMatchers("/videoRoom/ws/**").permitAll();
                 // Q5：放开 Spring Boot Actuator 健康检查 / Prometheus 指标抓取（生产由网络层做内网限制）
                 auth.requestMatchers("/actuator/**").permitAll();
+                // WebDAV servlet 自行做 HTTP Basic Auth，放行让请求抵达 servlet（仅 file-server 有 /dav/* servlet）
+                auth.requestMatchers("/dav/**").permitAll();
                 auth.anyRequest().authenticated();
             })
             // 使用无状态session，即不使用session缓存数据
