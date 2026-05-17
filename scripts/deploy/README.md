@@ -61,6 +61,23 @@ scripts/deploy/release.sh misu-gateway --skip-build  # 镜像已推过，只重�
 
 目标名支持别名：`gateway` / `account` / `file-server` / `front` / `ui`。
 
+## ConfigMap 与 Deployment 解耦
+
+每个服务的 k8s 清单拆成两个文件：
+
+- `misu-<svc>.yaml` —— Deployment + Service，**日常 `release.sh` 只覆盖它**（镜像 tag 变更）。
+- `misu-<svc>-config.yaml` —— ConfigMap（nacos 接入配置），日常发布**不会动它**。
+
+所以普通发布不会覆盖或重置 ConfigMap。改了 nacos 接入配置后，单独下发：
+
+```bash
+scripts/deploy/release.sh --config                # 下发全部 3 个服务的 ConfigMap
+scripts/deploy/release.sh --config misu-gateway   # 只下发单个
+```
+
+`--config` 会备份旧 ConfigMap → apply 新的 → `kubectl rollout restart`（ConfigMap 走
+subPath 挂载，kubelet 不热更新，必须重启 pod 才生效）。
+
 ## 回滚
 
 ```bash
@@ -73,12 +90,14 @@ scripts/deploy/release.sh --rollback 20260517T083000Z
 
 ## k8s 清单的真源
 
-`scripts/deploy/k8s/misu-server/{misu-gateway,misu-account,misu-file-server}.yaml` 是清单的
-唯一真源，内容取自集群现有清单，仅把镜像行参数化为
-`${REGISTRY_PULL}/misuaa/<服务>:${IMAGE_TAG}`，发布时由 `envsubst` 渲染。
+`scripts/deploy/k8s/misu-server/` 下每个服务两个文件，是清单的唯一真源，内容取自集群现有清单：
 
-要改部署配置（副本数、资源、探针等），改这里的文件并合并到 master，下次发布即生效。
-`misu-server-nginx.yaml`、`nacos.yaml` 等其它清单未纳入本流程，仍在服务器上手工维护。
+- `misu-<svc>.yaml`（Deployment+Service）—— 镜像行参数化为 `${REGISTRY_PULL}/misuaa/<服务>:${IMAGE_TAG}`，发布时 `envsubst` 渲染。
+- `misu-<svc>-config.yaml`（ConfigMap）—— 无模板变量，`--config` 时原样下发。
+
+要改部署配置（副本数、资源、探针等）改前者、改 nacos 接入配置改后者，合并到 master 后分别用
+`release.sh` / `release.sh --config` 生效。`misu-server-nginx.yaml`、`nacos.yaml` 等其它清单
+未纳入本流程，仍在服务器上手工维护。
 
 ## 日志与备份
 

@@ -1,29 +1,6 @@
 ---
-# misu-file-server: hostPath 数据在 misu-maco，必须 required
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: misu-file-server-config
-  namespace: misu-server
-data:
-  application-prod.yaml: |
-    spring:
-      config:
-        import: optional:nacos:misu-file-server-prod.yml
-      cloud:
-        nacos:
-          discovery:
-            server-addr: nacos.misu-server.svc.cluster.local:8848
-            namespace: prod
-            group: DEFAULT_GROUP
-          config:
-            import-check:
-              enabled: false
-            server-addr: nacos.misu-server.svc.cluster.local:8848
-            namespace: prod
-            group: DEFAULT_GROUP
-            file-extension: yml
----
+# misu-file-server Deployment + Service（hostPath 数据在 misu-maco，必须 required）。
+# ConfigMap 见 misu-file-server-config.yaml。
 apiVersion: apps/v1
 kind: Deployment
 metadata:

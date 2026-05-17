@@ -1,29 +1,6 @@
 ---
-# misu-account: 无状态 Java 服务，配置走 nacos
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: misu-account-config
-  namespace: misu-server
-data:
-  application-prod.yaml: |
-    spring:
-      config:
-        import: optional:nacos:misu-account-prod.yml
-      cloud:
-        nacos:
-          discovery:
-            server-addr: nacos.misu-server.svc.cluster.local:8848
-            namespace: prod
-            group: DEFAULT_GROUP
-          config:
-            import-check:
-              enabled: false
-            server-addr: nacos.misu-server.svc.cluster.local:8848
-            namespace: prod
-            group: DEFAULT_GROUP
-            file-extension: yml
----
+# misu-account Deployment + Service（无状态 Java 服务，配置走 nacos）。
+# ConfigMap 见 misu-account-config.yaml。
 apiVersion: apps/v1
 kind: Deployment
 metadata:

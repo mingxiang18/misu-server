@@ -1,0 +1,26 @@
+---
+# misu-gateway 的 ConfigMap —— 与 Deployment 解耦，仅在 nacos 接入配置变更时
+# 用 `release.sh --config` 单独下发；日常镜像发布不会动它。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: misu-gateway-config
+  namespace: misu-server
+data:
+  application-prod.yaml: |
+    spring:
+      config:
+        import: optional:nacos:misu-gateway-prod.yml
+      cloud:
+        nacos:
+          discovery:
+            server-addr: nacos.misu-server.svc.cluster.local:8848
+            namespace: prod
+            group: DEFAULT_GROUP
+          config:
+            import-check:
+              enabled: false
+            server-addr: nacos.misu-server.svc.cluster.local:8848
+            namespace: prod
+            group: DEFAULT_GROUP
+            file-extension: yml

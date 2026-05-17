@@ -6,6 +6,7 @@
 #   scripts/deploy/release.sh misu-gateway          # 只发布单个服务
 #   scripts/deploy/release.sh misu-account frontend # 发布多个指定目标
 #   scripts/deploy/release.sh frontend              # 只发布前端
+#   scripts/deploy/release.sh --config              # 只下发 ConfigMap（不发镜像）
 #
 # 目标名（可用别名）：
 #   misu-gateway      (gateway)
@@ -16,8 +17,12 @@
 # 选项：
 #   --dry-run        # 只构建，不推送、不碰服务器
 #   --skip-build     # 不重新构建镜像，直接用已推送的 tag 部署
+#   --config         # 只下发 ConfigMap（nacos 接入配置）并重启服务，不构建/发镜像
 #   --rollback <ts>  # 回滚到某次备份时间戳
 #   --list-backups   # 列出可回滚的备份时间戳
+#
+# ConfigMap 与 Deployment 解耦：日常发布只覆盖 misu-<svc>.yaml（Deployment+Service），
+# 不动 ConfigMap；改了 nacos 接入配置才用 --config 单独下发 misu-<svc>-config.yaml。
 #
 # 单步流程：构建镜像→推私有 registry→SSH 主节点备份+覆盖清单+apply+rollout；
 #           前端：vite build→SSH 工作节点备份+覆盖 html。任一步失败自动回滚。
@@ -210,6 +215,41 @@ cmd_rollback() {
 }
 
 # ============================================================================
+# 单独下发 ConfigMap（与日常镜像发布解耦）
+# ============================================================================
+cmd_config() {
+  local entry name ts
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  log "下发 ConfigMap：服务=[${SEL_SVCS[*]}]  ts=${ts}"
+  mssh "mkdir -p '${MASTER_BACKUP_DIR}/${ts}/k8s'"
+  for entry in "${SERVICES[@]}"; do
+    name="${entry%%|*}"; in_selected "${name}" || continue
+    mssh "cp -a '${MASTER_K8S_DIR}/${name}-config.yaml' '${MASTER_BACKUP_DIR}/${ts}/k8s/' 2>/dev/null || true"
+  done
+
+  log "主节点：覆盖 ConfigMap 清单 + kubectl apply"
+  for entry in "${SERVICES[@]}"; do
+    name="${entry%%|*}"; in_selected "${name}" || continue
+    scp "${SSH_OPTS[@]}" "${ROOT_DIR}/scripts/deploy/k8s/misu-server/${name}-config.yaml" \
+      "${MASTER_SSH}:${MASTER_K8S_DIR}/${name}-config.yaml"
+    mssh "kubectl apply -f '${MASTER_K8S_DIR}/${name}-config.yaml'"
+  done
+
+  # ConfigMap 走 subPath 挂载，kubelet 不会热更新，必须重启 pod 才能生效
+  log "主节点：重启 deployment 让新配置生效"
+  for entry in "${SERVICES[@]}"; do
+    name="${entry%%|*}"; in_selected "${name}" || continue
+    mssh "kubectl -n '${NAMESPACE}' rollout restart 'deployment/${name}'"
+  done
+  for entry in "${SERVICES[@]}"; do
+    name="${entry%%|*}"; in_selected "${name}" || continue
+    mssh "kubectl -n '${NAMESPACE}' rollout status 'deployment/${name}' --timeout='${ROLLOUT_TIMEOUT}'" \
+      || err "${name} 重启后 rollout 未就绪"
+  done
+  log "ConfigMap 下发完成（备份时间戳 ${ts}）。"
+}
+
+# ============================================================================
 # 主流程
 # ============================================================================
 main() {
@@ -219,6 +259,7 @@ main() {
     case "$1" in
       --dry-run)      dry=1 ;;
       --skip-build)   skip_build=1 ;;
+      --config)       action="config" ;;
       --list-backups) action="list" ;;
       --rollback)     action="rollback"; rb_ts="${2:-}"; shift ;;
       --*)            die "未知选项：$1（-h 看帮助）" ;;
@@ -238,6 +279,11 @@ main() {
   # 未指定目标 → 全部
   if [[ "${any_target}" -eq 0 ]]; then
     SEL_SVCS=(misu-gateway misu-account misu-file-server); DO_FRONTEND=1
+  fi
+
+  if [[ "${action}" == "config" ]]; then
+    [[ ${#SEL_SVCS[@]} -gt 0 ]] || die "--config 仅适用于 Java 服务（frontend 无 ConfigMap）"
+    cmd_config; exit 0
   fi
 
   TAG="$(git rev-parse --short HEAD)"
