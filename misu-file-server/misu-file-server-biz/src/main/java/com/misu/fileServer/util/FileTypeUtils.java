@@ -26,6 +26,19 @@ public class FileTypeUtils {
     );
 
     /**
+     * 生产容器是 amazoncorretto:17-alpine（无 /etc/mime.types），Files.probeContentType
+     * 对 mkv / flv 直接返回 null、对 avi 返回错误的 application/x-troff-msvideo，
+     * 这些都会漏判成 OTHER_FILE → 前端不渲染播放器、上传不触发转码、转码产物也拒绝服务。
+     * 用扩展名兜底兜住 video/* 探测不到的容器格式。
+     * 注意：.ts 与 TypeScript 源码冲突，归 TEXT_EXTENSIONS，不在此列。
+     */
+    private static final Set<String> VIDEO_EXTENSIONS = Set.of(
+            "mp4", "m4v", "mkv", "mov", "webm", "avi", "wmv", "flv", "f4v",
+            "m2ts", "mts", "mpg", "mpeg", "3gp", "3g2",
+            "ogv", "rmvb", "rm", "vob", "asf", "divx"
+    );
+
+    /**
      * 获取文件类型
      */
     @SneakyThrows
@@ -47,8 +60,13 @@ public class FileTypeUtils {
         }
         // 扩展名兜底（mime probe 在 JDK 自带 mime DB 之外的类型上经常返 null）
         String ext = StringUtils.substringAfterLast(file.getName(), '.').toLowerCase();
-        if (StringUtils.isNotBlank(ext) && TEXT_EXTENSIONS.contains(ext)) {
-            return FileType.TEXT_FILE;
+        if (StringUtils.isNotBlank(ext)) {
+            if (VIDEO_EXTENSIONS.contains(ext)) {
+                return FileType.VIDEO_FILE;
+            }
+            if (TEXT_EXTENSIONS.contains(ext)) {
+                return FileType.TEXT_FILE;
+            }
         }
         return FileType.OTHER_FILE;
     }
