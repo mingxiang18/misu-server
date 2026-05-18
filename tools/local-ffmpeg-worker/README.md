@@ -30,25 +30,31 @@
   ClusterIP:18765)。`entrypoint.sh` 收到 SIGTERM 时显式 forward 到两个 child，
   让 worker 的 trap 把 `running/` 任务退回 `queue/` 再退出。
 
-### 1.2 镜像构建 & 推送
+### 1.2 构建 + 部署（推荐：release.sh）
+
+ffmpeg-worker 已纳入 `scripts/deploy/release.sh`，构建镜像→推私有 registry→
+SSH 覆盖清单→`kubectl apply`→等 rollout，失败自动回滚，与 Java 服务同一套流程。
+镜像 tag 统一用 git short SHA，`deployment.yaml` 的 image 字段由 `envsubst` 注入。
 
 ```bash
-# 推到默认仓库 misuaa/misu-ffmpeg-worker
-./scripts/build/build-push-ffmpeg-worker.sh 0.0.1
-
-# 推到本地集群仓库
-REGISTRY=10.8.0.26:30500/ ./scripts/build/build-push-ffmpeg-worker.sh 0.0.1
-
-# 单架构（misu-maco 是 arm64 mac mini 时）
-PLATFORMS=linux/arm64 ./scripts/build/build-push-ffmpeg-worker.sh 0.0.1
+# 在仓库根执行（合并到 master 后）
+scripts/deploy/release.sh ffmpeg-worker     # 只发 worker
+scripts/deploy/release.sh                   # 全部：3 Java 服务 + 前端 + worker
+scripts/deploy/release.sh ffmpeg-worker --dry-run   # 只构建不部署
 ```
 
-### 1.3 部署
+### 1.3 手动构建 / 部署（备用）
 
 ```bash
+# 构建镜像（旧脚本，semver tag）
+REGISTRY=10.8.0.26:30500/ ./scripts/build/build-push-ffmpeg-worker.sh 0.0.1
+PLATFORMS=linux/arm64 ./scripts/build/build-push-ffmpeg-worker.sh 0.0.1  # 单架构
+
 cd tools/local-ffmpeg-worker/k8s
-# 必要：先确认 deployment.yaml 中的 image 指向正确版本
-kubectl apply -f configmap.yaml -f service.yaml -f deployment.yaml
+# deployment.yaml 的 image 是 ${REGISTRY_PULL}/${IMAGE_TAG} 模板，手动 apply 需先 envsubst
+kubectl apply -f configmap.yaml -f service.yaml
+REGISTRY_PULL=10.8.0.26:30500 IMAGE_TAG=0.0.1 \
+  envsubst '${REGISTRY_PULL} ${IMAGE_TAG}' <deployment.yaml | kubectl apply -f -
 # 可选：开启 NetworkPolicy 限制访问
 cp networkpolicy.yaml.example networkpolicy.yaml
 kubectl apply -f networkpolicy.yaml

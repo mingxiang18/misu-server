@@ -43,7 +43,9 @@ spec:
         supplementalGroups: [44, 27, 107, 109, 110, 989, 990]
       containers:
         - name: misu-ffmpeg-worker
-          image: 10.8.0.26:30500/misuaa/misu-ffmpeg-worker:0.0.9
+          # 由 scripts/deploy/release.sh 用 envsubst 替换（REGISTRY_PULL 读自 deploy.conf，
+          # IMAGE_TAG 为 git short SHA）。手动 apply 需先 envsubst，见 README §1.3。
+          image: ${REGISTRY_PULL}/misuaa/misu-ffmpeg-worker:${IMAGE_TAG}
           imagePullPolicy: IfNotPresent
           # privileged 用来打开 device cgroup —— k8s 默认即便 hostPath 把
           # /dev/dri/renderD128 挂进来，字符设备 cgroup 仍然 deny。

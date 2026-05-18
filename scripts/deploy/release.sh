@@ -2,10 +2,11 @@
 # release.sh —— 开发机一键自动部署（可按需选择服务）。
 #
 # 用法：
-#   scripts/deploy/release.sh                       # 全部：3 个 Java 服务 + 前端
+#   scripts/deploy/release.sh                       # 全部：3 个 Java 服务 + 前端 + ffmpeg-worker
 #   scripts/deploy/release.sh misu-gateway          # 只发布单个服务
 #   scripts/deploy/release.sh misu-account frontend # 发布多个指定目标
 #   scripts/deploy/release.sh frontend              # 只发布前端
+#   scripts/deploy/release.sh ffmpeg-worker         # 只发布转码 worker
 #   scripts/deploy/release.sh --config              # 只下发 ConfigMap（不发镜像）
 #
 # 目标名（可用别名）：
@@ -13,6 +14,7 @@
 #   misu-account      (account)
 #   misu-file-server  (file-server)
 #   frontend          (front / ui)
+#   ffmpeg-worker     (worker)
 #
 # 选项：
 #   --dry-run        # 只构建，不推送、不碰服务器
@@ -112,6 +114,22 @@ build_images() {
   done
 }
 
+# ffmpeg-worker 不是 Maven 模块，构建上下文是 tools/local-ffmpeg-worker。
+build_worker() {
+  local push="$1" image
+  image="${REGISTRY_PUSH}/misuaa/misu-ffmpeg-worker:${TAG}"
+  log "ffmpeg-worker 镜像构建：${image}"
+  if [[ "${push}" == "1" ]]; then
+    docker buildx build --platform "${PLATFORMS}" -t "${image}" --push \
+      "${ROOT_DIR}/tools/local-ffmpeg-worker" \
+      -f "${ROOT_DIR}/tools/local-ffmpeg-worker/Dockerfile"
+  else
+    docker buildx build --platform "${PLATFORMS}" -t "${image}" \
+      "${ROOT_DIR}/tools/local-ffmpeg-worker" \
+      -f "${ROOT_DIR}/tools/local-ffmpeg-worker/Dockerfile"
+  fi
+}
+
 build_frontend() {
   log "前端构建（vite build）..."
   ( cd "${ROOT_DIR}/misu-file-server-ui" \
@@ -167,6 +185,40 @@ restore_k8s() {
 }
 
 # ============================================================================
+# 部署 —— ffmpeg-worker（k8s 清单在 tools/local-ffmpeg-worker/k8s/，与 Java 服务分开）
+# 只覆盖 Deployment；configmap/service 是一次性的，改了再单独 apply。
+# ============================================================================
+deploy_worker() {
+  local tmp
+  log "主节点：备份旧 ffmpeg-worker 清单 → ${MASTER_BACKUP_DIR}/${TS}/k8s"
+  mssh "mkdir -p '${MASTER_BACKUP_DIR}/${TS}/k8s'"
+  mssh "cp -a '${MASTER_K8S_DIR}/misu-ffmpeg-worker.yaml' '${MASTER_BACKUP_DIR}/${TS}/k8s/' 2>/dev/null || true"
+
+  tmp="$(mktemp -d)"
+  export REGISTRY_PULL IMAGE_TAG="${TAG}"
+  log "主节点：覆盖 ffmpeg-worker 清单 + kubectl apply（tag=${TAG}）"
+  envsubst '${REGISTRY_PULL} ${IMAGE_TAG}' \
+    <"${ROOT_DIR}/tools/local-ffmpeg-worker/k8s/deployment.yaml" >"${tmp}/misu-ffmpeg-worker.yaml"
+  scp "${SSH_OPTS[@]}" "${tmp}/misu-ffmpeg-worker.yaml" "${MASTER_SSH}:${MASTER_K8S_DIR}/misu-ffmpeg-worker.yaml"
+  mssh "kubectl apply -f '${MASTER_K8S_DIR}/misu-ffmpeg-worker.yaml'"
+  rm -rf "${tmp}"
+
+  log "主节点：等待 ffmpeg-worker rollout..."
+  if ! mssh "kubectl -n '${NAMESPACE}' rollout status 'deployment/misu-ffmpeg-worker' --timeout='${ROLLOUT_TIMEOUT}'"; then
+    err "misu-ffmpeg-worker rollout 失败 —— 从 ${TS} 备份回滚"
+    restore_worker "${TS}"
+    die "ffmpeg-worker 部署失败并已回滚。"
+  fi
+}
+
+restore_worker() {
+  local ts="$1"
+  mssh "test -f '${MASTER_BACKUP_DIR}/${ts}/k8s/misu-ffmpeg-worker.yaml' && \
+    cp -a '${MASTER_BACKUP_DIR}/${ts}/k8s/misu-ffmpeg-worker.yaml' '${MASTER_K8S_DIR}/misu-ffmpeg-worker.yaml' && \
+    kubectl apply -f '${MASTER_K8S_DIR}/misu-ffmpeg-worker.yaml'" || err "回滚 misu-ffmpeg-worker 失败，请人工介入"
+}
+
+# ============================================================================
 # 部署 —— 工作节点 前端
 # ============================================================================
 deploy_frontend() {
@@ -206,11 +258,14 @@ cmd_rollback() {
   [[ -n "${ts}" ]] || die "--rollback 需要时间戳参数（用 --list-backups 查看）"
   log "回滚到 ${ts}"
   restore_k8s "${ts}"
+  restore_worker "${ts}"
   for entry in "${SERVICES[@]}"; do
     name="${entry%%|*}"
     mssh "kubectl -n '${NAMESPACE}' rollout status 'deployment/${name}' --timeout='${ROLLOUT_TIMEOUT}'" \
       || err "${name} 回滚后 rollout 未就绪"
   done
+  mssh "kubectl -n '${NAMESPACE}' rollout status 'deployment/misu-ffmpeg-worker' --timeout='${ROLLOUT_TIMEOUT}'" \
+    || err "misu-ffmpeg-worker 回滚后 rollout 未就绪"
   restore_frontend "${ts}"
   log "回滚完成。"
 }
@@ -255,7 +310,7 @@ cmd_config() {
 # ============================================================================
 main() {
   local dry=0 skip_build=0 action="deploy" rb_ts="" any_target=0 c=""
-  SEL_SVCS=(); DO_FRONTEND=0
+  SEL_SVCS=(); DO_FRONTEND=0; DO_WORKER=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dry-run)      dry=1 ;;
@@ -265,9 +320,10 @@ main() {
       --rollback)     action="rollback"; rb_ts="${2:-}"; shift ;;
       --*)            die "未知选项：$1（-h 看帮助）" ;;
       frontend|front|ui) DO_FRONTEND=1; any_target=1 ;;
+      ffmpeg-worker|ffmpegworker|worker) DO_WORKER=1; any_target=1 ;;
       *)
         c="$(canon_service "$1")"
-        [[ -n "${c}" ]] || die "未知目标：$1（可选 misu-gateway/misu-account/misu-file-server/frontend）"
+        [[ -n "${c}" ]] || die "未知目标：$1（可选 misu-gateway/misu-account/misu-file-server/frontend/ffmpeg-worker）"
         in_selected "${c}" || SEL_SVCS+=("${c}")
         any_target=1 ;;
     esac
@@ -279,7 +335,7 @@ main() {
 
   # 未指定目标 → 全部
   if [[ "${any_target}" -eq 0 ]]; then
-    SEL_SVCS=(misu-gateway misu-account misu-file-server); DO_FRONTEND=1
+    SEL_SVCS=(misu-gateway misu-account misu-file-server); DO_FRONTEND=1; DO_WORKER=1
   fi
 
   if [[ "${action}" == "config" ]]; then
@@ -291,7 +347,7 @@ main() {
   TS="$(date -u +%Y%m%dT%H%M%SZ)"
   local branch; branch="$(git rev-parse --abbrev-ref HEAD)"
   [[ "${branch}" == "master" ]] || err "当前分支是 ${branch}（非 master）—— 将按该 SHA 发布，请确认。"
-  log "发布目标：服务=[${SEL_SVCS[*]:-无}] 前端=$([[ ${DO_FRONTEND} -eq 1 ]] && echo 是 || echo 否)  tag=${TAG}  ts=${TS}"
+  log "发布目标：服务=[${SEL_SVCS[*]:-无}] 前端=$([[ ${DO_FRONTEND} -eq 1 ]] && echo 是 || echo 否) worker=$([[ ${DO_WORKER} -eq 1 ]] && echo 是 || echo 否)  tag=${TAG}  ts=${TS}"
 
   # 构建
   if [[ ${#SEL_SVCS[@]} -gt 0 ]]; then
@@ -299,6 +355,13 @@ main() {
       log "跳过镜像构建（--skip-build）"
     else
       build_images "$([[ "${dry}" -eq 1 ]] && echo 0 || echo 1)"
+    fi
+  fi
+  if [[ "${DO_WORKER}" -eq 1 ]]; then
+    if [[ "${skip_build}" -eq 1 ]]; then
+      log "跳过 ffmpeg-worker 镜像构建（--skip-build）"
+    else
+      build_worker "$([[ "${dry}" -eq 1 ]] && echo 0 || echo 1)"
     fi
   fi
   [[ "${DO_FRONTEND}" -eq 1 ]] && build_frontend
@@ -310,6 +373,7 @@ main() {
 
   # 部署
   [[ ${#SEL_SVCS[@]} -gt 0 ]] && deploy_k8s
+  [[ "${DO_WORKER}" -eq 1 ]] && deploy_worker
   [[ "${DO_FRONTEND}" -eq 1 ]] && deploy_frontend
   prune_backups
   log "发布成功：${TAG} 已上线（备份时间戳 ${TS}）"
