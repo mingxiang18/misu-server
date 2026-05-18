@@ -370,6 +370,22 @@ duration_us() {
     | awk '{ printf "%.0f", $1 * 1000000 }'
 }
 
+# 探测源文件里可转 mov_text 的文本型字幕流，逐行 echo 其全局 stream index。
+# 只收 subrip/ass/ssa/webvtt 等文本字幕 —— 它们能转 mov_text 内嵌进 MP4，
+# Safari 的 <video> 原生控件会把它们列在字幕菜单里。图形字幕
+# (hdmv_pgs_subtitle / dvd_subtitle / dvb_subtitle 等) 无法转 mov_text，
+# 必须跳过，否则 ffmpeg 整段失败。
+text_subtitle_indexes() {
+  ffprobe -v error -select_streams s \
+    -show_entries stream=index,codec_name -of csv=p=0 "$1" 2>/dev/null \
+    | while IFS=, read -r idx codec; do
+        case "$codec" in
+          subrip|srt|ass|ssa|mov_text|webvtt|text|subviewer|subviewer1|sami|stl)
+            printf '%s\n' "$idx" ;;
+        esac
+      done
+}
+
 progress_percent() {
   local duration="$1"
   local progress_file="$2"
@@ -475,6 +491,15 @@ run_ffmpeg_task() {
       ;;
   esac
 
+  # 文本字幕：转 mov_text 内嵌进输出 MP4，Safari <video> 可在字幕菜单里选。
+  local sub_map_args=() sub_idx
+  while IFS= read -r sub_idx; do
+    [[ -n "$sub_idx" ]] && sub_map_args+=(-map "0:${sub_idx}")
+  done < <(text_subtitle_indexes "$LOCAL_SOURCE")
+  if [[ "${#sub_map_args[@]}" -gt 0 ]]; then
+    log "Task $TASK_ID: 检测到 $(( ${#sub_map_args[@]} / 2 )) 条文本字幕，内嵌为 mov_text"
+  fi
+
   log "Task $TASK_ID: transcoding with $ENCODER_NAME (scale=$scale_type)"
   publish_status "PROCESSING" "5" "容器内转码中 ($ENCODER_NAME, scale=$scale_type)" "TRANSCODING" || return 1
 
@@ -482,11 +507,14 @@ run_ffmpeg_task() {
   # -ignore_unknown 跳过 ffmpeg 不认识的流（iPhone 17 Pro / iOS 26 录像里的 apac 空间音频、
   # mebx 元数据等），否则 ffmpeg 会因为找不到 decoder for "none" 而整段失败。
   # -map 0:a:0? 只取第一条音频（最常用的 AAC），避免误抓到不识别的辅音轨。
+  # sub_map_args 只含文本字幕流，统一 -c:s mov_text 转码内嵌；无字幕时数组为空、
+  # -c:s mov_text 无字幕流可应用，ffmpeg 直接忽略，均无副作用。
   ffmpeg -y "${hwaccel_args[@]}" -ignore_unknown -i "$LOCAL_SOURCE" \
-    -map 0:v:0 -map 0:a:0? \
+    -map 0:v:0 -map 0:a:0? ${sub_map_args[@]+"${sub_map_args[@]}"} \
     -vf "$vf" \
     "${video_args[@]}" \
     -c:a aac -b:a "$AUDIO_BITRATE" \
+    -c:s mov_text \
     -movflags +faststart \
     -progress "$LOCAL_PROGRESS" -nostats "$LOCAL_OUTPUT" < /dev/null &
 
