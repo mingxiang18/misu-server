@@ -14,7 +14,7 @@ const getCookieDomain = () => {
   return undefined
 }
 
-const getCookieOptions = (expires) => {
+export const getCookieOptions = (expires) => {
   const options = {
     expires,
     sameSite: 'Lax'

@@ -342,10 +342,9 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CaretRight, CopyDocument, Delete, Refresh, RefreshLeft, RefreshRight, Search, Top, VideoCamera } from '@element-plus/icons-vue'
-import { getUserInfo } from '@/api/user/user'
 import {
   cancelTranscodeBatch,
   getTranscodeJobs,
@@ -381,8 +380,10 @@ const QUEUE_STATE_OPTIONS = [
 
 const { isMobile } = useBreakpoint()
 const tableMaxHeight = computed(() => (isMobile.value ? '50vh' : '60vh'))
-const currentUserInfo = ref(getUserInfo())
-const isAdmin = computed(() => (currentUserInfo.value.authorities || []).includes('ADMIN'))
+// 用 Index.vue 注入的响应式 userInfo（每次进入应用都会从服务端刷新），
+// 不要再直接同步读 Cookie —— Cookie 可能已过期或缺失，导致 ADMIN 误判
+const userInfo = inject('userInfo', { value: {} })
+const isAdmin = computed(() => (userInfo.value.authorities || []).includes('ADMIN'))
 const loading = ref(false)
 const recovering = ref(false)
 const retryingBatch = ref(false)
@@ -459,21 +460,6 @@ const resetFilter = () => {
   pagination.page = 1
   loadJobs()
 }
-
-onMounted(() => {
-  if (isAdmin.value) {
-    loadJobs()
-    loadSummary()
-    loadBackfillStatus()
-    loadWorkerState()
-    backfillTimer = setInterval(loadBackfillStatus, 3000)
-    workerTimer = setInterval(loadWorkerState, 5000)
-    jobsTimer = setInterval(() => {
-      loadSummary()
-      loadJobs()
-    }, 8000)
-  }
-})
 
 onBeforeUnmount(() => {
   if (backfillTimer) { clearInterval(backfillTimer); backfillTimer = null }
@@ -726,6 +712,23 @@ const progressStatus = (row) => {
   if (displayState(row) === 'FAILED') return 'exception'
   return undefined
 }
+
+// isAdmin 可能在挂载后（Index.vue 异步刷新 userInfo 完成时）才变 true，
+// 用 watch + immediate 兼顾"已是管理员"和"稍后才变管理员"两种时序。
+// 必须放在所有 loadXxx 函数定义之后，否则 immediate 同步执行时会命中 TDZ。
+watch(isAdmin, (admin) => {
+  if (!admin || jobsTimer) return
+  loadJobs()
+  loadSummary()
+  loadBackfillStatus()
+  loadWorkerState()
+  backfillTimer = setInterval(loadBackfillStatus, 3000)
+  workerTimer = setInterval(loadWorkerState, 5000)
+  jobsTimer = setInterval(() => {
+    loadSummary()
+    loadJobs()
+  }, 8000)
+}, { immediate: true })
 </script>
 
 <style scoped>

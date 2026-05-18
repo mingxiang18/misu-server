@@ -1,6 +1,7 @@
 import request from '@/api/request'
 import Cookies from 'js-cookie'
 import logger from '@/utils/logger'
+import { getCookieOptions } from '@/api/auth/token'
 
 const UserKey = 'User-Info';
 
@@ -26,12 +27,17 @@ export function getUserInfo() {
     return {};
 }
 
-export function setUserInfo(userInfo) {
+// 把用户信息写入 Cookie，过期时间对齐 refreshToken（30 天），
+// 否则会话级 Cookie 在浏览器重启后丢失，而 refreshToken 仍有效，导致权限误判
+export function cacheUserInfo(userInfo) {
+    Cookies.set(UserKey, JSON.stringify(userInfo || {}), getCookieOptions(30));
+}
+
+export function setUserInfo() {
     //将用户信息设置到本地
     return getUserInfoFromToken().then(response => {
-        userInfo = response.data;
-        Cookies.set(UserKey, JSON.stringify(userInfo));
-        return userInfo;
+        cacheUserInfo(response.data);
+        return response.data;
     })
 }
 

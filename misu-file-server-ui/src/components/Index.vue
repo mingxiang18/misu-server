@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, provide } from 'vue'
 import { useBreakpoint } from '@/composables/useBreakpoint'
-import { getUserInfo, getUserInfoFromToken } from '@/api/user/user'
+import { cacheUserInfo, getUserInfo, getUserInfoFromToken } from '@/api/user/user'
 import SideNav from '@/components/layout/SideNav.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import TabBar from '@/components/layout/TabBar.vue'
@@ -14,7 +14,10 @@ provide('userInfo', userInfo)
 onMounted(() => {
   getUserInfoFromToken()
       .then(response => {
-        if (response && response.data) userInfo.value = response.data
+        if (response && response.data) {
+          userInfo.value = response.data
+          cacheUserInfo(response.data)
+        }
       })
       .catch(() => {})
 })
