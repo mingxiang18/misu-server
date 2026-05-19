@@ -3,6 +3,7 @@ package com.misu.security.config;
 import com.misu.security.filter.JwtAuthenticationFilter;
 import com.misu.security.properties.PermitAllUrlProperties;
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -60,6 +61,16 @@ public class SecurityConfiguration {
                 auth.requestMatchers("/dav/**").permitAll();
                 auth.anyRequest().authenticated();
             })
+            // 未携带 / 已过期 / 无效 token 的请求统一返回 401。
+            // Spring Security 6 在无 formLogin/httpBasic 时默认入口点是
+            // Http403ForbiddenEntryPoint（返回 403 空 body），会让前端 axios
+            // 的 token 刷新逻辑（仅在 401 触发）永不生效，refreshToken 形同虚设。
+            .exceptionHandling(exception -> exception
+                    .authenticationEntryPoint((request, response, authException) -> {
+                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        response.setContentType("application/json;charset=UTF-8");
+                        response.getWriter().write("{\"code\":401,\"msg\":\"未登录或登录状态已过期\"}");
+                    }))
             // 使用无状态session，即不使用session缓存数据
             .sessionManagement(sessionManagement -> sessionManagement
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
