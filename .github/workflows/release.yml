@@ -25,23 +25,72 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # paths-filter 要拿父 commit 做 diff
 
-      # 计算 tag + 哪些服务需要发布
+      # ---------- 路径变更检测 ----------
+      # push: 只发改动涉及的服务。 dispatch: 用户 services 输入覆盖（默认 all）。
+      # 共享模块（misu-framework / misu-net / 根 pom）改动 → 所有 Java 服务都重发。
+      - name: Detect changed paths
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            gateway:
+              - 'misu-gateway/**'
+              - 'misu-framework/**'
+              - 'misu-net/**'
+              - 'pom.xml'
+              - 'scripts/deploy/k8s/misu-server/misu-gateway.yaml'
+            account:
+              - 'misu-account/**'
+              - 'misu-framework/**'
+              - 'misu-net/**'
+              - 'pom.xml'
+              - 'scripts/deploy/k8s/misu-server/misu-account.yaml'
+            file_server:
+              - 'misu-file-server/**'
+              - 'misu-framework/**'
+              - 'misu-net/**'
+              - 'pom.xml'
+              - 'scripts/deploy/k8s/misu-server/misu-file-server.yaml'
+            frontend:
+              - 'misu-file-server-ui/**'
+
       # 注意: GitHub Actions 表达式不允许 output 名带 '-'，所以一律用下划线（file_server）。
       - name: Compute tag & target selection
         id: meta
+        env:
+          EVENT: ${{ github.event_name }}
+          SEL_INPUT: ${{ github.event.inputs.services }}
+          CHG_GATEWAY: ${{ steps.changes.outputs.gateway }}
+          CHG_ACCOUNT: ${{ steps.changes.outputs.account }}
+          CHG_FILE_SERVER: ${{ steps.changes.outputs.file_server }}
+          CHG_FRONTEND: ${{ steps.changes.outputs.frontend }}
         run: |
           TAG=$(git rev-parse --short HEAD)
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          SEL="${{ github.event.inputs.services || 'all' }}"
-          for s in gateway account file_server frontend; do
-            if [[ "$SEL" == "all" || ",$SEL," == *",$s,"* ]]; then
-              echo "do_$s=1" >> "$GITHUB_OUTPUT"
+
+          set_flag() {
+            local svc="$1" auto="$2" on=0
+            if [[ "$EVENT" == "workflow_dispatch" ]]; then
+              # dispatch: 用户输入决定（默认 all）
+              local sel="${SEL_INPUT:-all}"
+              [[ "$sel" == "all" || ",$sel," == *",$svc,"* ]] && on=1
             else
-              echo "do_$s=0" >> "$GITHUB_OUTPUT"
+              # push (or other event): paths-filter 输出
+              [[ "$auto" == "true" ]] && on=1
             fi
-          done
-          echo "Tag: $TAG  selection: $SEL"
+            echo "do_$svc=$on" >> "$GITHUB_OUTPUT"
+            printf "  %-12s: %s\n" "$svc" "$on"
+          }
+
+          echo "Tag: $TAG  Event: $EVENT  Input: ${SEL_INPUT:-<none>}"
+          echo "Selection:"
+          set_flag gateway     "$CHG_GATEWAY"
+          set_flag account     "$CHG_ACCOUNT"
+          set_flag file_server "$CHG_FILE_SERVER"
+          set_flag frontend    "$CHG_FRONTEND"
 
       # ---------- Maven ----------
       - name: Build JARs
@@ -93,6 +142,9 @@ jobs:
       - name: Build frontend
         if: steps.meta.outputs.do_frontend == '1'
         working-directory: misu-file-server-ui
+        env:
+          # 复用 hostPath /mnt/misu/ci（已经挂载为 ci-shared），跨 pod 持久化 npm 包缓存
+          NPM_CONFIG_CACHE: /mnt/misu/ci/npm-cache
         run: |
           npm ci --registry=https://registry.npmjs.org/ --ignore-scripts
           npm run build
