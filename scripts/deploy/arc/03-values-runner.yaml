@@ -41,7 +41,16 @@ template:
       - name: runner
         image: 10.8.0.26:30500/misuaa/misu-ci-runner:latest
         imagePullPolicy: Always
-        command: ["/home/runner/run.sh"]
+        # 临时：包一层 tee 把 stderr+stdout 抓到 hostPath，方便 pod 死后 misu-maco 上读
+        # 跑通后可以改回 ["/home/runner/run.sh"]
+        command:
+          - sh
+          - -c
+          - |
+            mkdir -p /mnt/misu/ci/runner-debug
+            ts=$(date +%s)
+            /home/runner/run.sh 2>&1 | tee /mnt/misu/ci/runner-debug/runner-$ts.log
+            echo "exit_code=$?" >> /mnt/misu/ci/runner-debug/runner-$ts.log
         env:
           # actions-runner agent 默认拒绝以 root 启动，必须显式 opt-in
           - name: RUNNER_ALLOW_RUNASROOT
@@ -49,6 +58,14 @@ template:
           # 让 git checkout 不要 LFS / 提示
           - name: GIT_TERMINAL_PROMPT
             value: "0"
+          # ⚠️ root 运行时 HOME 默认变 /root；同时 actions-runner agent 给每个
+          # step 用临时 HOME。所以 HOME 这个 env 不够，mvn 还是会找 /root/.m2 或临时目录。
+          - name: HOME
+            value: /home/runner
+          # MAVEN_OPTS 走 JVM 系统属性，**强制锁** mvn 用 PVC 挂载的 repo，
+          # 任何 HOME 改写都干涉不到。bb-bot-sdk 自定义版本在 PVC 上，必须用这条。
+          - name: MAVEN_OPTS
+            value: "-Dmaven.repo.local=/home/runner/.m2/repository"
         resources:
           requests:
             cpu: "500m"

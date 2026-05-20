@@ -45,6 +45,14 @@ RUN curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kub
 
 # Kaniko：从官方镜像把 /kaniko 整个目录搬过来（包含 executor + 依赖 lib）
 COPY --from=gcr.io/kaniko-project/executor:v1.23.2 /kaniko /kaniko
+
+# 用 wrapper 替换 /kaniko/executor —— Kaniko 1.23.2 跟 Alpine 3.20 base 不兼容，
+# wrapper 会改写 Dockerfile 让它 FROM 预装字体的 jdk-fonts，并去掉 apk add 步。
+# 详见 kaniko-wrapper.sh 头注释。
+COPY kaniko-wrapper.sh /tmp/kaniko-wrapper.sh
+RUN mv /kaniko/executor /kaniko/executor-real \
+ && install -m 0755 /tmp/kaniko-wrapper.sh /kaniko/executor \
+ && rm -f /tmp/kaniko-wrapper.sh
 ENV PATH="/kaniko:${PATH}"
 # Kaniko 需要的环境
 ENV DOCKER_CONFIG=/kaniko/.docker
