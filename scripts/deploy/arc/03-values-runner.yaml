@@ -43,28 +43,11 @@ template:
           # 让 git checkout 不要 LFS / 提示
           - name: GIT_TERMINAL_PROMPT
             value: "0"
-          # ---- clash 代理 ------------------------------------------------------
-          # 走宿主机（misu-maco）clash 的 HTTP 端口 7890。通过 downward API 拿到
-          # 真实节点 IP，避免在 pod 里写死 10.8.0.26 —— 万一未来 runner 调度到别的
-          # 节点也能跑（前提那台节点也有 clash 起在 7890）。
-          - name: NODE_IP
-            valueFrom:
-              fieldRef:
-                fieldPath: status.hostIP
-          - name: HTTP_PROXY
-            value: "http://$(NODE_IP):7890"
-          - name: HTTPS_PROXY
-            value: "http://$(NODE_IP):7890"
-          - name: http_proxy
-            value: "http://$(NODE_IP):7890"
-          - name: https_proxy
-            value: "http://$(NODE_IP):7890"
-          # 集群内 / 内网 / 私有 registry 必须绕过代理。CIDR 部分 curl/wget 认，
-          # 但 Java/Go 不一定全认，所以也列出具体 IP 和后缀。
-          - name: NO_PROXY
-            value: "localhost,127.0.0.1,10.8.0.1,10.8.0.22,10.8.0.26,192.168.50.227,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.cluster.local,.svc,.local,kubernetes.default,kubernetes.default.svc"
-          - name: no_proxy
-            value: "localhost,127.0.0.1,10.8.0.1,10.8.0.22,10.8.0.26,192.168.50.227,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.cluster.local,.svc,.local,kubernetes.default,kubernetes.default.svc"
+          # ⚠️ 不显式设 HTTP(S)_PROXY ——
+          # misu-maco 节点的 clash 是 TUN/TPROXY 透明代理模式，pod 出向流量自动
+          # 走 clash。再在 pod 里设 HTTPS_PROXY 等于双重代理，runner agent 跟
+          # GitHub broker 的长连接会被掐断（连上几秒后 container exit, 5 次后标 Failed）。
+          # 验证：misu-maco pod 直连 maven/npm/ghcr/github.com 全 200/301。
         resources:
           requests:
             cpu: "500m"

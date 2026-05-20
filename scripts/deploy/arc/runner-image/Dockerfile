@@ -3,7 +3,11 @@
 #
 # Build & push 命令见 ./README.md。每当 actions-runner 升级或想换底层工具版本
 # 时重建一次即可，平时不动。
-FROM ghcr.io/actions/actions-runner:2.319.1
+#
+# ⚠️ runner 版本必须保持较新：GitHub 会定期 deprecate 旧版本，被 deprecate 的
+# runner agent 一连上 broker 就拒绝（Forbidden... is deprecated and cannot
+# receive messages），pod 立即 exit。用 :latest 让每次 rebuild 都拿最新版。
+FROM ghcr.io/actions/actions-runner:latest
 
 USER root
 
