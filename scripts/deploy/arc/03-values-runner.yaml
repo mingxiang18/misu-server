@@ -71,5 +71,14 @@ template:
         hostPath:
           path: /mnt/misu/ci
           type: DirectoryOrCreate
+      # workspace 持久化到 hostPath：第一次 run 之后，_work 里会有
+      #   _work/_actions/   <- 缓存 actions/checkout、dorny/paths-filter 解压结果
+      #   _work/_tool/      <- 工具链缓存（setup-java 之类的）
+      #   _work/_temp/      <- 临时文件
+      #   _work/misu-server/misu-server/   <- 仓库 working tree + .git
+      # 下一次 actions/checkout@v4 看到 .git 存在，做 git fetch（不是 clone），快得多。
+      # 注意：maxRunners=1 保证不会有并发 runner 同时改 workspace。
       - name: workspace
-        emptyDir: {}
+        hostPath:
+          path: /mnt/misu/ci/runner-work
+          type: Directory
