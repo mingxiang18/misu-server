@@ -1,0 +1,45 @@
+# Maven 仓库缓存（hostPath 在 misu-maco 节点上）
+# 集群无 StorageClass，所以全部用 hostPath PV + 严格 nodeAffinity 锁定到 misu-maco。
+# 装之前在 misu-maco 上执行（README §2）：
+#   mkdir -p /mnt/misu/ci/maven-repo /mnt/misu/ci/html-backups
+#   chown -R 1001:1001 /mnt/misu/ci /mnt/misu/misu-server/html
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: misu-ci-maven-repo
+  labels:
+    app: misu-ci
+    purpose: maven-repo
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /mnt/misu/ci/maven-repo
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [misu-maco]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: misu-ci-maven-repo
+  namespace: arc-runners
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: ""
+  selector:
+    matchLabels:
+      app: misu-ci
+      purpose: maven-repo

@@ -47,3 +47,7 @@ electron-dist/
 # AI workflow scaffolding & Claude Code 本地缓存（不入库）
 /.ai-workflow/
 /.claude/
+.claude/settings.local.json
+
+# ARC GitHub App 凭据（含私钥），永远不入库
+/scripts/deploy/arc/02-secret.yaml

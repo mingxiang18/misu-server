@@ -1,0 +1,21 @@
+# Helm values for chart: gha-runner-scale-set-controller
+#
+# 把 controller pod 钉在 misu-maco —— 这样：
+#  1) master 上不会跑额外的 workload pod
+#  2) controller 拉镜像走 misu-maco 上的 containerd（containerd 已经配过 clash 代理）
+#  3) controller 反复 watch API 也只是 misu-maco → master 的 6443 流量，
+#     不会有 master 自己 watch 自己的 CPU 损耗
+nodeSelector:
+  kubernetes.io/hostname: misu-maco
+
+# controller 资源限制 —— 别让它把 misu-maco 也压爆
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 1
+    memory: 512Mi
+
+# 1 个 controller 就够（HA 对家用集群没意义）
+replicaCount: 1

@@ -1,0 +1,201 @@
+name: release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "release targets (comma sep): gateway,account,file_server,frontend,all"
+        default: "all"
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: 10.8.0.26:30500
+  NAMESPACE: misu-server
+  ROLLOUT_TIMEOUT: 5m
+
+jobs:
+  release:
+    runs-on: misu-runners
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # 计算 tag + 哪些服务需要发布
+      # 注意: GitHub Actions 表达式不允许 output 名带 '-'，所以一律用下划线（file_server）。
+      - name: Compute tag & target selection
+        id: meta
+        run: |
+          TAG=$(git rev-parse --short HEAD)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          SEL="${{ github.event.inputs.services || 'all' }}"
+          for s in gateway account file_server frontend; do
+            if [[ "$SEL" == "all" || ",$SEL," == *",$s,"* ]]; then
+              echo "do_$s=1" >> "$GITHUB_OUTPUT"
+            else
+              echo "do_$s=0" >> "$GITHUB_OUTPUT"
+            fi
+          done
+          echo "Tag: $TAG  selection: $SEL"
+
+      # ---------- Maven ----------
+      # Maven 不全认 HTTP_PROXY env，强行用 -Dhttp.proxy* 系统属性。从 HTTP_PROXY 切出 host/port。
+      - name: Build JARs
+        if: steps.meta.outputs.do_gateway == '1' || steps.meta.outputs.do_account == '1' || steps.meta.outputs.do_file_server == '1'
+        run: |
+          MODULES=""
+          [[ "${{ steps.meta.outputs.do_gateway }}" == "1" ]]      && MODULES="$MODULES,misu-gateway"
+          [[ "${{ steps.meta.outputs.do_account }}" == "1" ]]      && MODULES="$MODULES,misu-account/misu-account-biz"
+          [[ "${{ steps.meta.outputs.do_file_server }}" == "1" ]]  && MODULES="$MODULES,misu-file-server/misu-file-server-biz"
+          MODULES="${MODULES#,}"
+          echo "Maven modules: $MODULES"
+          # 从 HTTP_PROXY=http://host:port 提取 host / port
+          PX="${HTTP_PROXY#http://}"; PROXY_HOST="${PX%%:*}"; PROXY_PORT="${PX##*:}"
+          # nonProxyHosts: Maven 这格式用 | 分隔，且支持 * 前缀通配
+          NPH="localhost|127.0.0.1|10.8.0.*|192.168.50.*|*.cluster.local|*.svc"
+          mvn -B clean package -pl "$MODULES" -am -DskipTests -P prod \
+            -Dhttp.proxyHost="$PROXY_HOST"  -Dhttp.proxyPort="$PROXY_PORT" \
+            -Dhttps.proxyHost="$PROXY_HOST" -Dhttps.proxyPort="$PROXY_PORT" \
+            -Dhttp.nonProxyHosts="$NPH"
+
+      # ---------- Kaniko ----------
+      - name: Build & push misu-gateway image
+        if: steps.meta.outputs.do_gateway == '1'
+        run: |
+          /kaniko/executor \
+            --context="$(pwd)/misu-gateway" \
+            --dockerfile="$(pwd)/misu-gateway/DockerfileLocal" \
+            --destination="${REGISTRY}/misuaa/misu-gateway:${{ steps.meta.outputs.tag }}" \
+            --destination="${REGISTRY}/misuaa/misu-gateway:latest" \
+            --insecure --skip-tls-verify --insecure-pull --skip-tls-verify-pull \
+            --snapshot-mode=redo --use-new-run
+
+      - name: Build & push misu-account image
+        if: steps.meta.outputs.do_account == '1'
+        run: |
+          /kaniko/executor \
+            --context="$(pwd)/misu-account/misu-account-biz" \
+            --dockerfile="$(pwd)/misu-account/misu-account-biz/DockerfileLocal" \
+            --destination="${REGISTRY}/misuaa/misu-account:${{ steps.meta.outputs.tag }}" \
+            --destination="${REGISTRY}/misuaa/misu-account:latest" \
+            --insecure --skip-tls-verify --insecure-pull --skip-tls-verify-pull \
+            --snapshot-mode=redo --use-new-run
+
+      - name: Build & push misu-file-server image
+        if: steps.meta.outputs.do_file_server == '1'
+        run: |
+          /kaniko/executor \
+            --context="$(pwd)/misu-file-server/misu-file-server-biz" \
+            --dockerfile="$(pwd)/misu-file-server/misu-file-server-biz/DockerfileLocal" \
+            --destination="${REGISTRY}/misuaa/misu-file-server:${{ steps.meta.outputs.tag }}" \
+            --destination="${REGISTRY}/misuaa/misu-file-server:latest" \
+            --insecure --skip-tls-verify --insecure-pull --skip-tls-verify-pull \
+            --snapshot-mode=redo --use-new-run
+
+      # ---------- Frontend ----------
+      - name: Build frontend
+        if: steps.meta.outputs.do_frontend == '1'
+        working-directory: misu-file-server-ui
+        run: |
+          # 集群内 npm 必须走 clash（pod env 已有 HTTP_PROXY），同时显式传一遍兜底；
+          # 不要再像本地 CLAUDE.md 那样 --proxy=null
+          npm ci --registry=https://registry.npmjs.org/ --ignore-scripts \
+            --proxy="$HTTP_PROXY" --https-proxy="$HTTPS_PROXY"
+          npm run build
+          test -d dist || { echo "::error::frontend build produced no dist/"; exit 1; }
+
+      - name: Snapshot current nginx html (rollback safety)
+        if: steps.meta.outputs.do_frontend == '1'
+        run: |
+          BACKUP=/mnt/misu/ci/html-backups/${{ steps.meta.outputs.tag }}-$(date -u +%Y%m%dT%H%M%SZ)
+          mkdir -p "$BACKUP"
+          if [ -d /mnt/misu/misu-server/html ]; then
+            rsync -a /mnt/misu/misu-server/html/ "$BACKUP/" 2>/dev/null || true
+          fi
+          echo "HTML_BACKUP=$BACKUP" >> "$GITHUB_ENV"
+          # 保留最近 20 份
+          ls -1dt /mnt/misu/ci/html-backups/* 2>/dev/null | tail -n +21 | xargs -r rm -rf
+
+      - name: Sync frontend → nginx html dir
+        if: steps.meta.outputs.do_frontend == '1'
+        run: |
+          rsync -a --delete --delete-excluded --exclude='.DS_Store' \
+            misu-file-server-ui/dist/ /mnt/misu/misu-server/html/
+
+      # ---------- Deploy ----------
+      # 用 envsubst 渲染 scripts/deploy/k8s/misu-server/*.yaml 后 kubectl apply,
+      # 这样 Deployment YAML 里的 resources / probes / env 改动也会随 push 生效，
+      # 不只是镜像 tag。和 release.sh 行为对齐。
+      - name: Apply manifests & roll out
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          DO_GATEWAY: ${{ steps.meta.outputs.do_gateway }}
+          DO_ACCOUNT: ${{ steps.meta.outputs.do_account }}
+          DO_FILE_SERVER: ${{ steps.meta.outputs.do_file_server }}
+          DO_FRONTEND: ${{ steps.meta.outputs.do_frontend }}
+          REGISTRY_PULL: ${{ env.REGISTRY }}
+        run: |
+          export IMAGE_TAG="$TAG"
+          TMP=$(mktemp -d)
+          apply_one() {
+            local flag="$1" name="$2"
+            [[ "$flag" != "1" ]] && return 0
+            envsubst '${REGISTRY_PULL} ${IMAGE_TAG}' \
+              < "scripts/deploy/k8s/misu-server/${name}.yaml" \
+              > "${TMP}/${name}.yaml"
+            kubectl apply -f "${TMP}/${name}.yaml"
+          }
+          apply_one "$DO_GATEWAY"     misu-gateway
+          apply_one "$DO_ACCOUNT"     misu-account
+          apply_one "$DO_FILE_SERVER" misu-file-server
+          # 静态文件已替换，重启 nginx pod 清掉内部缓存
+          [[ "$DO_FRONTEND" == "1" ]] && kubectl -n "$NAMESPACE" rollout restart deploy/misu-server-nginx
+          true
+
+      - name: Wait for rollouts
+        id: wait
+        env:
+          DO_GATEWAY: ${{ steps.meta.outputs.do_gateway }}
+          DO_ACCOUNT: ${{ steps.meta.outputs.do_account }}
+          DO_FILE_SERVER: ${{ steps.meta.outputs.do_file_server }}
+          DO_FRONTEND: ${{ steps.meta.outputs.do_frontend }}
+        run: |
+          set +e
+          FAIL=""
+          check() {
+            local flag="$1" dep="$2"
+            [[ "$flag" != "1" ]] && return 0
+            echo "::group::rollout status $dep"
+            kubectl -n "$NAMESPACE" rollout status "deploy/$dep" --timeout="$ROLLOUT_TIMEOUT"
+            local rc=$?
+            echo "::endgroup::"
+            [[ $rc -ne 0 ]] && FAIL="$FAIL $dep"
+          }
+          check "$DO_GATEWAY"     misu-gateway
+          check "$DO_ACCOUNT"     misu-account
+          check "$DO_FILE_SERVER" misu-file-server
+          check "$DO_FRONTEND"    misu-server-nginx
+          if [[ -n "$FAIL" ]]; then
+            echo "failed_deps=$FAIL" >> "$GITHUB_OUTPUT"
+            echo "::error::rollout failed for:$FAIL"
+            exit 1
+          fi
+
+      # ---------- Rollback on failure ----------
+      - name: Roll back on failure
+        if: failure() && steps.wait.outputs.failed_deps != ''
+        run: |
+          for d in ${{ steps.wait.outputs.failed_deps }}; do
+            echo "Rolling back $d"
+            kubectl -n "$NAMESPACE" rollout undo "deploy/$d" || true
+          done
+          # 前端静态文件回滚
+          if [[ -n "${HTML_BACKUP:-}" && -d "$HTML_BACKUP" ]]; then
+            echo "Restoring html from $HTML_BACKUP"
+            rsync -a --delete "$HTML_BACKUP/" /mnt/misu/misu-server/html/
+          fi

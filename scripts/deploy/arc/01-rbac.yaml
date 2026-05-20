@@ -1,0 +1,44 @@
+# ServiceAccount + RBAC：让 runner pod 在 misu-server ns 里能 set image / rollout restart / undo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: misu-deployer
+  namespace: arc-runners
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: misu-deployer
+  namespace: misu-server
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    # create: 万一 deployment 被删了，kubectl apply 能重建
+    # patch/update: 日常 apply
+    verbs: ["get", "list", "watch", "create", "patch", "update"]
+  # rollout undo 需要操作 replicasets
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch", "patch", "update", "delete"]
+  # 排错用：能看 pod 和 log
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: misu-deployer
+  namespace: misu-server
+subjects:
+  - kind: ServiceAccount
+    name: misu-deployer
+    namespace: arc-runners
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: misu-deployer

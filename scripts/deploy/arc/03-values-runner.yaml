@@ -1,0 +1,97 @@
+# Helm values for chart: gha-runner-scale-set
+# 安装命令见 ./README.md §5。
+githubConfigUrl: "https://github.com/mingxiang18/misu-server"
+githubConfigSecret: gh-app-creds
+
+# 一次只允许一个 build，避免和 prod pod 抢资源
+minRunners: 0
+maxRunners: 1
+
+# 这个名字就是 workflow 里 `runs-on:` 写的值
+runnerScaleSetName: misu-runners
+
+# 不用 dind / kubernetes 容器模式 —— 我们用自建镜像，工具全在里面
+containerMode:
+  type: ""
+
+# listener pod 也钉在 misu-maco —— 它跟 controller 同款镜像
+# (ghcr.io/actions/gha-runner-scale-set-controller:0.9.3)，
+# misu-maco 上 containerd 有代理而且镜像已经缓存了
+listenerTemplate:
+  spec:
+    nodeSelector:
+      kubernetes.io/hostname: misu-maco
+    containers:
+      - name: listener
+
+# runner pod 模板：钉在 misu-maco 节点 + 挂 maven cache + 挂 nginx html dir
+template:
+  spec:
+    serviceAccountName: misu-deployer
+    nodeSelector:
+      kubernetes.io/hostname: misu-maco
+    securityContext:
+      # 把挂载的 hostPath 设成 group 1001 可写。runner 容器以 uid=1001 跑，
+      # 在 misu-maco 上预先 chown -R 1001:1001 这些目录（README §2）。
+      fsGroup: 1001
+    containers:
+      - name: runner
+        image: 10.8.0.26:30500/misuaa/misu-ci-runner:latest
+        imagePullPolicy: Always
+        command: ["/home/runner/run.sh"]
+        env:
+          # 让 git checkout 不要 LFS / 提示
+          - name: GIT_TERMINAL_PROMPT
+            value: "0"
+          # ---- clash 代理 ------------------------------------------------------
+          # 走宿主机（misu-maco）clash 的 HTTP 端口 7890。通过 downward API 拿到
+          # 真实节点 IP，避免在 pod 里写死 10.8.0.26 —— 万一未来 runner 调度到别的
+          # 节点也能跑（前提那台节点也有 clash 起在 7890）。
+          - name: NODE_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.hostIP
+          - name: HTTP_PROXY
+            value: "http://$(NODE_IP):7890"
+          - name: HTTPS_PROXY
+            value: "http://$(NODE_IP):7890"
+          - name: http_proxy
+            value: "http://$(NODE_IP):7890"
+          - name: https_proxy
+            value: "http://$(NODE_IP):7890"
+          # 集群内 / 内网 / 私有 registry 必须绕过代理。CIDR 部分 curl/wget 认，
+          # 但 Java/Go 不一定全认，所以也列出具体 IP 和后缀。
+          - name: NO_PROXY
+            value: "localhost,127.0.0.1,10.8.0.1,10.8.0.22,10.8.0.26,192.168.50.227,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.cluster.local,.svc,.local,kubernetes.default,kubernetes.default.svc"
+          - name: no_proxy
+            value: "localhost,127.0.0.1,10.8.0.1,10.8.0.22,10.8.0.26,192.168.50.227,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.cluster.local,.svc,.local,kubernetes.default,kubernetes.default.svc"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "4"
+            memory: "4Gi"
+        volumeMounts:
+          - name: maven-repo
+            mountPath: /home/runner/.m2/repository
+          - name: ui-html
+            mountPath: /mnt/misu/misu-server/html
+          - name: ci-shared
+            mountPath: /mnt/misu/ci
+          - name: workspace
+            mountPath: /home/runner/_work
+    volumes:
+      - name: maven-repo
+        persistentVolumeClaim:
+          claimName: misu-ci-maven-repo
+      - name: ui-html
+        hostPath:
+          path: /mnt/misu/misu-server/html
+          type: Directory
+      - name: ci-shared
+        hostPath:
+          path: /mnt/misu/ci
+          type: DirectoryOrCreate
+      - name: workspace
+        emptyDir: {}
