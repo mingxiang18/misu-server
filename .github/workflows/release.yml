@@ -44,7 +44,6 @@ jobs:
           echo "Tag: $TAG  selection: $SEL"
 
       # ---------- Maven ----------
-      # misu-maco clash 是透明代理，mvn 直连 maven central 即可
       - name: Build JARs
         if: steps.meta.outputs.do_gateway == '1' || steps.meta.outputs.do_account == '1' || steps.meta.outputs.do_file_server == '1'
         run: |
@@ -95,9 +94,7 @@ jobs:
         if: steps.meta.outputs.do_frontend == '1'
         working-directory: misu-file-server-ui
         run: |
-          # 透明代理已生效，直连 npm 即可
-          npm ci --registry=https://registry.npmjs.org/ --ignore-scripts \
-            --proxy=null --https-proxy=null
+          npm ci --registry=https://registry.npmjs.org/ --ignore-scripts
           npm run build
           test -d dist || { echo "::error::frontend build produced no dist/"; exit 1; }
 

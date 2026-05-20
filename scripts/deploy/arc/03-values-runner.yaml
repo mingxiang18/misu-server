@@ -43,11 +43,6 @@ template:
           # 让 git checkout 不要 LFS / 提示
           - name: GIT_TERMINAL_PROMPT
             value: "0"
-          # ⚠️ 不显式设 HTTP(S)_PROXY ——
-          # misu-maco 节点的 clash 是 TUN/TPROXY 透明代理模式，pod 出向流量自动
-          # 走 clash。再在 pod 里设 HTTPS_PROXY 等于双重代理，runner agent 跟
-          # GitHub broker 的长连接会被掐断（连上几秒后 container exit, 5 次后标 Failed）。
-          # 验证：misu-maco pod 直连 maven/npm/ghcr/github.com 全 200/301。
         resources:
           requests:
             cpu: "500m"
