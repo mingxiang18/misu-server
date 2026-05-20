@@ -31,8 +31,11 @@ template:
     nodeSelector:
       kubernetes.io/hostname: misu-maco
     securityContext:
-      # 把挂载的 hostPath 设成 group 1001 可写。runner 容器以 uid=1001 跑，
-      # 在 misu-maco 上预先 chown -R 1001:1001 这些目录（README §2）。
+      # runner 以 root 跑：Kaniko 解压 base image rootfs 时要 chown /bin 等系统
+      # 目录，必须 uid 0。k8s pod 的 root 是 namespaced，不等于宿主 root，加上
+      # 没 privileged 没 hostNetwork，对宿主依然隔离。fsGroup 1001 保留是为了
+      # 让以前 chown 1001:1001 的 hostPath 文件被新建对象继续以 gid 1001 共存。
+      runAsUser: 0
       fsGroup: 1001
     containers:
       - name: runner
@@ -40,6 +43,9 @@ template:
         imagePullPolicy: Always
         command: ["/home/runner/run.sh"]
         env:
+          # actions-runner agent 默认拒绝以 root 启动，必须显式 opt-in
+          - name: RUNNER_ALLOW_RUNASROOT
+            value: "1"
           # 让 git checkout 不要 LFS / 提示
           - name: GIT_TERMINAL_PROMPT
             value: "0"
