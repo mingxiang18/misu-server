@@ -12,7 +12,9 @@ on:
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  # 新 dispatch / push 自动 cancel 同分支前一个还没结束的 run。
+  # 避免：上一个失败 run 在 GitHub 侧没及时收尾，新 run 卡 queue 不跑。
+  cancel-in-progress: true
 
 env:
   REGISTRY: 10.8.0.26:30500
