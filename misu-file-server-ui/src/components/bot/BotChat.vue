@@ -27,6 +27,10 @@ const connStatus = ref('connecting')
 // 是否已通过服务端认证（收到 auth_ok 后才为 true）。
 // 只有 OPEN 且 authed 才能真正发消息——否则未注册连接上的消息会被服务端当成 auth 包而踢掉。
 let authed = false
+// auth_ok 兜底定时器：发出 auth 后若 N 毫秒内既没收到 auth_ok 也没被踢（auth_error/close），
+// 就乐观地认为已认证。兼容不回 auth_ok 的旧版服务端，避免前后端版本错配时永远卡在「正在连接」。
+let authFallbackTimer = null
+const AUTH_FALLBACK_MS = 2500
 // 待发队列：socket 未就绪/未认证时消息先入队，auth_ok 后统一 flush
 const pendingQueue = []
 // 已发消息留底（id → 原始 message），用于 bot_offline 时按 id 自动重发
@@ -262,6 +266,22 @@ const reconnectAttempts = ref(0)
 const reconnectAt = ref(null) // 当前 setTimeout id（非 0 表示退避中）
 let intentionalClose = false
 
+const clearAuthFallback = () => {
+  if (authFallbackTimer) {
+    clearTimeout(authFallbackTimer)
+    authFallbackTimer = null
+  }
+}
+
+// 标记已就绪：清掉兜底定时器、状态置 open、把待发队列发出去。
+// 由 auth_ok、收到任意真实回复、或兜底定时器三条路径触发（幂等）。
+const markAuthed = () => {
+  clearAuthFallback()
+  authed = true
+  connStatus.value = 'open'
+  flushQueue()
+}
+
 const initSocket = () => {
   intentionalClose = false
   if (connStatus.value !== 'open') connStatus.value = 'connecting'
@@ -277,6 +297,11 @@ const initSocket = () => {
       getBotAccessToken().then((response) => {
         botAccessToken.value = response.data
         socket.send(JSON.stringify({ type: 'auth', token: botAccessToken.value }))
+        // 兜底：旧版服务端不回 auth_ok，等不到就乐观放行（此时连接早已注册，补发业务消息是安全的）
+        clearAuthFallback()
+        authFallbackTimer = setTimeout(() => {
+          if (socket && socket.readyState === WebSocket.OPEN && !authed) markAuthed()
+        }, AUTH_FALLBACK_MS)
       })
     }
     socket.onmessage = handleIncomingMessage
@@ -285,6 +310,7 @@ const initSocket = () => {
       logger.info('bot WebSocket closed')
       socket = null
       authed = false
+      clearAuthFallback()
       if (!intentionalClose) {
         connStatus.value = 'connecting'
         scheduleReconnect()
@@ -327,11 +353,10 @@ const handleIncomingMessage = (event) => {
   // 控制消息（非聊天内容）：认证 ack / 认证失败 / bb 上游离线
   if (payload.type) {
     if (payload.type === 'auth_ok') {
-      authed = true
-      connStatus.value = 'open'
-      flushQueue()
+      markAuthed()
     } else if (payload.type === 'auth_error') {
       // 服务端会随即关闭连接，由 onclose 触发带新 token 的重连
+      clearAuthFallback()
       authed = false
     } else if (payload.type === 'bot_offline') {
       // bb 重新发布等导致上游短暂断开——几秒内自动恢复，按 id 自动重发该条
@@ -346,6 +371,9 @@ const handleIncomingMessage = (event) => {
     }
     return
   }
+
+  // 收到任意真实回复，说明连接已被服务端接受（兼容不回 auth_ok 的旧服务端）
+  if (!authed) markAuthed()
 
   // 真实回复到达：清掉该条的失败态/重试计数
   markDelivered(payload.receiveMessageId)
@@ -386,6 +414,7 @@ const handleIncomingMessage = (event) => {
 const closeSocket = () => {
   intentionalClose = true
   authed = false
+  clearAuthFallback()
   if (reconnectAt.value) {
     clearTimeout(reconnectAt.value)
     reconnectAt.value = null

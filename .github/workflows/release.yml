@@ -52,6 +52,7 @@ jobs:
               - 'scripts/deploy/k8s/misu-server/misu-account.yaml'
             file_server:
               - 'misu-file-server/**'
+              - 'misu-bot/**'
               - 'misu-framework/**'
               - 'misu-net/**'
               - 'pom.xml'
