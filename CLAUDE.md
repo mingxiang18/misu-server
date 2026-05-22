@@ -1,133 +1,94 @@
-# misu-server — project knowledge for Claude sessions
+# misu-server — hard rules
+## 拓扑 / 端口
 
-Auto-loaded into every session. Captures project-specific facts not derivable from `git log` or a 30-second tour. Generic workflow lessons live in the `ai-product-workflow` skill, not here.
+| 服务 | 端口 | context-path |
+|---|---|---|
+| `misu-gateway` | 30260 | — |
+| `misu-account` | 30261 | `/account` |
+| `misu-file-server-biz` | 30262 | `/fileServer` |
+| file-server actuator | 30362 | `/actuator` |
+| `misu-file-server-ui` (vite) | 5173 | — |
+| MySQL | 3316 | — |
+| Nacos | 8848 | `nacos/nacos` |
 
-## 1. What this repo is
+模块：`misu-framework`（含 `misu-security` JWT 过滤链）、`misu-net`（Nacos/Cloud 公共配置）、`misu-bot`、`misu-web`。
 
-A Spring Cloud (Spring Boot 3.2.5) microservice cluster plus a Vue 3 / Element Plus / Vite frontend. Modules:
+## 本机工具链（per-machine，禁止改进脚本）
 
-| Module | Role |
-|---|---|
-| `misu-gateway` | Spring Cloud Gateway, entry point on **30260** |
-| `misu-account` | auth + user, on **30261**, context-path `/account` |
-| `misu-file-server/misu-file-server-biz` | private cloud-drive backend, on **30262**, context-path `/fileServer` |
-| `misu-framework` | shared starters (security, redis, etc.) — `misu-security` is the JWT filter chain |
-| `misu-net` | Nacos / Cloud common config |
-| `misu-bot`, `misu-web` | auxiliary services |
-| `misu-file-server-ui` | Vite 5 + Vue 3 SPA, dev server on **5173** |
+- `JAVA_HOME=$(/usr/libexec/java_home -v 17)`
+- mvn：`/Users/renyuming/Documents/develop/maven/apache-maven-3.6.3/bin/mvn`
+- mvn 本地仓库：`-Dmaven.repo.local=/Users/renyuming/Documents/develop/maven/repository`
 
-Other ports: MySQL **3316**, Nacos console **8848** (`nacos`/`nacos`), file-server actuator **30362** (see §5).
-
-## 2. scripts/ — local dev, build, release
-
-All tooling lives under `scripts/`:
-
-| 路径 | 作用 |
-|---|---|
-| `scripts/dev/dev.sh` | 本地环境编排：`up` / `down` / `status` / `restart <svc>` / `logs <svc>` / `build` / `seed-nacos` / `seed-sql` / `nuke` |
-| `scripts/dev/` | `docker-compose.local.yml`、`nacos/*.yml`、`lib/`、`dev-env-README.md`（详细指南） |
-| `scripts/build/` | `build-push-*.sh`（公有 Docker Hub）、`build-local-push-*.sh`（私有 registry）、`build-push-ffmpeg-worker.sh` |
-| `scripts/deploy/` | `release.sh` 一键发布 + `k8s/misu-server/*.yaml` 清单 + `README.md` |
-
-```bash
-scripts/dev/dev.sh up          # docker 中间件 + 3 个 Java 服务 + vite
-scripts/dev/dev.sh status
-scripts/dev/dev.sh restart file-server
-```
-
-**Java + Maven 前置：**
-- **JAVA_HOME 指向 JDK 17**：`export JAVA_HOME=$(/usr/libexec/java_home -v 17)`
-- **`mvn` 不在 PATH 上**：用 `/Users/renyuming/Documents/develop/maven/apache-maven-3.6.3/bin/mvn`（或 `export MVN=…`，`dev.sh` 认）。
-- **Maven 本地仓库是自定义路径** `/Users/renyuming/Documents/develop/maven/repository` —— 直接调 `mvn` 时务必带 `-Dmaven.repo.local=…`。
-
-单模块编译示例：
+单模块编译模板：
 ```bash
 /Users/renyuming/Documents/develop/maven/apache-maven-3.6.3/bin/mvn \
   -pl misu-file-server/misu-file-server-biz -am compile -DskipTests \
   -Dmaven.repo.local=/Users/renyuming/Documents/develop/maven/repository
 ```
 
-**发布**：合并到 master 后，在仓库根执行 `scripts/deploy/release.sh` —— 本地驱动，构建镜像→推私有 registry→SSH 部署到 k8s 集群 + 覆盖前端静态文件，失败自动回滚。支持按需发布：`release.sh misu-gateway`、`release.sh frontend`、`release.sh --dry-run`。配置集中在 `scripts/deploy/deploy.conf`（含 SSH key / IP，已 gitignore）。细节见 `scripts/deploy/README.md`。
+## Dev / Release
 
-## 3. Frontend — npm proxy workaround
+- 本地起停：`scripts/dev/dev.sh {up|down|status|restart <svc>|logs <svc>|build|seed-nacos|seed-sql|nuke}`
+- 重启 `mw` 会重新 seed `scripts/dev/nacos/*.yml`
+- 本地手动发布（兜底）：`scripts/deploy/release.sh`（本地驱动 → 推私有 registry → SSH 部署，失败自动回滚）。配置 `scripts/deploy/deploy.conf`（gitignored）
 
-The user's `~/.npmrc` has `proxy=http://127.0.0.1:7890` which is frequently **offline** — `npm install` will hang. Always run npm with proxy disabled and registry pinned:
+## ⚠️ 发布 = push master 自动触发（ARC self-hosted runner）
 
-```bash
-npm install --proxy=null --https-proxy=null \
-  --registry=https://registry.npmjs.org/ --ignore-scripts
+**merge / push 到 master 会自动构建并部署到生产**，没有手动步骤。改任何代码前先想清楚这条链路：
+
+```
+push master → GitHub Actions(.github/workflows/release.yml) → 集群内 runner
+  → mvn package → Kaniko build & push 私有 registry → kubectl apply + rollout
 ```
 
-`git` / `curl` use a different proxy (`http://127.0.0.1:7897`) which **is** typically up, so git clone works.
+- 按变更路径自动选服务：改 `misu-gateway/**` 只发 gateway；改 `misu-framework/** | misu-net/** | pom.xml`（共享）会发**全部 Java 服务**；改 `misu-file-server-ui/**` 发前端
+- 镜像 tag = git short SHA；`workflow_dispatch` 可手动选 `services=all/gateway/account/file_server/frontend`
+- ARC 配置在 `scripts/deploy/arc/`；机制 / 踩坑见那里的 README + 集群侧 `init/k8s/docs/ARC-CICD.md`
 
-When `npm install` is blocked by registry-mirror lag for a library, **vendor it**: `git clone --depth=1` into `misu-file-server-ui/src/lib/<lib>/` and import via relative path. Already done for `foliate-js` (used by `EpubViewer.vue`).
+### 改代码必须保证 merge 后 auto-deploy 仍能跑通（每条都踩过）
 
-## 4. Nacos-driven config — where to find what
+1. **加新服务/模块** → 必须同时：① workflow 的 paths-filter + Build JARs 的 `-pl` 列表加它 ② `scripts/deploy/k8s/misu-server/` 加它的 Deployment+Service YAML ③ 否则 push 后它不会被构建/部署
+2. **改 Deployment/Service YAML**（resources/probes/env/端口）→ 直接生效（workflow 用 `envsubst + kubectl apply`，不只是换镜像 tag）。但 YAML 写错会让 `kubectl apply` 失败 → 整个 release 失败
+3. **改 `DockerfileLocal`** → 必须保持 `FROM .../amazoncorretto:17-alpine3.20-jdk`（runner 的 kaniko-wrapper 靠它换 `-fonts` 变体 + 删 apk RUN；换别的 base 会触发 Alpine+kaniko 字体 bug）
+4. **引入新的自定义/私有 maven 依赖**（非 maven central 能拉的）→ 要么在同 reactor 内构建，要么先 push 到集群 maven cache PVC（否则 runner 上 mvn 拉不到，build 失败）
+5. **改 `scripts/deploy/k8s/misu-server/*.yaml` 的镜像行** → 保留 `${REGISTRY_PULL}/misuaa/<svc>:${IMAGE_TAG}` 占位（workflow envsubst 渲染）
+6. push 后去 GitHub Actions 看绿；失败时 workflow 会自动 `rollout undo`，但**别留着红的 release 不管**
 
-Each Spring service has a thin `application.yml` baked into the jar and a **richer override pulled from Nacos at boot**. For local dev:
+## Dev 测试账号（AI 自验证流程直接复用）
 
-- Baked-in: `misu-file-server/misu-file-server-biz/src/main/resources/application.yml`
-- Nacos override (loaded over the top): `scripts/dev/nacos/misu-file-server-local.yml`
+- `verifybot` / `Test1234!`，phone `13900000000`，非管理员
+- `POST /account/auth/login { userName, password, captchaCode:"dummy" }`
+- captcha 后端只校验非空（任意字符串都行），phone 必填且要过 `^(13|14|15|16|17|18|19)\d{9}$`
+- 注册需 `register.enable=true`（local nacos 已开，prod 没有）
+- 该号撞管理员接口会被合法拒绝 → HTTP 403，正好可验「真 403 路径」
 
-The Nacos config has `spring.jpa.properties.hibernate.hbm2ddl.auto=update` for local dev, so new entities and `@Index` declarations auto-apply on boot. For production, prefer migration DDL — see `docs/file-server-ux-mvp-ddl.md`.
+## 后端硬规则（每条都踩过坑）
 
-`scripts/dev/dev.sh restart mw` re-seeds the local Nacos with `scripts/dev/nacos/*.yml`.
+- `@RequestParam` **必须显式写名字**：`@RequestParam("openType") Integer openType`（编译不带 `-parameters`）
+- `LocalDateTime` 字段配 `@ColumnDefault("CURRENT_TIMESTAMP(6)")`，**不是** `"CURRENT_TIMESTAMP"`（Hibernate 生成 `datetime(6)`，MySQL 8 STRICT 会拒绝）
+- 复合索引按 `(open_type, user_id, parent_path, deleted)` 列序；`target_virtual_path varchar(1200)` **禁止**进复合索引（4× utf8mb4 超 3072 byte 限制）
+- 新实体加 `@Index` 时列顺序必须与现有约定对齐 —— `hbm2ddl=update` 只 ADD 不修
+- 新指向 `file_mapping` 的实体必须同时挂进 `purgeFromTrash`（手动彻底删除）和 `cleanDeletedFileMappings`（定时 GC），参考 `FileVersionService.purgeAllVersionsForMapping`
+- 权限拒绝抛 `HttpStatus.FORBIDDEN`（403），与 401（session 过期）严格分开 —— 前端 axios 上 401 刷 token、403 toast，**不能并支**
+- Actuator 必须在 30362 单独端口：`management.server.port: 30362` + `SecurityConfiguration.permitAll("/actuator/**")`（否则与 `misu-security` 的 `PermitAllUrlProperties` 冲突）
+- **新成体系功能（如 WebDAV）另起独立 service**，不要往 `FileServiceImpl` 加方法（已经很大）；复用就调它已 public 的方法（如 `accessUserFileAsUser`）
 
-## 5. file-server module — gotchas baked in from real incidents
+## 前端硬规则
 
-Each item below caused a real bug; treat them as defaults, not options.
+- **所有请求走 `misu-file-server-ui/src/api/request.js` 的 axios 实例**，包括二进制下载（`responseType:'arraybuffer'`）。禁止裸 `fetch()`（跨域 5173→30260 会掉 `Authorization`）
+- `useBreakpoint()`（`src/composables/useBreakpoint.js`）分桌面 / 移动 chrome
+- **任何 UI/UX 改动必须同时覆盖桌面 + 移动**（≤640px）。桌面 = SideNav 左 + PageHeader 顶，移动 = TabBar 底 + sheets。改完两个 viewport 都要在 Chrome MCP 截图验证（1280×800 + 414×800）。复用同一 ref/composable 让两端状态自动同步
+- `vite.config.js` 的 `build.target: 'esnext'` 禁改（foliate-js 顶层 await 必需）
 
-**5.1 `@ColumnDefault` precision must match Hibernate's generated type.**
-For `LocalDateTime` columns Hibernate generates `datetime(6)` — pair it with `@ColumnDefault("CURRENT_TIMESTAMP(6)")`, NOT `"CURRENT_TIMESTAMP"`. MySQL 8 STRICT mode rejects the mismatch with `Invalid default value for 'create_time'`. Canonical pattern: `FileShare`, `FileVersion`, `FileAuditLog`.
+## ffmpeg-worker 镜像跨架构
 
-**5.2 Actuator runs on a separate port (30362).**
-`management.server.port: 30362` avoids a `RequestMappingHandlerMapping` bean clash with `misu-security`'s `PermitAllUrlProperties` (the actuator-added `controllerEndpointHandlerMapping` makes that bean ambiguous on the same port). Also, `misu-security`'s `SecurityConfiguration` must `permitAll("/actuator/**")`, else endpoints 403 even on the management port.
+- worker 镜像必须 `linux/amd64`（节点 misu-maco 是 amd64）
+- 在 arm64 Mac 上用 `docker buildx --platform linux/amd64` **完整**构建 worker 会 QEMU 卡死（apk 装 140+ 多媒体包死锁）
+- **只改 shell 脚本 / worker-api.py** → 补丁镜像：`FROM <现有 amd64 镜像> + COPY --chmod=755 <新脚本>`，零 RUN 零模拟，秒级完成；之后 `release.sh ffmpeg-worker --skip-build`
+- 要重装 / 升级 apk 包 → 必须有原生 amd64 构建机（buildkit on 集群节点），arm64 Mac 上 `release.sh ffmpeg-worker`（不带 `--skip-build`）会卡死
 
-**5.3 `@RequestParam` needs explicit names.**
-The project compiles **without** `-parameters`, so Spring 6 throws `Name for argument of type [Integer] not specified`. Always write `@RequestParam("openType") Integer openType`.
+## Nacos 配置
 
-**5.4 Composite-index conventions on `file_mapping`.**
-Standard predicate is `(open_type, user_id, parent_path, deleted)` plus search-by-name and trash-GC variants; new related entities should match this column order. Don't put `target_virtual_path varchar(1200)` into a composite index — 4× utf8mb4 exceeds the 3072-byte InnoDB key limit.
-
-**5.5 GC + version-history must cascade.**
-When a new entity points at `file_mapping`, wire it into both `purgeFromTrash` (manual permanent delete) AND `cleanDeletedFileMappings` (scheduled GC). Existing pattern: `FileVersionService.purgeAllVersionsForMapping(mappingId)`.
-
-**5.6 Permission denial is 403, session expiry is 401.**
-Backend permission checks (`checkPublicWriteAuthority` etc.) throw `HttpStatus.FORBIDDEN`. The axios interceptor in `misu-file-server-ui/src/api/request.js` refreshes the token on 401, toasts on 403 — they must never collapse to one branch, or a non-admin touching a public dir wrongly gets booted to `/login`.
-
-## 6. Frontend conventions — what reuses what
-
-- `misu-file-server-ui/src/api/request.js` is the axios instance. **All API calls go through it**, including binary downloads (`responseType: 'arraybuffer'`). It auto-attaches `Authorization: Bearer <token>`. Naked `fetch()` drops auth cross-origin (5173 → 30260) → 401s (the trap the original `EpubViewer.vue` hit).
-- Route map: `misu-file-server-ui/src/router/index.js`.
-- `useBreakpoint()` (`src/composables/useBreakpoint.js`) gates mobile vs desktop UI.
-- Hash uploads: `FileUpload.vue` computes md5 via `spark-md5`, calls `POST /fileServer/file/checkUploadByHash`, falls back to chunked upload on miss.
-- EPUB rendering: vendored `src/lib/foliate-js/` (not `epubjs`). Three project-local patches that must survive any upstream re-sync:
-  - `view.js` — `loadText` CJK-character-count heuristic across UTF-8 / GB18030 / Big5 so legacy GBK EPUBs render without mojibake; shadowRoot mode `open` for HMR.
-  - `paginator.js` — shadowRoot mode `open` for HMR.
-  - `pdf.js:1` — `new URL(\`./vendor/pdfjs/\${path}\`, import.meta.url)` (leading `./` added; Vite 5 rejects the unanchored glob without it).
-- `vite.config.js` MUST keep `build.target: 'esnext'` — foliate-js uses top-level await, forbidden by Vite's default ES2020 preset.
-
-## 7. Audit log + metrics infra
-
-- `@Audited(action = AuditAction.X, target = "#filePath", openType = "#openType")`, wired by `FileAuditAspect` (Spring AOP): persists rows to `file_audit_log` AND records a Micrometer `Timer` `misu.file.audit.<action>` with `outcome` + `openType` tags. Exposed via `/actuator/prometheus` on **30362**.
-- Whole subsystem: `misu-file-server-biz/src/main/java/com/misu/fileServer/audit/`.
-
-## 8. Where to look first
-
-| Question | File |
-|---|---|
-| login / token refresh | `misu-framework/misu-security/.../JwtAuthenticationFilter.java`, `misu-account/.../AccountController.java` |
-| upload merging | `misu-file-server/misu-file-server-biz/.../FileServiceImpl.java` — `mergeChunks`, `saveOrUpdateFileMapping` |
-| video room | `misu-file-server/misu-file-server-biz/.../room` — `accessUserFileAsUser(房主.userId, ...)` "act-as-user" pattern |
-| path-traversal guard | `misu-file-server/misu-file-server-biz/.../util/FilePathGuard.java` |
-| upload rate-limiting | `UploadConcurrencyGuard` + `TranscodeQueueGuard` (config `file.upload.maxConcurrentPerUser`, `video.transcode.maxQueuePerUser`) |
-| auto-DDL config | `scripts/dev/nacos/misu-file-server-local.yml` → `hibernate.hbm2ddl.auto=update` |
-
-## 9. Things NOT to do
-
-- Don't `npm install` without the proxy/registry flags from §3 — it hangs on 127.0.0.1:7890.
-- Don't push to `master` directly. PR-only.
-- Don't change `MAVEN_REPO_LOCAL` / `JAVA_HOME` in scripts — per-machine env, not committed.
-- Don't put `target_virtual_path` into a composite index (§5.4).
-- Don't add Spring entities without `@Index` declarations matching existing patterns — `hbm2ddl=update` only ADDS indexes, never repairs a bad column order.
-- Don't bypass the axios `request` instance for fetching files — auth drops (§6).
+- 每个服务有 jar 内薄 `application.yml` + Nacos 启动时拉的**覆盖**（local 在 `scripts/dev/nacos/*.yml`）
+- local 用 `hibernate.hbm2ddl.auto=update`，新实体 / `@Index` 自动应用
+- 生产用迁移 DDL（参考 `docs/file-server-ux-mvp-ddl.md`）
