@@ -47,9 +47,11 @@ public class BotConnectionConfig {
     public void registerBbWebSocket () {
         //与bb-bot建立连接，握手上报 stream / file 能力位：
         //服务端据此走 streamId/streamState 帧式真流式并下发 localFile/netFile 附件
+        //connectInterval 同时是 SDK 重连检查线程的轮询间隔：bb 断开后最长隔这么久才补一次重连。
+        //调到 5s（原 30s），把 bb 重新发布期间的「上游离线窗口」缩到几秒，配合前端自动重发基本无感。
         BbWebSocketClient bbWebSocketClient = new BbWebSocketClient("bb-bot",
                 bbConnectionConfig.getAppId(), bbConnectionConfig.getSecret(),
-                30000,
+                5000,
                 URI.create(bbConnectionConfig.getUrl()),
                 bbMessageHandler,
                 List.of(BbCapability.STREAM, BbCapability.FILE));

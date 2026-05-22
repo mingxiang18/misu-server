@@ -3,7 +3,6 @@ package com.misu.bot.connection;
 import com.alibaba.fastjson2.JSON;
 import com.bb.bot.constant.BbSendMessageType;
 import com.bb.bot.constant.MessageType;
-import com.bb.bot.entity.bb.BbMessageContent;
 import com.bb.bot.entity.bb.BbSocketClientMessage;
 import com.bb.bot.entity.bb.MessageUser;
 import com.misu.bot.config.BotConfig;
@@ -20,7 +19,6 @@ import org.java_websocket.server.WebSocketServer;
 
 import java.net.InetSocketAddress;
 import java.time.LocalDateTime;
-import java.util.Collections;
 import java.util.stream.Collectors;
 
 /**
@@ -72,9 +70,13 @@ public class BotWebSocketServer extends WebSocketServer {
                 //token解析成功后取出token信息记录到map
                 BotTokenMessage userInfo = JSON.parseObject(claims.get("userInfo", String.class), BotTokenMessage.class);
                 botConnectionManager.registerUserBotClientWebSocket(userInfo, webSocket);
+                //回 auth_ok ack，前端收到后才 flush 待发队列（避免认证窗口期发的消息被当成 auth 包）
+                BotResponseMessage authOk = new BotResponseMessage();
+                authOk.setType("auth_ok");
+                webSocket.send(JSON.toJSONString(authOk));
             }catch (Exception e) {
                 BotResponseMessage botResponseMessage = new BotResponseMessage();
-                botResponseMessage.setMessageList(Collections.singletonList(BbMessageContent.buildTextContent("认证失败")));
+                botResponseMessage.setType("auth_error");
                 webSocket.send(JSON.toJSONString(botResponseMessage));
                 //认证不通过则关闭连接
                 webSocket.close();
@@ -142,8 +144,11 @@ public class BotWebSocketServer extends WebSocketServer {
         if (bbWebSocket != null && bbWebSocket.isOpen()) {
             bbWebSocket.send(JSON.toJSONString(bbSocketClientMessage));
         }else {
+            //与 bb 的上游连接暂时断开（多为 bb 重新发布，SDK 重连线程几秒内会补上）。
+            //回 bot_offline 控制消息并带上 receiveMessageId，前端据此自动重发这一条，而不是丢弃。
             BotResponseMessage botResponseMessage = new BotResponseMessage();
-            botResponseMessage.setMessageList(Collections.singletonList(BbMessageContent.buildTextContent("对不起，当前无法获取机器人回复")));
+            botResponseMessage.setType("bot_offline");
+            botResponseMessage.setReceiveMessageId(botUserMessage.getMessageId());
             webSocket.send(JSON.toJSONString(botResponseMessage));
         }
     }

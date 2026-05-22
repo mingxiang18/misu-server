@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Service, Picture, Close, Promotion, Document, Download } from '@element-plus/icons-vue'
+import { Service, Picture, Close, Promotion, Document, Download, RefreshRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { getBotAccessToken, getServerWebSocketUrl } from '@/api/bot/bot'
 import logger from '@/utils/logger'
@@ -21,6 +21,20 @@ const fileList = ref([])
 
 const botAccessToken = ref(null)
 let socket = null
+
+// 连接状态，驱动顶部状态条：connecting（首连/重连中）/ open（已就绪）/ offline（重连耗尽）
+const connStatus = ref('connecting')
+// 是否已通过服务端认证（收到 auth_ok 后才为 true）。
+// 只有 OPEN 且 authed 才能真正发消息——否则未注册连接上的消息会被服务端当成 auth 包而踢掉。
+let authed = false
+// 待发队列：socket 未就绪/未认证时消息先入队，auth_ok 后统一 flush
+const pendingQueue = []
+// 已发消息留底（id → 原始 message），用于 bot_offline 时按 id 自动重发
+const sentMessages = new Map()
+// bot_offline 自动重试计数（id → 已重试次数）
+const retryCounts = new Map()
+const MAX_BOT_RETRY = 3
+const BOT_RETRY_DELAY_MS = 1500
 
 // 单个附件上限 20MB
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -183,26 +197,62 @@ const sendSocketMessage = async () => {
 
 const sendMessage = (message) => {
   messages.value.push({
+    messageId: message.messageId,
     content: message.messageContentList,
     isSelf: true
   })
   scrollToBottom()
 
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(message))
-  } else {
-    // 主动重连，告知用户
-    if (!reconnectAt.value) initSocket()
-    messages.value.push({
-      content: [{ data: '冥想bb已离线，正在重连中', type: 'text' }],
-      isSelf: false
-    })
-    scrollToBottom()
-  }
+  sentMessages.set(message.messageId, message)
+  enqueueAndFlush(message)
 
   newMessage.value = ''
   handleImageRemove()
   handleFileRemove()
+}
+
+// 入队待发；若连接已就绪并通过认证则立即 flush，否则确保重连已在进行
+const enqueueAndFlush = (message) => {
+  pendingQueue.push(message)
+  if (socket && socket.readyState === WebSocket.OPEN && authed) {
+    flushQueue()
+  } else if (!socket && !reconnectAt.value) {
+    // socket 已彻底关闭且没有退避中的重连——主动拉起一次
+    initSocket()
+  }
+}
+
+// 把队列里的消息一次性发出去（仅在 OPEN 且已认证时调用）
+const flushQueue = () => {
+  if (!socket || socket.readyState !== WebSocket.OPEN || !authed) return
+  while (pendingQueue.length > 0) {
+    const msg = pendingQueue.shift()
+    socket.send(JSON.stringify(msg))
+  }
+}
+
+// 标记某条自己发的消息发送失败（展示「重发」），用于 bot_offline 重试耗尽
+const markFailed = (messageId) => {
+  const bubble = messages.value.find((m) => m.isSelf && m.messageId === messageId)
+  if (bubble) bubble.failed = true
+}
+
+// 收到机器人对某条消息的回复后，清掉它的失败态与重试计数
+const markDelivered = (receiveMessageId) => {
+  if (!receiveMessageId) return
+  retryCounts.delete(receiveMessageId)
+  const bubble = messages.value.find((m) => m.isSelf && m.messageId === receiveMessageId)
+  if (bubble && bubble.failed) bubble.failed = false
+}
+
+// 手动重发某条消息（点「重发」按钮）
+const resend = (messageId) => {
+  const msg = sentMessages.get(messageId)
+  if (!msg) return
+  const bubble = messages.value.find((m) => m.isSelf && m.messageId === messageId)
+  if (bubble) bubble.failed = false
+  retryCounts.delete(messageId)
+  enqueueAndFlush(msg)
 }
 
 /* ------------------ Socket with exponential backoff ------------------ */
@@ -210,11 +260,11 @@ const MAX_RECONNECT_ATTEMPTS = 5
 const RECONNECT_BASE_MS = 1000
 const reconnectAttempts = ref(0)
 const reconnectAt = ref(null) // 当前 setTimeout id（非 0 表示退避中）
-const reconnectExhausted = ref(false)
 let intentionalClose = false
 
 const initSocket = () => {
   intentionalClose = false
+  if (connStatus.value !== 'open') connStatus.value = 'connecting'
   getServerWebSocketUrl().then((response) => {
     const socketUrl = response.data
     socket = new WebSocket(socketUrl)
@@ -222,7 +272,8 @@ const initSocket = () => {
     socket.onopen = () => {
       logger.info('bot WebSocket connected')
       reconnectAttempts.value = 0
-      reconnectExhausted.value = false
+      // OPEN 还不够：要等服务端 auth_ok 才算就绪，期间不能发业务消息
+      authed = false
       getBotAccessToken().then((response) => {
         botAccessToken.value = response.data
         socket.send(JSON.stringify({ type: 'auth', token: botAccessToken.value }))
@@ -233,7 +284,11 @@ const initSocket = () => {
     socket.onclose = () => {
       logger.info('bot WebSocket closed')
       socket = null
-      if (!intentionalClose) scheduleReconnect()
+      authed = false
+      if (!intentionalClose) {
+        connStatus.value = 'connecting'
+        scheduleReconnect()
+      }
     }
   }).catch((err) => {
     logger.error('Failed to fetch bot WS url:', err)
@@ -243,12 +298,8 @@ const initSocket = () => {
 
 const scheduleReconnect = () => {
   if (reconnectAttempts.value >= MAX_RECONNECT_ATTEMPTS) {
-    reconnectExhausted.value = true
-    messages.value.push({
-      content: [{ data: '多次重连失败，请点击下方"重新连接"再试一次', type: 'text' }],
-      isSelf: false
-    })
-    scrollToBottom()
+    // 退避耗尽：保留待发队列，亮出状态条让用户手动重连，成功后会自动 flush
+    connStatus.value = 'offline'
     return
   }
   // 1s, 2s, 4s, 8s, 16s
@@ -262,7 +313,6 @@ const scheduleReconnect = () => {
 
 const manualReconnect = () => {
   reconnectAttempts.value = 0
-  reconnectExhausted.value = false
   if (reconnectAt.value) {
     clearTimeout(reconnectAt.value)
     reconnectAt.value = null
@@ -273,6 +323,32 @@ const manualReconnect = () => {
 const handleIncomingMessage = (event) => {
   const payload = JSON.parse(event.data)
   const list = payload.messageList || []
+
+  // 控制消息（非聊天内容）：认证 ack / 认证失败 / bb 上游离线
+  if (payload.type) {
+    if (payload.type === 'auth_ok') {
+      authed = true
+      connStatus.value = 'open'
+      flushQueue()
+    } else if (payload.type === 'auth_error') {
+      // 服务端会随即关闭连接，由 onclose 触发带新 token 的重连
+      authed = false
+    } else if (payload.type === 'bot_offline') {
+      // bb 重新发布等导致上游短暂断开——几秒内自动恢复，按 id 自动重发该条
+      const id = payload.receiveMessageId
+      const tried = retryCounts.get(id) || 0
+      if (id && sentMessages.has(id) && tried < MAX_BOT_RETRY) {
+        retryCounts.set(id, tried + 1)
+        setTimeout(() => enqueueAndFlush(sentMessages.get(id)), BOT_RETRY_DELAY_MS)
+      } else if (id) {
+        markFailed(id)
+      }
+    }
+    return
+  }
+
+  // 真实回复到达：清掉该条的失败态/重试计数
+  markDelivered(payload.receiveMessageId)
 
   // 流式帧：同一 streamId 的 start/delta/end 续写到同一气泡
   if (payload.streamId) {
@@ -309,6 +385,7 @@ const handleIncomingMessage = (event) => {
 
 const closeSocket = () => {
   intentionalClose = true
+  authed = false
   if (reconnectAt.value) {
     clearTimeout(reconnectAt.value)
     reconnectAt.value = null
@@ -329,8 +406,8 @@ const loadHistory = () => {
       localStorage.removeItem(CHAT_HISTORY_KEY)
       return null
     }
-    // 恢复时清掉流式中间态，避免残留闪烁光标
-    return saved.messages.map((m) => ({ ...m, streaming: false }))
+    // 恢复时清掉流式中间态（残留闪烁光标）与失败态（重发依赖的内存 map 已随刷新丢失）
+    return saved.messages.map((m) => ({ ...m, streaming: false, failed: false }))
   } catch (err) {
     logger.error('读取聊天记录失败:', err)
     return null
@@ -392,6 +469,16 @@ onUnmounted(() => {
 
 <template>
   <div class="bot-chat">
+    <!-- 连接状态条：就绪时不显示；连接中显示提示，断开时给手动重连 -->
+    <div v-if="connStatus !== 'open'" class="bot-conn-banner" :class="{ offline: connStatus === 'offline' }">
+      <span class="bot-conn-text">{{ connStatus === 'offline' ? '与冥想bb的连接已断开' : '正在连接冥想bb…' }}</span>
+      <button
+          v-if="connStatus === 'offline'"
+          class="bot-conn-retry"
+          type="button"
+          @click="manualReconnect">重新连接</button>
+    </div>
+
     <!-- Messages -->
     <div ref="messagesContainer" class="bot-messages">
       <!-- Inner uses margin-top:auto so content sticks to the bottom when
@@ -440,6 +527,15 @@ onUnmounted(() => {
               </a>
             </template>
           </div>
+
+          <!-- 自己发的消息发送失败（bb 多次重试仍离线）时的重发入口 -->
+          <div v-if="message.isSelf && message.failed" class="bot-retry">
+            <span class="bot-retry-hint">未送达</span>
+            <button class="bot-retry-btn" type="button" @click="resend(message.messageId)">
+              <RefreshRight/>
+              <span>重发</span>
+            </button>
+          </div>
         </div>
 
         <!-- Suggestions: only on first turn (when only greeting is present) -->
@@ -453,10 +549,6 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <!-- 重连耗尽时的手动重试 -->
-        <div v-if="reconnectExhausted" class="bot-reconnect">
-          <button class="bot-chip bot-chip-warn" type="button" @click="manualReconnect">重新连接</button>
-        </div>
       </div>
     </div>
 
@@ -573,6 +665,7 @@ onUnmounted(() => {
 .bot-row {
   display: flex;
   align-items: flex-end;
+  flex-wrap: wrap;
   gap: var(--space-2);
   max-width: 100%;
 }
@@ -738,15 +831,75 @@ onUnmounted(() => {
   border-color: var(--color-border-strong);
 }
 
-.bot-chip-warn {
-  color: var(--color-danger);
-  border-color: var(--color-danger);
+/* ---------- Connection status banner ---------- */
+.bot-conn-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-muted);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
-.bot-reconnect {
+.bot-conn-banner.offline {
+  color: var(--color-danger);
+  background: var(--accent-soft);
+}
+
+.bot-conn-retry {
+  padding: 2px var(--space-3);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+/* ---------- Per-message send-failed retry ---------- */
+/* flex-basis:100% 让它整行换到气泡下方；右对齐跟自己发的气泡同侧 */
+.bot-retry {
+  flex: 0 0 100%;
   display: flex;
-  justify-content: center;
-  margin-top: var(--space-3);
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-top: 1px;
+}
+
+.bot-retry-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+}
+
+.bot-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard),
+              color var(--duration-fast) var(--ease-standard);
+}
+
+.bot-retry-btn:hover,
+.bot-retry-btn:active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.bot-retry-btn :deep(svg) {
+  width: 12px;
+  height: 12px;
 }
 
 /* ---------- Input ---------- */
