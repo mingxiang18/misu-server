@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
-import { Picture, Close, Promotion, Document, Download, ArrowLeft, More, Avatar as AvatarIcon, Camera, RefreshRight } from '@element-plus/icons-vue'
+import { Picture, Close, Promotion, Document, Download, ArrowLeft, More, Camera, RefreshRight, Folder } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import ChatAvatar from './ChatAvatar.vue'
 import { botProfile, setBotAvatar } from './botProfile.js'
@@ -11,9 +11,11 @@ const props = defineProps({
   conversation: { type: Object, default: null },
   currentUser: { type: Object, required: true },
   members: { type: Array, default: () => [] },
-  isMobile: { type: Boolean, default: false }
+  isMobile: { type: Boolean, default: false },
+  // 仅 ADMIN：是否允许编辑 bb 头像
+  canEditBotAvatar: { type: Boolean, default: false }
 })
-const emit = defineEmits(['back', 'open-members', 'incoming'])
+const emit = defineEmits(['back', 'open-members', 'open-files', 'incoming'])
 
 /* ------------------ State ------------------ */
 const messages = ref([])
@@ -24,6 +26,7 @@ const imageUpload = ref(null)
 const fileList = ref([])
 const fileUpload = ref(null)
 const showMention = ref(false)
+const mentionQuery = ref('')
 const pendingAtIds = ref([])
 
 const isGroup = computed(() => props.conversation && props.conversation.type === 'GROUP')
@@ -33,10 +36,16 @@ const subtitle = computed(() => {
   if (isGroup.value) return `${props.conversation.memberCount || (props.conversation.members ? props.conversation.members.length : 0)} 名成员 · 含冥想bb`
   return connStatus.value === 'open' ? '在线 · 随时陪你聊' : (connStatus.value === 'offline' ? '连接已断开' : '连接中…')
 })
-// 群成员（来自服务端 listMembers，含 self 标记 + bb）；@ 列表排除自己
+// 群成员（来自服务端 listMembers，含 self 标记 + bb）；@ 列表排除自己，并按输入的 @查询 过滤
 const mentionTargets = computed(() => {
   if (!isGroup.value) return []
-  return (props.members || []).filter((m) => !m.self)
+  const q = mentionQuery.value.trim().toLowerCase()
+  return (props.members || []).filter((m) => {
+    if (m.self) return false
+    if (!q) return true
+    const name = (m.botFlag ? botName.value : (m.nickName || m.userName || '')).toLowerCase()
+    return name.includes(q)
+  })
 })
 
 /* ------------------ Connection state ------------------ */
@@ -359,17 +368,39 @@ const onAvatarPick = (e) => {
   const file = e.target.files && e.target.files[0]
   if (!file) return
   const reader = new FileReader()
-  reader.onload = () => setBotAvatar(reader.result)
+  reader.onload = async () => {
+    try {
+      await setBotAvatar(reader.result)
+      ElMessage.success('已更新 bb 头像（全局生效）')
+    } catch (err) {
+      logger.error('更新 bb 头像失败:', err)
+      ElMessage.error('更新失败：只有管理员可以修改')
+    }
+  }
   reader.readAsDataURL(file)
   e.target.value = ''
 }
 
 /* ------------------ mention ------------------ */
+// 打字触发：输入末尾出现 @ 或 @查询 时弹出选择窗（仅群聊）
+watch(newMessage, (val) => {
+  if (!isGroup.value) { showMention.value = false; return }
+  const m = (val || '').match(/@([^\s@]*)$/)
+  if (m) {
+    mentionQuery.value = m[1]
+    showMention.value = true
+  } else {
+    showMention.value = false
+  }
+})
+
 const insertMention = (m) => {
   const name = m.botFlag ? botName.value : (m.nickName || m.userName)
-  newMessage.value = (newMessage.value ? newMessage.value.replace(/@$/, '') : '') + '@' + name + ' '
+  // 用所选成员名替换末尾的「@查询」
+  newMessage.value = (newMessage.value || '').replace(/@[^\s@]*$/, '@' + name + ' ')
   if (m.userId && !pendingAtIds.value.includes(String(m.userId))) pendingAtIds.value.push(String(m.userId))
   showMention.value = false
+  mentionQuery.value = ''
 }
 </script>
 
@@ -379,17 +410,18 @@ const insertMention = (m) => {
       <button v-if="isMobile" class="chat-back" type="button" aria-label="返回" @click="emit('back')"><ArrowLeft /></button>
       <div
           class="chat-header-avatar"
-          :class="{ editable: !isGroup, 'cam-always': !isGroup && isMobile }"
-          :title="!isGroup ? '点击更换 bb 头像' : ''"
-          @click="!isGroup && triggerAvatarPick()">
+          :class="{ editable: !isGroup && canEditBotAvatar, 'cam-always': !isGroup && canEditBotAvatar && isMobile }"
+          :title="(!isGroup && canEditBotAvatar) ? '点击更换 bb 头像' : ''"
+          @click="(!isGroup && canEditBotAvatar) && triggerAvatarPick()">
         <ChatAvatar :name="conversation.title" :kind="isGroup ? 'group' : 'bot'" :avatar="isGroup ? '' : botProfile.avatar" :size="36" />
-        <span v-if="!isGroup" class="chat-avatar-cam" aria-hidden="true"><Camera /></span>
+        <span v-if="!isGroup && canEditBotAvatar" class="chat-avatar-cam" aria-hidden="true"><Camera /></span>
       </div>
       <input ref="avatarInput" type="file" accept="image/png,image/jpeg" hidden @change="onAvatarPick" />
       <div class="chat-header-meta">
         <div class="chat-header-title">{{ conversation.title }}</div>
         <div class="chat-header-sub">{{ subtitle }}</div>
       </div>
+      <button v-if="isGroup" class="chat-header-action" type="button" aria-label="群文件" @click="emit('open-files')"><Folder /></button>
       <button v-if="isGroup" class="chat-header-action" type="button" aria-label="群成员" @click="emit('open-members')"><More /></button>
     </header>
 
@@ -468,7 +500,6 @@ const insertMention = (m) => {
       </transition>
 
       <div class="bot-input-row">
-        <button v-if="isGroup" class="bot-input-btn" type="button" aria-label="@成员" :class="{ active: showMention }" @click="showMention = !showMention"><AvatarIcon /></button>
         <el-upload ref="imageUpload" v-model:file-list="imageList" class="bot-upload" action="#" :auto-upload="false" :show-file-list="false" :on-exceed="handleImageExceed" :limit="1" accept="image/png,image/jpeg">
           <button class="bot-input-btn" type="button" aria-label="上传图片"><Picture /></button>
         </el-upload>

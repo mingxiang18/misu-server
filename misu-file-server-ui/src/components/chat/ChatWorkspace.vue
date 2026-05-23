@@ -6,10 +6,14 @@ import ConversationList from './ConversationList.vue'
 import ChatRoom from './ChatRoom.vue'
 import CreateGroupDialog from './CreateGroupDialog.vue'
 import GroupMemberPanel from './GroupMemberPanel.vue'
+import GroupFilesPanel from './GroupFilesPanel.vue'
 import {
   listConversations, getPrivateConversation,
-  createGroup, listGroupMembers, addGroupMembers, removeGroupMember, markRead
+  createGroup, listGroupMembers, addGroupMembers, removeGroupMember, markRead,
+  listGroupFiles, downloadGroupFile, deleteGroupFile
 } from '@/api/chat/chat'
+import { loadBotProfile } from './botProfile.js'
+import { ElMessageBox } from 'element-plus'
 import logger from '@/utils/logger'
 
 const { isMobile, isDesktop } = useBreakpoint()
@@ -21,6 +25,7 @@ const currentUser = computed(() => ({
   nickName: userInfo.value ? (userInfo.value.nickName || userInfo.value.userName) : '',
   avatar: userInfo.value ? userInfo.value.avatar : ''
 }))
+const isAdmin = computed(() => ((userInfo.value && userInfo.value.authorities) || []).includes('ADMIN'))
 
 const conversations = ref([])
 const activeId = ref(null)
@@ -30,6 +35,8 @@ const activeMembers = ref([])
 const showCreate = ref(false)
 const showAddMember = ref(false)
 const showMembers = ref(false)
+const showFiles = ref(false)
+const activeFiles = ref([])
 const createDialog = ref(null)
 
 const existingMemberIds = computed(() => activeMembers.value.filter((m) => !m.botFlag).map((m) => String(m.userId)))
@@ -48,7 +55,52 @@ const refreshConversations = async () => {
     logger.error('加载会话列表失败:', err)
   }
 }
-onMounted(refreshConversations)
+onMounted(() => {
+  refreshConversations()
+  loadBotProfile() // 全局 bb 头像
+})
+
+/* ---------- 群文件 ---------- */
+const loadFiles = async () => {
+  if (!active.value || active.value.type !== 'GROUP') { activeFiles.value = []; return }
+  try {
+    const res = await listGroupFiles(active.value.id)
+    activeFiles.value = res.data || []
+  } catch (err) {
+    logger.error('加载群文件失败:', err)
+    activeFiles.value = []
+  }
+}
+const onOpenFiles = async () => { await loadFiles(); showFiles.value = true }
+const onDownloadFile = async (f) => {
+  try {
+    const res = await downloadGroupFile(f.id)
+    const blob = new Blob([res.data], { type: f.mimeType || 'application/octet-stream' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = f.fileName || 'file'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    logger.error('下载失败:', err)
+    ElMessage.error('下载失败')
+  }
+}
+const onDeleteFile = async (f) => {
+  try {
+    await ElMessageBox.confirm(`确认删除「${f.fileName}」？`, '删除文件', { type: 'warning' })
+  } catch { return }
+  try {
+    await deleteGroupFile(f.id)
+    await loadFiles()
+    ElMessage.success('已删除')
+  } catch (err) {
+    ElMessage.error('删除失败')
+  }
+}
 
 // 切到群聊时加载成员（供 @ 选择 + 成员面板）
 const loadMembers = async () => {
@@ -149,13 +201,13 @@ const onLeave = async () => {
         <ConversationList :conversations="conversations" :active-id="activeId" @select="onSelect" @create-group="showCreate = true" />
       </aside>
       <section class="bot-ws-chat">
-        <ChatRoom :conversation="active" :current-user="currentUser" :members="activeMembers" :is-mobile="false" @open-members="showMembers = true" @incoming="onIncoming" />
+        <ChatRoom :conversation="active" :current-user="currentUser" :members="activeMembers" :can-edit-bot-avatar="isAdmin" :is-mobile="false" @open-members="showMembers = true" @open-files="onOpenFiles" @incoming="onIncoming" />
       </section>
     </template>
 
     <template v-else>
       <ConversationList v-show="!mobileShowChat" :conversations="conversations" :active-id="activeId" @select="onSelect" @create-group="showCreate = true" />
-      <ChatRoom v-if="mobileShowChat" :conversation="active" :current-user="currentUser" :members="activeMembers" :is-mobile="true" @back="onBack" @open-members="showMembers = true" @incoming="onIncoming" />
+      <ChatRoom v-if="mobileShowChat" :conversation="active" :current-user="currentUser" :members="activeMembers" :can-edit-bot-avatar="isAdmin" :is-mobile="true" @back="onBack" @open-members="showMembers = true" @open-files="onOpenFiles" @incoming="onIncoming" />
     </template>
 
     <CreateGroupDialog ref="createDialog" v-model="showCreate" :is-mobile="isMobile" @created="onCreated" />
@@ -167,6 +219,12 @@ const onLeave = async () => {
         @add-member="onAddMember"
         @remove-member="onRemoveMember"
         @leave="onLeave" />
+    <GroupFilesPanel
+        v-model="showFiles"
+        :files="activeFiles"
+        :is-mobile="isMobile"
+        @download="onDownloadFile"
+        @delete="onDeleteFile" />
   </div>
 </template>
 

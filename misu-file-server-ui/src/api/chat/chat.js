@@ -70,3 +70,28 @@ export function listGroupMembers(conversationId) {
 export function searchUsers(keyword) {
     return request({ url: '/account/user/search', method: 'get', params: { keyword } });
 }
+
+// bb 全局资料（名称/头像）
+export function getBotProfile() {
+    return request({ url: '/fileServer/chat/bot/profile', method: 'get' });
+}
+
+// 设置 bb 全局头像（仅 ADMIN）
+export function setBotAvatarApi(avatar) {
+    return request({ url: '/fileServer/chat/bot/profile/avatar', method: 'post', data: { avatar } });
+}
+
+// 群文件列表
+export function listGroupFiles(conversationId) {
+    return request({ url: `/fileServer/chat/conversation/${conversationId}/file/list`, method: 'get' });
+}
+
+// 下载群文件（二进制，走 axios 带鉴权）
+export function downloadGroupFile(fileId) {
+    return request({ url: `/fileServer/chat/file/${fileId}/download`, method: 'get', responseType: 'arraybuffer' });
+}
+
+// 删除群文件
+export function deleteGroupFile(fileId) {
+    return request({ url: `/fileServer/chat/file/${fileId}`, method: 'delete' });
+}

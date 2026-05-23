@@ -6,6 +6,7 @@ import com.misu.account.dto.UserBriefDto;
 import com.misu.chat.domain.dto.MessageDto;
 import com.misu.chat.domain.entity.ChatMessage;
 import com.misu.chat.repository.ChatMessageRepository;
+import com.misu.chat.service.ChatFileService;
 import com.misu.chat.service.MessageService;
 import com.misu.chat.service.UserInfoService;
 import jakarta.annotation.Resource;
@@ -34,6 +35,9 @@ public class MessageServiceImpl implements MessageService {
     @Resource
     private UserInfoService userInfoService;
 
+    @Resource
+    private ChatFileService chatFileService;
+
     @Override
     @Transactional("chatTransactionManager")
     public ChatMessage saveUserMessage(Long conversationId, String senderUserId, String clientMessageId,
@@ -55,7 +59,9 @@ public class MessageServiceImpl implements MessageService {
         m.setContentJson(JSON.toJSONString(content == null ? Collections.emptyList() : content));
         m.setAtUserIds(atUserIds);
         m.setCreateTime(LocalDateTime.now());
-        return messageRepository.save(m);
+        ChatMessage saved = messageRepository.save(m);
+        chatFileService.indexFromMessage(saved); // 新消息才索引（dedup 分支已提前 return）
+        return saved;
     }
 
     @Override
@@ -67,7 +73,9 @@ public class MessageServiceImpl implements MessageService {
         m.setStreamId(streamId);
         m.setContentJson(contentJson == null ? "[]" : contentJson);
         m.setCreateTime(LocalDateTime.now());
-        return messageRepository.save(m);
+        ChatMessage saved = messageRepository.save(m);
+        chatFileService.indexFromMessage(saved); // bb 返回的文件也进群文件
+        return saved;
     }
 
     @Override

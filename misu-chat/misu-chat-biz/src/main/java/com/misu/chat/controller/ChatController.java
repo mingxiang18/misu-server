@@ -3,11 +3,15 @@ package com.misu.chat.controller;
 import com.misu.account.dto.UserBriefDto;
 import com.misu.chat.config.ChatConfig;
 import com.misu.chat.domain.dto.AddMembersRequest;
+import com.misu.chat.domain.dto.BotAvatarRequest;
 import com.misu.chat.domain.dto.ConversationDto;
 import com.misu.chat.domain.dto.CreateGroupRequest;
 import com.misu.chat.domain.dto.MemberDto;
 import com.misu.chat.domain.entity.ChatConversation;
 import com.misu.chat.domain.entity.ChatConversationMember;
+import com.misu.chat.domain.entity.ChatFile;
+import com.misu.chat.service.BotProfileService;
+import com.misu.chat.service.ChatFileService;
 import com.misu.chat.service.ChatService;
 import com.misu.chat.service.ConversationService;
 import com.misu.chat.service.MessageService;
@@ -19,8 +23,14 @@ import com.misu.security.utils.LoginMessageUtil;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import jakarta.annotation.Resource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +60,10 @@ public class ChatController {
     private UserInfoService userInfoService;
     @Resource
     private ChatConfig chatConfig;
+    @Resource
+    private BotProfileService botProfileService;
+    @Resource
+    private ChatFileService chatFileService;
 
     /** 获取提供客户端连接的服务端的socket的url */
     @GetMapping({"/getServerWebSocketUrl"})
@@ -180,6 +194,87 @@ public class ChatController {
         result.add(bot);
 
         return AjaxResult.success(result);
+    }
+
+    /** bb 全局资料（名称/头像），所有人可读 */
+    @GetMapping("/bot/profile")
+    @ApiOperation(value = "获取 bb 全局资料")
+    public AjaxResult getBotProfile() {
+        return AjaxResult.success(botProfileService.getProfile());
+    }
+
+    /** 设置 bb 全局头像（仅 ADMIN） */
+    @PostMapping("/bot/profile/avatar")
+    @ApiOperation(value = "设置 bb 全局头像（ADMIN）")
+    public AjaxResult setBotAvatar(@RequestBody BotAvatarRequest req) {
+        if (!isAdmin()) {
+            return AjaxResult.error(HttpStatus.FORBIDDEN, "只有管理员可以修改 bb 头像");
+        }
+        botProfileService.updateAvatar(req.getAvatar());
+        return AjaxResult.success();
+    }
+
+    /** 群文件列表 */
+    @GetMapping("/conversation/{id}/file/list")
+    @ApiOperation(value = "群文件列表")
+    public AjaxResult listFiles(@PathVariable("id") Long id) {
+        String me = currentUserId();
+        if (!conversationService.isMember(id, me)) {
+            return AjaxResult.error(HttpStatus.FORBIDDEN, "无权访问该会话");
+        }
+        ChatConversation conv = conversationService.getById(id);
+        String ownerId = conv != null ? conv.getOwnerUserId() : null;
+        return AjaxResult.success(chatFileService.listFiles(id, me, ownerId));
+    }
+
+    /** 下载群文件（成员可下载；走 axios 带鉴权） */
+    @GetMapping("/file/{fileId}/download")
+    @ApiOperation(value = "下载群文件")
+    public ResponseEntity<byte[]> downloadFile(@PathVariable("fileId") Long fileId) {
+        ChatFile f = chatFileService.getById(fileId);
+        if (f == null || Boolean.TRUE.equals(f.getDeleted())) {
+            return ResponseEntity.notFound().build();
+        }
+        if (!conversationService.isMember(f.getConversationId(), currentUserId())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        ChatFileService.FileDownload d = chatFileService.download(fileId);
+        if (d == null) {
+            return ResponseEntity.notFound().build();
+        }
+        // netFile：跳转到外链
+        if (d.netUrl != null) {
+            return ResponseEntity.status(302).location(URI.create(d.netUrl)).build();
+        }
+        ContentDisposition cd = ContentDisposition.attachment()
+                .filename(d.fileName != null ? d.fileName : "file", StandardCharsets.UTF_8).build();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentDisposition(cd);
+        headers.setContentType(MediaType.parseMediaType(d.mimeType));
+        return new ResponseEntity<>(d.bytes, headers, org.springframework.http.HttpStatus.OK);
+    }
+
+    /** 删除群文件（群主或上传者） */
+    @DeleteMapping("/file/{fileId}")
+    @ApiOperation(value = "删除群文件")
+    public AjaxResult deleteFile(@PathVariable("fileId") Long fileId) {
+        ChatFile f = chatFileService.getById(fileId);
+        if (f == null) {
+            return AjaxResult.error(HttpStatus.FORBIDDEN, "文件不存在");
+        }
+        String me = currentUserId();
+        if (!conversationService.isMember(f.getConversationId(), me)) {
+            return AjaxResult.error(HttpStatus.FORBIDDEN, "无权访问该会话");
+        }
+        ChatConversation conv = conversationService.getById(f.getConversationId());
+        String ownerId = conv != null ? conv.getOwnerUserId() : null;
+        boolean ok = chatFileService.delete(fileId, me, ownerId);
+        return ok ? AjaxResult.success() : AjaxResult.error(HttpStatus.FORBIDDEN, "只有群主或上传者可以删除");
+    }
+
+    private boolean isAdmin() {
+        LoginUser loginUser = LoginMessageUtil.getLoginUser().get();
+        return loginUser.getAuthorities() != null && loginUser.getAuthorities().contains("ADMIN");
     }
 
     private ConversationDto toDto(ChatConversation conv, int memberCount) {
