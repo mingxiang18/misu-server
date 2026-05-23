@@ -148,21 +148,26 @@ const mapServerMessage = (dto) => ({
   time: fmtTime(dto.createTime)
 })
 
+const curConvId = () => (props.conversation ? props.conversation.id : null)
+
 const loadHistory = async (convId) => {
   if (!convId) { messages.value = []; return }
   noMore.value = false
-  // 先用本地缓存秒显，避免进会话时空白
+  // 切会话立刻切到「新会话」的缓存秒显；没有缓存就清空，绝不残留上一个会话的记录
   const cached = readMsgs(cacheScope(), convId)
-  if (cached && cached.length) { messages.value = cached; scrollToBottom() }
+  messages.value = (cached && cached.length) ? cached : []
+  if (messages.value.length) scrollToBottom()
   try {
     const res = await pageMessages(convId, { size: 50 })
+    // 防竞态：接口返回时若已切到别的会话，丢弃这次结果
+    if (curConvId() !== convId) return
     messages.value = (res.data || []).map(mapServerMessage)
     writeMsgs(cacheScope(), convId, messages.value)
   } catch (err) {
     logger.error('加载历史消息失败:', err)
-    if (!(cached && cached.length)) messages.value = []
+    if (curConvId() === convId && !(cached && cached.length)) messages.value = []
   }
-  scrollToBottom()
+  if (curConvId() === convId) scrollToBottom()
 }
 
 // 上滑到顶加载更早的消息（游标 beforeId = 当前最旧的服务端消息 id）
