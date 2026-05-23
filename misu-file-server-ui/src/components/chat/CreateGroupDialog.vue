@@ -7,9 +7,15 @@ import logger from '@/utils/logger'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
-  isMobile: { type: Boolean, default: false }
+  isMobile: { type: Boolean, default: false },
+  // 'create'（建群）| 'add'（往现有群加人）
+  mode: { type: String, default: 'create' },
+  // add 模式下排除的已有成员 userId
+  existingIds: { type: Array, default: () => [] }
 })
-const emit = defineEmits(['update:modelValue', 'created'])
+const emit = defineEmits(['update:modelValue', 'created', 'add-members'])
+
+const isAdd = computed(() => props.mode === 'add')
 
 const visible = computed({
   get: () => props.modelValue,
@@ -27,7 +33,8 @@ const runSearch = async () => {
   loading.value = true
   try {
     const res = await searchUsers(keyword.value.trim())
-    candidates.value = res.data || []
+    const ex = (props.existingIds || []).map((x) => String(x))
+    candidates.value = (res.data || []).filter((u) => !ex.includes(String(u.userId)))
   } catch (err) {
     logger.error('搜索用户失败:', err)
     candidates.value = []
@@ -60,15 +67,18 @@ const toggle = (u) => {
 }
 const removeChip = (u) => { selected.value = selected.value.filter((s) => String(s.userId) !== String(u.userId)) }
 
-const canCreate = computed(() => groupName.value.trim().length > 0 && selected.value.length >= 1 && !submitting.value)
+const canCreate = computed(() =>
+    selected.value.length >= 1 && !submitting.value && (isAdd.value || groupName.value.trim().length > 0))
 
 const submit = () => {
   if (!canCreate.value) return
   submitting.value = true
-  emit('created', {
-    title: groupName.value.trim(),
-    memberUserIds: selected.value.map((u) => String(u.userId))
-  })
+  const ids = selected.value.map((u) => String(u.userId))
+  if (isAdd.value) {
+    emit('add-members', ids)
+  } else {
+    emit('created', { title: groupName.value.trim(), memberUserIds: ids })
+  }
 }
 
 // 父组件创建完成后会关闭弹窗；这里暴露一个失败回滚（重新允许提交）
@@ -84,13 +94,13 @@ defineExpose({ resetSubmitting: () => { submitting.value = false } })
       class="cg-dialog">
     <template #header>
       <div class="cg-header">
-        <h3 class="cg-title">创建群聊</h3>
+        <h3 class="cg-title">{{ isAdd ? '添加成员' : '创建群聊' }}</h3>
         <button class="cg-close" type="button" aria-label="关闭" @click="visible = false"><Close /></button>
       </div>
     </template>
 
     <div class="cg-body">
-      <div class="cg-field">
+      <div v-if="!isAdd" class="cg-field">
         <label class="cg-label">群名称</label>
         <input v-model="groupName" class="cg-name-input" type="text" placeholder="给群聊起个名字" maxlength="20" />
       </div>
@@ -129,14 +139,14 @@ defineExpose({ resetSubmitting: () => { submitting.value = false } })
           <div v-if="candidates.length === 0" class="cg-cand-empty">没有匹配的用户</div>
         </div>
 
-        <p class="cg-hint">冥想bb 会自动加入新群，群里 @它 即可让它回复</p>
+        <p v-if="!isAdd" class="cg-hint">冥想bb 会自动加入新群，群里 @它 即可让它回复</p>
       </div>
     </div>
 
     <template #footer>
       <div class="cg-footer">
         <button class="cg-btn ghost" type="button" @click="visible = false">取消</button>
-        <button class="cg-btn primary" type="button" :disabled="!canCreate" @click="submit">创建</button>
+        <button class="cg-btn primary" type="button" :disabled="!canCreate" @click="submit">{{ isAdd ? '添加' : '创建' }}</button>
       </div>
     </template>
   </el-dialog>

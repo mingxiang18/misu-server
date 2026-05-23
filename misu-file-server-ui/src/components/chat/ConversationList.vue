@@ -71,7 +71,8 @@ const fmtTime = (v) => {
             <span class="conv-item-preview">
               <span v-if="c.type === 'GROUP' && c.lastSenderName" class="conv-item-sender">{{ c.lastSenderName }}：</span>{{ c.lastMessage }}
             </span>
-            <span v-if="c.type === 'GROUP'" class="conv-item-count" title="群成员数"><User class="conv-item-count-icon" />{{ memberCount(c) }}</span>
+            <span v-if="c.unreadCount > 0" class="conv-item-unread">{{ c.unreadCount > 99 ? '99+' : c.unreadCount }}</span>
+            <span v-else-if="c.type === 'GROUP'" class="conv-item-count" title="群成员数"><User class="conv-item-count-icon" />{{ memberCount(c) }}</span>
           </div>
         </div>
       </button>
@@ -263,6 +264,21 @@ const fmtTime = (v) => {
 .conv-item-count-icon {
   width: 11px;
   height: 11px;
+}
+
+.conv-item-unread {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--color-danger);
+  color: #fff;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
 }
 
 .conv-item.active .conv-item-count {

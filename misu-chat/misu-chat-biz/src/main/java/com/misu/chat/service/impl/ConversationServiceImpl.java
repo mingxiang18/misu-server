@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -71,15 +72,19 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     @Transactional(value = "chatTransactionManager", readOnly = true)
     public List<ConversationDto> listMyConversations(String userId) {
-        List<Long> convIds = memberRepository.findByMemberUserId(userId).stream()
-                .map(ChatConversationMember::getConversationId)
-                .collect(Collectors.toList());
-        if (convIds.isEmpty()) {
+        List<ChatConversationMember> myMemberships = memberRepository.findByMemberUserId(userId);
+        if (myMemberships.isEmpty()) {
             return new ArrayList<>();
+        }
+        Map<Long, LocalDateTime> lastReadMap = new HashMap<>();
+        List<Long> convIds = new ArrayList<>();
+        for (ChatConversationMember mem : myMemberships) {
+            convIds.add(mem.getConversationId());
+            lastReadMap.put(mem.getConversationId(), mem.getLastReadAt());
         }
         List<ChatConversation> convs = conversationRepository.findByIdInOrderByLastMessageAtDesc(convIds);
 
-        return convs.stream().map(c -> {
+        List<ConversationDto> dtos = convs.stream().map(c -> {
             ConversationDto dto = new ConversationDto();
             dto.setId(c.getId());
             dto.setType(c.getType());
@@ -87,6 +92,7 @@ public class ConversationServiceImpl implements ConversationService {
             dto.setOwnerUserId(c.getOwnerUserId());
             dto.setMemberCount(memberRepository.findByConversationId(c.getId()).size() + 1); // +bb
             dto.setLastMessageAt(c.getLastMessageAt());
+            dto.setUnreadCount((int) messageRepository.countUnread(c.getId(), lastReadMap.get(c.getId()), userId));
 
             List<ChatMessage> latest = messageRepository.pageHistory(c.getId(), null, PageRequest.of(0, 1));
             if (!latest.isEmpty()) {
@@ -98,6 +104,22 @@ public class ConversationServiceImpl implements ConversationService {
             }
             return dto;
         }).collect(Collectors.toList());
+
+        // 机器人(私聊)置顶：PRIVATE 在前，其余按 last_message_at 倒序（null 最后）
+        dtos.sort((a, b) -> {
+            boolean ap = TYPE_PRIVATE.equals(a.getType());
+            boolean bp = TYPE_PRIVATE.equals(b.getType());
+            if (ap != bp) {
+                return ap ? -1 : 1;
+            }
+            LocalDateTime at = a.getLastMessageAt();
+            LocalDateTime bt = b.getLastMessageAt();
+            if (at == null && bt == null) return 0;
+            if (at == null) return 1;
+            if (bt == null) return -1;
+            return bt.compareTo(at);
+        });
+        return dtos;
     }
 
     @Override
@@ -168,6 +190,15 @@ public class ConversationServiceImpl implements ConversationService {
     @Transactional(value = "chatTransactionManager", readOnly = true)
     public List<ChatConversationMember> getMembers(Long conversationId) {
         return memberRepository.findByConversationId(conversationId);
+    }
+
+    @Override
+    @Transactional("chatTransactionManager")
+    public void markRead(Long conversationId, String userId) {
+        memberRepository.findFirstByConversationIdAndMemberUserId(conversationId, userId).ifPresent(m -> {
+            m.setLastReadAt(LocalDateTime.now());
+            memberRepository.save(m);
+        });
     }
 
     @Override

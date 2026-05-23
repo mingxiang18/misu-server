@@ -13,7 +13,7 @@ const props = defineProps({
   members: { type: Array, default: () => [] },
   isMobile: { type: Boolean, default: false }
 })
-const emit = defineEmits(['back', 'open-members'])
+const emit = defineEmits(['back', 'open-members', 'incoming'])
 
 /* ------------------ State ------------------ */
 const messages = ref([])
@@ -21,6 +21,8 @@ const messagesContainer = ref(null)
 const newMessage = ref('')
 const imageList = ref([])
 const imageUpload = ref(null)
+const fileList = ref([])
+const fileUpload = ref(null)
 const showMention = ref(false)
 const pendingAtIds = ref([])
 
@@ -50,7 +52,7 @@ const MAX_BOT_RETRY = 3
 const BOT_RETRY_DELAY_MS = 1500
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
-const canSend = computed(() => (newMessage.value && newMessage.value.trim().length > 0) || imageList.value.length > 0)
+const canSend = computed(() => (newMessage.value && newMessage.value.trim().length > 0) || imageList.value.length > 0 || fileList.value.length > 0)
 
 /* ------------------ Helpers ------------------ */
 const escapeHtml = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -143,6 +145,10 @@ const sendMessage = async () => {
       const raw = imageList.value[0].raw
       content.push({ type: 'localImage', data: await readBase64(raw), fileName: raw.name, mimeType: raw.type, size: raw.size })
     }
+    if (fileList.value.length > 0) {
+      const raw = fileList.value[0].raw
+      content.push({ type: 'localFile', data: await readBase64(raw), fileName: raw.name, mimeType: raw.type, size: raw.size })
+    }
   } catch (err) {
     logger.error('附件读取失败:', err)
     ElMessage.error('附件读取失败，请重试')
@@ -174,6 +180,7 @@ const sendMessage = async () => {
   newMessage.value = ''
   pendingAtIds.value = []
   handleImageRemove()
+  handleFileRemove()
 }
 
 const markFailed = (messageId) => {
@@ -276,6 +283,9 @@ const handleIncomingMessage = (event) => {
   if (!authed) markAuthed()
   markDelivered(payload.receiveMessageId)
 
+  // 通知工作区有新消息到达（用于刷新会话列表未读 / 保持当前会话已读）
+  emit('incoming', payload.conversationId)
+
   // 只渲染当前会话的消息
   if (props.conversation && String(payload.conversationId) !== String(props.conversation.id)) return
 
@@ -330,6 +340,16 @@ const handleImageExceed = (files) => {
   if (!/^image\/(jpeg|png)$/.test(file.type)) { ElMessage.error('图片格式不正确！仅支持 JPEG / PNG'); return }
   if (file.size > MAX_ATTACHMENT_BYTES) { ElMessage.error('图片大小不能超过 20MB'); return }
   imageUpload.value.handleStart(file)
+}
+const handleFileRemove = () => {
+  fileList.value = []
+  if (fileUpload.value && fileUpload.value.clearFiles) fileUpload.value.clearFiles()
+}
+const handleFileExceed = (files) => {
+  if (fileUpload.value && fileUpload.value.clearFiles) fileUpload.value.clearFiles()
+  const file = files[0]
+  if (file.size > MAX_ATTACHMENT_BYTES) { ElMessage.error('文件大小不能超过 20MB'); return }
+  fileUpload.value.handleStart(file)
 }
 
 /* ------------------ bb avatar ------------------ */
@@ -424,10 +444,15 @@ const insertMention = (m) => {
     </div>
 
     <div class="bot-input-wrap">
-      <div v-if="imageList.length > 0" class="bot-attach-preview">
-        <div class="bot-image-thumb">
+      <div v-if="imageList.length > 0 || fileList.length > 0" class="bot-attach-preview">
+        <div v-if="imageList.length > 0" class="bot-image-thumb">
           <img :src="imageList[0].url" alt="" />
           <button class="bot-attach-remove" type="button" aria-label="移除图片" @click="handleImageRemove"><Close /></button>
+        </div>
+        <div v-if="fileList.length > 0" class="bot-file-chip">
+          <span class="bot-file-chip-icon"><Document /></span>
+          <span class="bot-file-chip-name">{{ fileList[0].name }}</span>
+          <button class="bot-attach-remove static" type="button" aria-label="移除文件" @click="handleFileRemove"><Close /></button>
         </div>
       </div>
 
@@ -446,6 +471,9 @@ const insertMention = (m) => {
         <button v-if="isGroup" class="bot-input-btn" type="button" aria-label="@成员" :class="{ active: showMention }" @click="showMention = !showMention"><AvatarIcon /></button>
         <el-upload ref="imageUpload" v-model:file-list="imageList" class="bot-upload" action="#" :auto-upload="false" :show-file-list="false" :on-exceed="handleImageExceed" :limit="1" accept="image/png,image/jpeg">
           <button class="bot-input-btn" type="button" aria-label="上传图片"><Picture /></button>
+        </el-upload>
+        <el-upload ref="fileUpload" v-model:file-list="fileList" class="bot-upload" action="#" :auto-upload="false" :show-file-list="false" :on-exceed="handleFileExceed" :limit="1">
+          <button class="bot-input-btn" type="button" aria-label="上传文件"><Document /></button>
         </el-upload>
         <el-input v-model="newMessage" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }"
                   :placeholder="isGroup ? '发送到群聊 · 输入 @ 呼叫成员' : '和冥想bb说点什么'" class="bot-input-text" resize="none"
@@ -543,8 +571,13 @@ const insertMention = (m) => {
 .bot-attach-preview { display: flex; gap: var(--space-2); padding: var(--space-3) var(--space-3) 0; }
 .bot-image-thumb { position: relative; width: 64px; height: 64px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border-default); }
 .bot-image-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.bot-attach-remove { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; background: rgba(31,27,22,0.6); color: #fff; border-radius: var(--radius-pill); }
+.bot-attach-remove { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; background: rgba(31,27,22,0.6); color: #fff; border-radius: var(--radius-pill); flex-shrink: 0; }
+.bot-attach-remove.static { position: static; }
 .bot-attach-remove :deep(svg) { width: 12px; height: 12px; }
+.bot-file-chip { display: flex; align-items: center; gap: var(--space-2); max-width: 220px; height: 36px; padding: 0 var(--space-2) 0 var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--color-border-default); background: var(--color-bg-muted); }
+.bot-file-chip-icon { flex-shrink: 0; display: inline-flex; color: var(--accent); }
+.bot-file-chip-icon :deep(svg) { width: 16px; height: 16px; }
+.bot-file-chip-name { flex: 1 1 auto; min-width: 0; font-size: var(--font-size-sm); color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .bot-input-row { display: flex; align-items: flex-end; gap: var(--space-2); padding: var(--space-2) var(--space-3); }
 .bot-input-btn { flex-shrink: 0; width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-pill); color: var(--color-text-secondary); background: transparent; transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard); }

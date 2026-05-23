@@ -8,7 +8,7 @@ import CreateGroupDialog from './CreateGroupDialog.vue'
 import GroupMemberPanel from './GroupMemberPanel.vue'
 import {
   listConversations, getPrivateConversation,
-  createGroup, listGroupMembers, addGroupMembers, removeGroupMember
+  createGroup, listGroupMembers, addGroupMembers, removeGroupMember, markRead
 } from '@/api/chat/chat'
 import logger from '@/utils/logger'
 
@@ -28,8 +28,11 @@ const mobileShowChat = ref(false)
 const activeMembers = ref([])
 
 const showCreate = ref(false)
+const showAddMember = ref(false)
 const showMembers = ref(false)
 const createDialog = ref(null)
+
+const existingMemberIds = computed(() => activeMembers.value.filter((m) => !m.botFlag).map((m) => String(m.userId)))
 
 const active = computed(() => conversations.value.find((c) => String(c.id) === String(activeId.value)) || null)
 
@@ -63,8 +66,19 @@ watch(() => active.value && active.value.id, loadMembers, { immediate: true })
 const onSelect = (c) => {
   activeId.value = c.id
   if (isMobile.value) mobileShowChat.value = true
+  // 进会话即清未读（本地置零 + 服务端 mark-read）
+  if (c.unreadCount) c.unreadCount = 0
+  markRead(c.id).catch(() => {})
 }
 const onBack = () => { mobileShowChat.value = false }
+
+// ChatRoom 收到任意新消息：保持当前会话已读 + 去抖刷新列表（更新其他会话未读 / 预览 / 排序）
+let refreshTimer = null
+const onIncoming = () => {
+  if (active.value) markRead(active.value.id).catch(() => {})
+  clearTimeout(refreshTimer)
+  refreshTimer = setTimeout(refreshConversations, 600)
+}
 
 const onCreated = async ({ title, memberUserIds }) => {
   try {
@@ -84,8 +98,21 @@ const onCreated = async ({ title, memberUserIds }) => {
 }
 
 const onAddMember = () => {
-  // 简化：复用建群弹窗的选人 UI 暂不单独做加人弹窗，提示走建群入口（阶段2 可扩展独立加人弹窗）
-  ElMessage.info('请在群里通过「建群」流程管理成员（加人独立弹窗后续补充）')
+  showMembers.value = false
+  showAddMember.value = true
+}
+const onAddMembersSubmit = async (userIds) => {
+  if (!active.value) return
+  try {
+    await addGroupMembers(active.value.id, userIds)
+    showAddMember.value = false
+    await loadMembers()
+    await refreshConversations()
+    ElMessage.success('已添加成员')
+  } catch (err) {
+    logger.error('加成员失败:', err)
+    ElMessage.error('添加成员失败')
+  }
 }
 const onRemoveMember = async (m) => {
   if (!active.value) return
@@ -122,16 +149,17 @@ const onLeave = async () => {
         <ConversationList :conversations="conversations" :active-id="activeId" @select="onSelect" @create-group="showCreate = true" />
       </aside>
       <section class="bot-ws-chat">
-        <ChatRoom :conversation="active" :current-user="currentUser" :members="activeMembers" :is-mobile="false" @open-members="showMembers = true" />
+        <ChatRoom :conversation="active" :current-user="currentUser" :members="activeMembers" :is-mobile="false" @open-members="showMembers = true" @incoming="onIncoming" />
       </section>
     </template>
 
     <template v-else>
       <ConversationList v-show="!mobileShowChat" :conversations="conversations" :active-id="activeId" @select="onSelect" @create-group="showCreate = true" />
-      <ChatRoom v-if="mobileShowChat" :conversation="active" :current-user="currentUser" :members="activeMembers" :is-mobile="true" @back="onBack" @open-members="showMembers = true" />
+      <ChatRoom v-if="mobileShowChat" :conversation="active" :current-user="currentUser" :members="activeMembers" :is-mobile="true" @back="onBack" @open-members="showMembers = true" @incoming="onIncoming" />
     </template>
 
     <CreateGroupDialog ref="createDialog" v-model="showCreate" :is-mobile="isMobile" @created="onCreated" />
+    <CreateGroupDialog v-model="showAddMember" mode="add" :is-mobile="isMobile" :existing-ids="existingMemberIds" @add-members="onAddMembersSubmit" />
     <GroupMemberPanel
         v-model="showMembers"
         :members="activeMembers"

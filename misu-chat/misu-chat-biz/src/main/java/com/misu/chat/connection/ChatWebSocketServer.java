@@ -44,6 +44,9 @@ public class ChatWebSocketServer extends WebSocketServer {
         this.tokenService = tokenService;
         this.botConnectionManager = botConnectionManager;
         this.inboundRouter = inboundRouter;
+        // SO_REUSEADDR：重启时若旧实例的端口仍处于 TIME_WAIT，也能立即重新绑定，
+        // 避免快速重启 / prod 滚动发布时 WS 端口偶发「绑定失败 → 无监听」。
+        this.setReuseAddr(true);
         log.info("【" + name + "】WebSocket服务器初始化:" + botConfig.getServerPort());
         this.start();
     }

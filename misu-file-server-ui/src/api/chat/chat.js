@@ -41,6 +41,11 @@ export function pageMessages(conversationId, params) {
     });
 }
 
+// 标记会话已读（清未读）
+export function markRead(conversationId) {
+    return request({ url: `/fileServer/chat/conversation/${conversationId}/read`, method: 'post' });
+}
+
 // 创建群聊
 export function createGroup(data) {
     return request({ url: '/fileServer/chat/conversation/group', method: 'post', data });

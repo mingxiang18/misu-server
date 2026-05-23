@@ -34,4 +34,7 @@ public interface ConversationService {
 
     /** 发消息时回填 last_message_at */
     void touchLastMessageAt(Long conversationId);
+
+    /** 标记会话已读（把成员的 last_read_at 置为当前时间） */
+    void markRead(Long conversationId, String userId);
 }

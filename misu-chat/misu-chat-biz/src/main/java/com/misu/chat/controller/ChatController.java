@@ -94,6 +94,18 @@ public class ChatController {
         return AjaxResult.success(messageService.pageHistory(id, beforeId, pageSize, me));
     }
 
+    /** 标记会话已读（清未读） */
+    @PostMapping("/conversation/{id}/read")
+    @ApiOperation(value = "标记会话已读")
+    public AjaxResult markRead(@PathVariable("id") Long id) {
+        String me = currentUserId();
+        if (!conversationService.isMember(id, me)) {
+            return AjaxResult.error(HttpStatus.FORBIDDEN, "无权访问该会话");
+        }
+        conversationService.markRead(id, me);
+        return AjaxResult.success();
+    }
+
     /** 创建群聊（创建者为群主，bb 自动隐式参与） */
     @PostMapping("/conversation/group")
     @ApiOperation(value = "创建群聊")

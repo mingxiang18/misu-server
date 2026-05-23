@@ -30,4 +30,7 @@ public class ConversationDto {
     private String lastSenderName;
 
     private LocalDateTime lastMessageAt;
+
+    /** 未读数（create_time > 我的 last_read_at 且非我发的；含 bb 回复） */
+    private Integer unreadCount;
 }
