@@ -186,7 +186,7 @@ defineExpose({ resetSubmitting: () => { submitting.value = false } })
   border-radius: var(--radius-md);
   background: var(--color-bg-surface);
   color: var(--color-text-primary);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-md); /* ≥16px：避免 iOS Safari 聚焦自动放大 */
   outline: none;
   transition: border-color var(--duration-fast) var(--ease-standard);
 }
@@ -213,7 +213,7 @@ defineExpose({ resetSubmitting: () => { submitting.value = false } })
   padding: 0 var(--space-3) 0 calc(var(--space-3) + 22px);
   border: 1px solid transparent; border-radius: var(--radius-md);
   background: var(--color-bg-muted); color: var(--color-text-primary);
-  font-size: var(--font-size-base); outline: none;
+  font-size: var(--font-size-md); outline: none; /* ≥16px：避免 iOS Safari 聚焦自动放大 */
   transition: background var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
 }
 .cg-search-input:focus { background: var(--color-bg-surface); border-color: var(--color-border-strong); }
