@@ -22,8 +22,8 @@ public class ChatBotProfile {
     @Column(name = "name", length = 64)
     private String name;
 
-    /** data URL（base64），全局头像 */
-    @Column(name = "avatar", columnDefinition = "TEXT")
+    /** data URL（base64），全局头像；LONGTEXT 以容纳真实头像图片 */
+    @Column(name = "avatar", columnDefinition = "LONGTEXT")
     private String avatar;
 
     @Column(name = "update_time")

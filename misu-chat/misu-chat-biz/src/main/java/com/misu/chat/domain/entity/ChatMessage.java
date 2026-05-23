@@ -48,7 +48,8 @@ public class ChatMessage {
     @Column(name = "stream_id", length = 64)
     private String streamId;
 
-    @Column(name = "content_json", columnDefinition = "TEXT", nullable = false)
+    // LONGTEXT：内容含图片/文件的 base64，TEXT(64KB) 装不下（一张图就超）
+    @Column(name = "content_json", columnDefinition = "LONGTEXT", nullable = false)
     private String contentJson;
 
     /** 群 @ 的 userId 逗号分隔（长串，不进复合索引） */
