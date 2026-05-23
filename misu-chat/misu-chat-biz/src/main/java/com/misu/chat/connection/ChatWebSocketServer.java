@@ -10,8 +10,6 @@ import com.misu.chat.domain.message.ChatAuthMessage;
 import com.misu.chat.domain.message.ChatResponseMessage;
 import com.misu.chat.domain.message.ChatTokenMessage;
 import com.misu.chat.domain.message.ChatUserMessage;
-import com.misu.chat.service.ConversationService;
-import com.misu.chat.service.MessageService;
 import com.misu.security.service.TokenService;
 import io.jsonwebtoken.Claims;
 import lombok.extern.slf4j.Slf4j;
@@ -34,20 +32,18 @@ public class ChatWebSocketServer extends WebSocketServer {
     private final ChatConfig botConfig;
     private final TokenService tokenService;
     private final ChatConnectionManager botConnectionManager;
-    private final MessageService messageService;
-    private final ConversationService conversationService;
+    private final ChatInboundRouter inboundRouter;
 
     /**
      * 构造方法
      */
     public ChatWebSocketServer(ChatConfig botConfig, TokenService tokenService, ChatConnectionManager botConnectionManager,
-                               MessageService messageService, ConversationService conversationService) {
+                               ChatInboundRouter inboundRouter) {
         super(new InetSocketAddress(botConfig.getServerPort()));
         this.botConfig = botConfig;
         this.tokenService = tokenService;
         this.botConnectionManager = botConnectionManager;
-        this.messageService = messageService;
-        this.conversationService = conversationService;
+        this.inboundRouter = inboundRouter;
         log.info("【" + name + "】WebSocket服务器初始化:" + botConfig.getServerPort());
         this.start();
     }
@@ -124,66 +120,12 @@ public class ChatWebSocketServer extends WebSocketServer {
     }
 
     /**
-     * 消息处理：落库 → 越权校验 → 转发 bb。
-     * 落库在转发之前，bb 离线也不丢用户消息。
+     * 消息处理：解析后交给 ChatInboundRouter（落库 / 越权 / 群广播 / bot 触发）。
      */
     private void handleMessage(WebSocket webSocket, String s) {
-        //将Json转为实体
         ChatUserMessage userMessage = JSON.parseObject(s, ChatUserMessage.class);
-
-        //获取当前socket对应的用户信息
         ChatTokenMessage tokenMessage = botConnectionManager.getBotClientWebSocketUser(webSocket);
-        String userId = tokenMessage.getUserId().toString();
-
-        //解析会话；私聊兜底创建
-        Long conversationId = userMessage.getConversationId();
-        if (conversationId == null) {
-            conversationId = conversationService.getOrCreatePrivateConversation(userId).getId();
-        }
-
-        //越权校验：非会话成员直接拒（业务错误，前端 toast，不登出，与 401 严格分开）
-        if (!conversationService.isMember(conversationId, userId)) {
-            ChatResponseMessage forbidden = new ChatResponseMessage();
-            forbidden.setType("forbidden");
-            forbidden.setReceiveMessageId(userMessage.getMessageId());
-            webSocket.send(JSON.toJSONString(forbidden));
-            return;
-        }
-
-        //落库 + 回填会话排序时间
-        String atCsv = (userMessage.getAtUserIds() == null || userMessage.getAtUserIds().isEmpty())
-                ? null : String.join(",", userMessage.getAtUserIds());
-        messageService.saveUserMessage(conversationId, userId, userMessage.getMessageId(),
-                userMessage.getMessageContentList(), atCsv);
-        conversationService.touchLastMessageAt(conversationId);
-
-        //封装bb机器人协议实体（1对1：PRIVATE；群聊路由在阶段2）
-        BbSocketClientMessage bbSocketClientMessage = new BbSocketClientMessage();
-        bbSocketClientMessage.setMessageType(MessageType.PRIVATE);
-        bbSocketClientMessage.setUserId(userId);
-        bbSocketClientMessage.setSender(new MessageUser(userId, tokenMessage.getUserName()));
-        bbSocketClientMessage.setMessageId(userMessage.getMessageId());
-        bbSocketClientMessage.setMessage(userMessage.getMessageContentList().stream()
-                .filter(bbMessageContent -> BbSendMessageType.TEXT.equals(bbMessageContent.getType()))
-                .map(bbMessageContent -> bbMessageContent.getData().toString())
-                .collect(Collectors.joining(" ")));
-        bbSocketClientMessage.setMessageContentList(userMessage.getMessageContentList());
-        bbSocketClientMessage.setSendTime(LocalDateTime.now());
-
-        //向bb机器人发送消息
-        WebSocket bbWebSocket = botConnectionManager.getBbWebSocket();
-        if (bbWebSocket != null && bbWebSocket.isOpen()) {
-            bbWebSocket.send(JSON.toJSONString(bbSocketClientMessage));
-        }else {
-            //与 bb 的上游连接暂时断开（多为 bb 重新发布，SDK 重连线程几秒内会补上）。
-            //回 bot_offline 控制消息并带上 receiveMessageId，前端据此自动重发这一条，而不是丢弃。
-            //（消息已落库，重发不会重复入库——saveUserMessage 在前端重发时会再写一条，
-            // 故前端仅在收到回复前的「未送达」才重发；幂等由 clientMessageId 兜底，阶段2 视需要去重。）
-            ChatResponseMessage botResponseMessage = new ChatResponseMessage();
-            botResponseMessage.setType("bot_offline");
-            botResponseMessage.setReceiveMessageId(userMessage.getMessageId());
-            webSocket.send(JSON.toJSONString(botResponseMessage));
-        }
+        inboundRouter.handle(webSocket, tokenMessage, userMessage);
     }
 
 }

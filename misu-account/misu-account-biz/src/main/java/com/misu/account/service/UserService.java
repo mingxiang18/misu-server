@@ -57,4 +57,9 @@ public interface UserService {
      * 按用户 id 批量查询简要信息（昵称/头像），供跨服务展示。
      */
     List<UserBriefDto> listBriefByIds(List<Long> userIds);
+
+    /**
+     * 按昵称/账号模糊搜索用户简要信息（普通用户可用，供建群选人），上限 20 条。
+     */
+    List<UserBriefDto> searchBrief(String keyword);
 }

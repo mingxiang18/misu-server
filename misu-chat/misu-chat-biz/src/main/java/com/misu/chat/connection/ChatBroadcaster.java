@@ -27,27 +27,21 @@ public class ChatBroadcaster {
 
     /**
      * 下发给会话全部在线成员（私聊即那一个用户）。
-     * 调用前请确保 message.conversationId 已设置。
+     * message 可为 ChatResponseMessage 或等价的 Map（mock 回复用 Map，避开 bb SDK 的 BbMessageContent 无公共构造器）。
+     * 调用前请确保 message 里的 conversationId 已设置。
      */
-    public void broadcast(Long conversationId, ChatResponseMessage message) {
-        List<ChatConversationMember> members = conversationService.getMembers(conversationId);
-        String payload = JSON.toJSONString(message);
-        for (ChatConversationMember member : members) {
-            WebSocket ws = connectionManager.getUserBotClientWebSocket(member.getMemberUserId());
-            if (ws != null && ws.isOpen()) {
-                ws.send(payload);
-            }
-        }
+    public void broadcast(Long conversationId, Object message) {
+        broadcastExcept(conversationId, message, null);
     }
 
     /**
-     * 下发给会话里除某个 userId 之外的其他在线成员（群里转发自己发言用，避免回声）。
+     * 下发给会话里除某个 userId 之外的其他在线成员（群里转发自己发言用，避免回声；exceptUserId 为 null 即不排除）。
      */
-    public void broadcastExcept(Long conversationId, ChatResponseMessage message, String exceptUserId) {
+    public void broadcastExcept(Long conversationId, Object message, String exceptUserId) {
         List<ChatConversationMember> members = conversationService.getMembers(conversationId);
         String payload = JSON.toJSONString(message);
         for (ChatConversationMember member : members) {
-            if (member.getMemberUserId().equals(exceptUserId)) {
+            if (exceptUserId != null && member.getMemberUserId().equals(exceptUserId)) {
                 continue;
             }
             WebSocket ws = connectionManager.getUserBotClientWebSocket(member.getMemberUserId());

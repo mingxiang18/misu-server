@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 /**
  * 用户相关业务
@@ -271,13 +272,31 @@ public class UserServiceImpl implements UserService {
         if (CollectionUtils.isEmpty(userIds)) {
             return Collections.emptyList();
         }
-        return userRepository.findAllById(userIds).stream().map(u -> {
-            UserBriefDto dto = new UserBriefDto();
-            dto.setUserId(u.getUserId());
-            dto.setUserName(u.getUserName());
-            dto.setNickName(u.getNickName());
-            dto.setAvatar(u.getAvatar());
-            return dto;
-        }).collect(Collectors.toList());
+        return userRepository.findAllById(userIds).stream().map(this::toBrief).collect(Collectors.toList());
+    }
+
+    @Override
+    public List<UserBriefDto> searchBrief(String keyword) {
+        // del_flag 可能为 null（注册未显式置 0），用 isNull().or(ne) 兜底，避免漏掉正常用户
+        BooleanExpression pred = QSysUser.sysUser.delFlag.isNull()
+                .or(QSysUser.sysUser.delFlag.ne(USER_DELETED));
+        if (StringUtils.hasText(keyword)) {
+            String k = keyword.trim();
+            pred = pred.and(QSysUser.sysUser.userName.containsIgnoreCase(k)
+                    .or(QSysUser.sysUser.nickName.containsIgnoreCase(k)));
+        }
+        return StreamSupport.stream(userRepository.findAll(pred,
+                        org.springframework.data.domain.PageRequest.of(0, 20)).spliterator(), false)
+                .map(this::toBrief)
+                .collect(Collectors.toList());
+    }
+
+    private UserBriefDto toBrief(SysUser u) {
+        UserBriefDto dto = new UserBriefDto();
+        dto.setUserId(u.getUserId());
+        dto.setUserName(u.getUserName());
+        dto.setNickName(u.getNickName());
+        dto.setAvatar(u.getAvatar());
+        return dto;
     }
 }

@@ -102,6 +102,64 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     @Transactional(value = "chatTransactionManager", readOnly = true)
+    public ChatConversation getById(Long conversationId) {
+        return conversationRepository.findById(conversationId).orElse(null);
+    }
+
+    @Override
+    @Transactional("chatTransactionManager")
+    public ChatConversation createGroup(String ownerUserId, String title, List<String> memberUserIds) {
+        ChatConversation conv = new ChatConversation();
+        conv.setType(TYPE_GROUP);
+        conv.setTitle(title);
+        conv.setOwnerUserId(ownerUserId);
+        conv.setCreateTime(LocalDateTime.now());
+        conv.setLastMessageAt(LocalDateTime.now());
+        ChatConversation saved = conversationRepository.save(conv);
+        // bb 用 groupId = conv-{id}
+        saved.setBbGroupId("conv-" + saved.getId());
+        conversationRepository.save(saved);
+
+        // 群主
+        addMemberInternal(saved.getId(), ownerUserId, ROLE_OWNER);
+        // 其他成员去重、排除群主
+        if (memberUserIds != null) {
+            memberUserIds.stream().filter(uid -> uid != null && !uid.equals(ownerUserId)).distinct()
+                    .forEach(uid -> addMemberInternal(saved.getId(), uid, ROLE_MEMBER));
+        }
+        return saved;
+    }
+
+    @Override
+    @Transactional("chatTransactionManager")
+    public void addMembers(Long conversationId, List<String> memberUserIds) {
+        if (memberUserIds == null) {
+            return;
+        }
+        memberUserIds.stream().filter(uid -> uid != null).distinct()
+                .forEach(uid -> addMemberInternal(conversationId, uid, ROLE_MEMBER));
+    }
+
+    @Override
+    @Transactional("chatTransactionManager")
+    public void removeMember(Long conversationId, String memberUserId) {
+        memberRepository.deleteByConversationIdAndMemberUserId(conversationId, memberUserId);
+    }
+
+    private void addMemberInternal(Long conversationId, String userId, String role) {
+        if (memberRepository.existsByConversationIdAndMemberUserId(conversationId, userId)) {
+            return;
+        }
+        ChatConversationMember m = new ChatConversationMember();
+        m.setConversationId(conversationId);
+        m.setMemberUserId(userId);
+        m.setRole(role);
+        m.setJoinedAt(LocalDateTime.now());
+        memberRepository.save(m);
+    }
+
+    @Override
+    @Transactional(value = "chatTransactionManager", readOnly = true)
     public boolean isMember(Long conversationId, String userId) {
         return memberRepository.existsByConversationIdAndMemberUserId(conversationId, userId);
     }

@@ -48,6 +48,15 @@ public class UserController {
     }
 
     /**
+     * 模糊搜索用户（普通用户可用，供建群选人）
+     */
+    @GetMapping({"/search"})
+    @ApiOperation(value = "搜索用户（建群选人）")
+    public AjaxResult searchUsers(@RequestParam(value = "keyword", required = false) String keyword) {
+        return AjaxResult.success(userService.searchBrief(keyword));
+    }
+
+    /**
      * 管理员分页查询用户
      */
     @GetMapping({"/manage/page"})

@@ -2,7 +2,8 @@
 import { ref, computed, watch } from 'vue'
 import { Search, Close, Check } from '@element-plus/icons-vue'
 import ChatAvatar from './ChatAvatar.vue'
-import { directory } from './botMockData.js'
+import { searchUsers } from '@/api/chat/chat'
+import logger from '@/utils/logger'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -18,37 +19,60 @@ const visible = computed({
 const groupName = ref('')
 const keyword = ref('')
 const selected = ref([])
+const candidates = ref([])
+const loading = ref(false)
+const submitting = ref(false)
+
+const runSearch = async () => {
+  loading.value = true
+  try {
+    const res = await searchUsers(keyword.value.trim())
+    candidates.value = res.data || []
+  } catch (err) {
+    logger.error('搜索用户失败:', err)
+    candidates.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+let searchTimer = null
+watch(keyword, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(runSearch, 250)
+})
 
 watch(visible, (v) => {
   if (v) {
     groupName.value = ''
     keyword.value = ''
     selected.value = []
+    candidates.value = []
+    submitting.value = false
+    runSearch()
   }
 })
 
-const candidates = computed(() => {
-  const k = keyword.value.trim().toLowerCase()
-  return directory.filter((u) => {
-    if (!k) return true
-    return (u.nickName || '').toLowerCase().includes(k) || (u.userName || '').toLowerCase().includes(k)
-  })
-})
-
-const isSelected = (u) => selected.value.some((s) => s.userId === u.userId)
+const isSelected = (u) => selected.value.some((s) => String(s.userId) === String(u.userId))
 const toggle = (u) => {
-  if (isSelected(u)) selected.value = selected.value.filter((s) => s.userId !== u.userId)
+  if (isSelected(u)) selected.value = selected.value.filter((s) => String(s.userId) !== String(u.userId))
   else selected.value.push(u)
 }
-const removeChip = (u) => { selected.value = selected.value.filter((s) => s.userId !== u.userId) }
+const removeChip = (u) => { selected.value = selected.value.filter((s) => String(s.userId) !== String(u.userId)) }
 
-const canCreate = computed(() => groupName.value.trim().length > 0 && selected.value.length >= 1)
+const canCreate = computed(() => groupName.value.trim().length > 0 && selected.value.length >= 1 && !submitting.value)
 
 const submit = () => {
   if (!canCreate.value) return
-  emit('created', { title: groupName.value.trim(), members: [...selected.value] })
-  visible.value = false
+  submitting.value = true
+  emit('created', {
+    title: groupName.value.trim(),
+    memberUserIds: selected.value.map((u) => String(u.userId))
+  })
 }
+
+// 父组件创建完成后会关闭弹窗；这里暴露一个失败回滚（重新允许提交）
+defineExpose({ resetSubmitting: () => { submitting.value = false } })
 </script>
 
 <template>

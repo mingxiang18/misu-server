@@ -10,6 +10,7 @@ import logger from '@/utils/logger'
 const props = defineProps({
   conversation: { type: Object, default: null },
   currentUser: { type: Object, required: true },
+  members: { type: Array, default: () => [] },
   isMobile: { type: Boolean, default: false }
 })
 const emit = defineEmits(['back', 'open-members'])
@@ -30,9 +31,10 @@ const subtitle = computed(() => {
   if (isGroup.value) return `${props.conversation.memberCount || (props.conversation.members ? props.conversation.members.length : 0)} 名成员 · 含冥想bb`
   return connStatus.value === 'open' ? '在线 · 随时陪你聊' : (connStatus.value === 'offline' ? '连接已断开' : '连接中…')
 })
+// 群成员（来自服务端 listMembers，含 self 标记 + bb）；@ 列表排除自己
 const mentionTargets = computed(() => {
-  if (!isGroup.value || !props.conversation.members) return []
-  return props.conversation.members.filter((m) => String(m.userId) !== String(props.currentUser.userId))
+  if (!isGroup.value) return []
+  return (props.members || []).filter((m) => !m.self)
 })
 
 /* ------------------ Connection state ------------------ */

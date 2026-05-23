@@ -6,8 +6,8 @@ import { botProfile } from './botProfile.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
-  conversation: { type: Object, default: null },
-  currentUser: { type: Object, required: true },
+  // 服务端 MemberDto[]：{ userId, nickName, avatar, role, botFlag, self }
+  members: { type: Array, default: () => [] },
   isMobile: { type: Boolean, default: false }
 })
 const emit = defineEmits(['update:modelValue', 'add-member', 'remove-member', 'leave'])
@@ -17,12 +17,12 @@ const visible = computed({
   set: (v) => emit('update:modelValue', v)
 })
 
-const members = computed(() => (props.conversation && props.conversation.members) || [])
-const isOwner = computed(() => props.conversation && String(props.conversation.ownerUserId) === String(props.currentUser.userId))
+const members = computed(() => props.members || [])
+const isOwner = computed(() => members.value.some((m) => m.self && m.role === 'OWNER'))
 
-const label = (m) => (m.botFlag ? '冥想bb' : (m.nickName || m.userName))
-const isMe = (m) => String(m.userId) === String(props.currentUser.userId)
-const canRemove = (m) => isOwner.value && !m.botFlag && !isMe(m)
+const label = (m) => (m.botFlag ? '冥想bb' : (m.nickName || m.userName || m.userId))
+const isMe = (m) => !!m.self
+const canRemove = (m) => isOwner.value && !m.botFlag && !m.self
 </script>
 
 <template>

@@ -40,3 +40,28 @@ export function pageMessages(conversationId, params) {
         params
     });
 }
+
+// 创建群聊
+export function createGroup(data) {
+    return request({ url: '/fileServer/chat/conversation/group', method: 'post', data });
+}
+
+// 添加群成员
+export function addGroupMembers(conversationId, userIds) {
+    return request({ url: `/fileServer/chat/conversation/${conversationId}/member`, method: 'post', data: { userIds } });
+}
+
+// 移除群成员 / 退群
+export function removeGroupMember(conversationId, userId) {
+    return request({ url: `/fileServer/chat/conversation/${conversationId}/member/${userId}`, method: 'delete' });
+}
+
+// 群成员列表（含 bb）
+export function listGroupMembers(conversationId) {
+    return request({ url: `/fileServer/chat/conversation/${conversationId}/member/list`, method: 'get' });
+}
+
+// 搜索用户（建群选人）
+export function searchUsers(keyword) {
+    return request({ url: '/account/user/search', method: 'get', params: { keyword } });
+}

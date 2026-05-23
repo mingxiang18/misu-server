@@ -3,10 +3,9 @@ package com.misu.chat.config;
 import com.bb.bot.client.BbWebSocketClient;
 import com.bb.bot.constant.BbCapability;
 import com.misu.chat.connection.ChatConnectionManager;
+import com.misu.chat.connection.ChatInboundRouter;
 import com.misu.chat.connection.ChatWebSocketServer;
 import com.misu.chat.handler.BbMessageHandler;
-import com.misu.chat.service.ConversationService;
-import com.misu.chat.service.MessageService;
 import com.misu.security.service.TokenService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
@@ -43,10 +42,7 @@ public class ChatConnectionConfig {
     private TokenService tokenService;
 
     @Resource
-    private MessageService messageService;
-
-    @Resource
-    private ConversationService conversationService;
+    private ChatInboundRouter inboundRouter;
 
     /**
      * 注册与bb机器人的连接
@@ -73,6 +69,6 @@ public class ChatConnectionConfig {
      */
     @Bean
     public WebSocketServer botServerSocket () {
-        return new ChatWebSocketServer(botConfig, tokenService, botConnectionManager, messageService, conversationService);
+        return new ChatWebSocketServer(botConfig, tokenService, botConnectionManager, inboundRouter);
     }
 }

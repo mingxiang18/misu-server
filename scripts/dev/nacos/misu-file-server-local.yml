@@ -79,6 +79,14 @@ bot:
     appId: dev
     secret: dev
 
+# 聊天数据层 / 群聊参数（chat.*）
+chat:
+  # 本地无 bb 上游：开启 mock 机器人回复（走真实落库+广播+流式），私聊必回、群里 @bot 触发
+  mockBotReply: true
+  botUserId: bot
+  # 群里没 @bot 时的小概率随机插话（本地演示可调大，如 0.3）
+  groupRandomReplyRate: 0.1
+
 misu:
   static:
     path: ${user.home}/.misu-dev/files/
