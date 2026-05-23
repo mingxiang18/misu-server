@@ -12,6 +12,7 @@ import com.misu.chat.domain.message.ChatResponseMessage;
 import com.misu.chat.domain.message.ChatTokenMessage;
 import com.misu.chat.domain.message.ChatUserMessage;
 import com.misu.chat.handler.ChatMockBotResponder;
+import com.misu.chat.service.BotProfileService;
 import com.misu.chat.service.ConversationService;
 import com.misu.chat.service.MessageService;
 import com.misu.chat.service.UserInfoService;
@@ -21,6 +22,7 @@ import org.java_websocket.WebSocket;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +52,8 @@ public class ChatInboundRouter {
     private ChatConnectionManager connectionManager;
     @Resource
     private ChatConfig chatConfig;
+    @Resource
+    private BotProfileService botProfileService;
 
     public void handle(WebSocket senderWs, ChatTokenMessage token, ChatUserMessage msg) {
         String userId = token.getUserId().toString();
@@ -88,7 +92,19 @@ public class ChatInboundRouter {
             broadcaster.broadcastExcept(conversationId, fan, userId);
 
             // 触发 bot：@bot 或 小概率随机插话
+            // @bot 既认前端传来的 atUserIds（从 @ 选择窗选中 bb 时带上），
+            // 也兜底从正文文本里识别「@{bb名称}」——用户直接手打 @ 而没走选择窗时也能触发。
             boolean atBot = msg.getAtUserIds() != null && msg.getAtUserIds().contains(chatConfig.getBotUserId());
+            if (!atBot && mentionsBotByText(msg)) {
+                atBot = true;
+                // 文本识别命中时补进 atUserIds，保证转发给 bb 的 atUserList 也带上 bot
+                if (msg.getAtUserIds() == null) {
+                    msg.setAtUserIds(new ArrayList<>());
+                }
+                if (!msg.getAtUserIds().contains(chatConfig.getBotUserId())) {
+                    msg.getAtUserIds().add(chatConfig.getBotUserId());
+                }
+            }
             double rate = chatConfig.getGroupRandomReplyRate() == null ? 0 : chatConfig.getGroupRandomReplyRate();
             if (atBot || Math.random() < rate) {
                 triggerBot(conv, userId, token, msg);
@@ -134,6 +150,26 @@ public class ChatInboundRouter {
         bm.setMessageContentList(msg.getMessageContentList());
         bm.setSendTime(LocalDateTime.now());
         bbWebSocket.send(JSON.toJSONString(bm));
+    }
+
+    /** 兜底：用户手打「@{bb名称}」而没走 @ 选择窗时，从正文文本里识别是否在叫 bb。 */
+    private boolean mentionsBotByText(ChatUserMessage msg) {
+        if (msg.getMessageContentList() == null || msg.getMessageContentList().isEmpty()) {
+            return false;
+        }
+        String botName;
+        try {
+            botName = botProfileService.getProfile().getName();
+        } catch (Exception e) {
+            botName = null;
+        }
+        if (botName == null || botName.isBlank()) {
+            return false;
+        }
+        String needle = "@" + botName;
+        return msg.getMessageContentList().stream()
+                .filter(c -> BbSendMessageType.TEXT.equals(c.getType()) && c.getData() != null)
+                .anyMatch(c -> c.getData().toString().contains(needle));
     }
 
     private void sendControl(WebSocket ws, String type, String receiveMessageId) {
