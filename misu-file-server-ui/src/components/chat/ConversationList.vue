@@ -154,7 +154,7 @@ const fmtTime = (v) => {
   border-radius: var(--radius-md);
   background: var(--color-bg-muted);
   color: var(--color-text-primary);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-md); /* ≥16px：避免 iOS Safari 聚焦自动放大 */
   outline: none;
   transition: background var(--duration-fast) var(--ease-standard),
               border-color var(--duration-fast) var(--ease-standard);

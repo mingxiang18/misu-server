@@ -5,6 +5,7 @@ import { cacheUserInfo, getUserInfo, getUserInfoFromToken } from '@/api/user/use
 import SideNav from '@/components/layout/SideNav.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import TabBar from '@/components/layout/TabBar.vue'
+import { chatLayout } from '@/components/chat/chatLayout.js'
 
 const { isMobile, isDesktop } = useBreakpoint()
 
@@ -31,12 +32,12 @@ onMounted(() => {
 
     <div class="app-main-column">
       <PageHeader v-if="isDesktop" />
-      <main class="app-content">
+      <main class="app-content" :class="{ 'no-tab-bar': isMobile && chatLayout.hideTabBar }">
         <router-view />
       </main>
     </div>
 
-    <TabBar v-if="isMobile" />
+    <TabBar v-if="isMobile && !chatLayout.hideTabBar" />
   </div>
 </template>
 
@@ -77,5 +78,10 @@ onMounted(() => {
 
 .app-shell-mobile .app-content {
   padding-bottom: calc(var(--layout-tab-bar-height) + env(safe-area-inset-bottom));
+}
+
+/* 进入会话全屏聊天：TabBar 隐藏，去掉为它预留的底部内边距，聊天直达底部 */
+.app-shell-mobile .app-content.no-tab-bar {
+  padding-bottom: 0;
 }
 </style>

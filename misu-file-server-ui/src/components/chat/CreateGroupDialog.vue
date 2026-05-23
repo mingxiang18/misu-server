@@ -118,7 +118,7 @@ defineExpose({ resetSubmitting: () => { submitting.value = false } })
 
         <div class="cg-search">
           <Search class="cg-search-icon" />
-          <input v-model="keyword" class="cg-search-input" type="text" placeholder="搜索用户昵称 / 账号" />
+          <input v-model="keyword" class="cg-search-input" type="text" placeholder="输入完整昵称 / 账号（需精确匹配）" />
         </div>
 
         <div class="cg-candidates">
@@ -136,7 +136,7 @@ defineExpose({ resetSubmitting: () => { submitting.value = false } })
             </div>
             <span class="cg-cand-check"><Check /></span>
           </button>
-          <div v-if="candidates.length === 0" class="cg-cand-empty">没有匹配的用户</div>
+          <div v-if="candidates.length === 0" class="cg-cand-empty">{{ keyword.trim() ? '没有完全匹配的用户' : '输入完整昵称或账号查找（保护隐私，不支持模糊搜索）' }}</div>
         </div>
 
         <p v-if="!isAdd" class="cg-hint">冥想bb 会自动加入新群，群里 @它 即可让它回复</p>
@@ -186,7 +186,7 @@ defineExpose({ resetSubmitting: () => { submitting.value = false } })
   border-radius: var(--radius-md);
   background: var(--color-bg-surface);
   color: var(--color-text-primary);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-md); /* ≥16px：避免 iOS Safari 聚焦自动放大 */
   outline: none;
   transition: border-color var(--duration-fast) var(--ease-standard);
 }
@@ -213,7 +213,7 @@ defineExpose({ resetSubmitting: () => { submitting.value = false } })
   padding: 0 var(--space-3) 0 calc(var(--space-3) + 22px);
   border: 1px solid transparent; border-radius: var(--radius-md);
   background: var(--color-bg-muted); color: var(--color-text-primary);
-  font-size: var(--font-size-base); outline: none;
+  font-size: var(--font-size-md); outline: none; /* ≥16px：避免 iOS Safari 聚焦自动放大 */
   transition: background var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
 }
 .cg-search-input:focus { background: var(--color-bg-surface); border-color: var(--color-border-strong); }
