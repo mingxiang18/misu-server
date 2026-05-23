@@ -3,6 +3,7 @@ import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { Picture, Close, Promotion, Document, Download, ArrowLeft, More, Camera, RefreshRight, Folder } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import ChatAvatar from './ChatAvatar.vue'
+import ChatUsageBar from './ChatUsageBar.vue'
 import { botProfile, setBotAvatar } from './botProfile.js'
 import { getAccessToken, getServerWebSocketUrl, pageMessages, uploadChatFile, chatFileUrl } from '@/api/chat/chat'
 import { readMsgs, writeMsgs } from './chatCache.js'
@@ -499,6 +500,8 @@ const insertMention = (m) => {
       <button v-if="isGroup" class="chat-header-action" type="button" aria-label="群文件" @click="emit('open-files')"><Folder /></button>
       <button v-if="isGroup" class="chat-header-action" type="button" aria-label="群成员" @click="emit('open-members')"><More /></button>
     </header>
+
+    <ChatUsageBar v-if="!isGroup" :conversation-id="conversation.id" />
 
     <div v-if="connStatus === 'offline'" class="bot-conn-banner">
       <span>与冥想bb的连接已断开</span>
