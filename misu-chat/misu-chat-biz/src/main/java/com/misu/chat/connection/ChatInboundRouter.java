@@ -143,13 +143,29 @@ public class ChatInboundRouter {
         bm.setUserId(userId);
         bm.setSender(new MessageUser(userId, token.getUserName()));
         bm.setMessageId(msg.getMessageId());
-        bm.setMessage(msg.getMessageContentList().stream()
-                .filter(c -> BbSendMessageType.TEXT.equals(c.getType()))
+        // 文本里去掉「@bb名称」再发给 bb：bb 的关键字规则按纯文本匹配（如「图」精确匹配 ^/?(下*图|全图)$），
+        // 若把「@冥想bb 图」原样发过去会匹配不上。bb 自己被 @ 的判定走 atUserList（上面已带 botFlag）。
+        String text = msg.getMessageContentList().stream()
+                .filter(c -> BbSendMessageType.TEXT.equals(c.getType()) && c.getData() != null)
                 .map(c -> c.getData().toString())
-                .collect(Collectors.joining(" ")));
+                .collect(Collectors.joining(" "));
+        String botName = botName();
+        if (botName != null && !botName.isBlank()) {
+            text = text.replace("@" + botName, " ");
+        }
+        bm.setMessage(text.replaceAll("\\s+", " ").trim());
         bm.setMessageContentList(msg.getMessageContentList());
         bm.setSendTime(LocalDateTime.now());
         bbWebSocket.send(JSON.toJSONString(bm));
+    }
+
+    /** bb 的全局显示名（默认「冥想bb」）；取不到返回 null。 */
+    private String botName() {
+        try {
+            return botProfileService.getProfile().getName();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** 兜底：用户手打「@{bb名称}」而没走 @ 选择窗时，从正文文本里识别是否在叫 bb。 */
@@ -157,12 +173,7 @@ public class ChatInboundRouter {
         if (msg.getMessageContentList() == null || msg.getMessageContentList().isEmpty()) {
             return false;
         }
-        String botName;
-        try {
-            botName = botProfileService.getProfile().getName();
-        } catch (Exception e) {
-            botName = null;
-        }
+        String botName = botName();
         if (botName == null || botName.isBlank()) {
             return false;
         }
