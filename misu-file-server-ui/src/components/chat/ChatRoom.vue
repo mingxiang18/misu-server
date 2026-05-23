@@ -105,7 +105,8 @@ const mapServerMessage = (dto) => ({
   senderType: dto.senderType,
   senderUserId: dto.senderUserId,
   sender: { userId: dto.senderUserId, nickName: dto.senderNickName, avatar: dto.senderAvatar },
-  isSelf: dto.senderType === 'USER' && String(dto.senderUserId) === String(props.currentUser.userId),
+  // self 由服务端按已登录用户判定（前端 currentUser.userId 可能尚未就绪，不可靠）
+  isSelf: dto.self === true || (dto.senderType === 'USER' && props.currentUser.userId != null && String(dto.senderUserId) === String(props.currentUser.userId)),
   streamId: dto.streamId,
   streaming: false,
   time: fmtTime(dto.createTime)

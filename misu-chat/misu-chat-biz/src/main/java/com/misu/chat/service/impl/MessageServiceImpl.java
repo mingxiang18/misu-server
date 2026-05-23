@@ -72,7 +72,7 @@ public class MessageServiceImpl implements MessageService {
 
     @Override
     @Transactional(value = "chatTransactionManager", readOnly = true)
-    public List<MessageDto> pageHistory(Long conversationId, Long beforeId, int size) {
+    public List<MessageDto> pageHistory(Long conversationId, Long beforeId, int size, String currentUserId) {
         List<ChatMessage> desc = messageRepository.pageHistory(conversationId, beforeId, PageRequest.of(0, size));
         // 翻转为正序（旧→新）便于前端顺序追加
         List<ChatMessage> asc = new ArrayList<>(desc);
@@ -92,6 +92,8 @@ public class MessageServiceImpl implements MessageService {
             dto.setClientMessageId(m.getClientMessageId());
             dto.setSenderType(m.getSenderType());
             dto.setSenderUserId(m.getSenderUserId());
+            dto.setSelf(SENDER_USER.equals(m.getSenderType())
+                    && currentUserId != null && currentUserId.equals(m.getSenderUserId()));
             dto.setStreamId(m.getStreamId());
             dto.setCreateTime(m.getCreateTime());
             dto.setContent(JSON.parseArray(m.getContentJson(), BbMessageContent.class));

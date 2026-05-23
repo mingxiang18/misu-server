@@ -90,7 +90,7 @@ public class ChatController {
             return AjaxResult.error(403, "无权访问该会话");
         }
         int pageSize = (size == null || size <= 0) ? DEFAULT_PAGE_SIZE : size;
-        return AjaxResult.success(messageService.pageHistory(id, beforeId, pageSize));
+        return AjaxResult.success(messageService.pageHistory(id, beforeId, pageSize, currentUserId()));
     }
 
     private String currentUserId() {

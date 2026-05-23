@@ -23,6 +23,9 @@ public class MessageDto {
 
     private String senderUserId;
 
+    /** 是否为当前请求用户自己发的（服务端按已登录用户判定，前端据此靠右） */
+    private Boolean self;
+
     /** 发送人昵称（USER）；BOT 为 null */
     private String senderNickName;
 
