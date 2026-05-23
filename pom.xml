@@ -50,7 +50,7 @@
         <commons-collections4.version>4.4</commons-collections4.version>
         <commons-lang3.version>3.17.0</commons-lang3.version>
         <thumbnailator.version>0.4.20</thumbnailator.version>
-        <bb-bot-sdk.version>1.0.3</bb-bot-sdk.version>
+        <bb-bot-sdk.version>1.0.4</bb-bot-sdk.version>
         <rome.version>1.15.0</rome.version>
         <alibaba-cloud-version>2023.0.3.2</alibaba-cloud-version>
         <sentinel-datasource-nacos-version>1.8.8</sentinel-datasource-nacos-version>
