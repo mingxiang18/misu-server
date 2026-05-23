@@ -28,6 +28,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -214,6 +215,19 @@ public class ChatController {
         return AjaxResult.success();
     }
 
+    /** 上传群文件到磁盘，返回元数据（含 id，前端据此在消息里放引用） */
+    @PostMapping("/conversation/{id}/file/upload")
+    @ApiOperation(value = "上传群文件")
+    public AjaxResult uploadFile(@PathVariable("id") Long id,
+                                 @RequestParam("file") MultipartFile file,
+                                 @RequestParam(value = "category", required = false) String category) {
+        String me = currentUserId();
+        if (!conversationService.isMember(id, me)) {
+            return AjaxResult.error(HttpStatus.FORBIDDEN, "无权访问该会话");
+        }
+        return AjaxResult.success(chatFileService.saveUploaded(id, me, "USER", file, category));
+    }
+
     /** 群文件列表 */
     @GetMapping("/conversation/{id}/file/list")
     @ApiOperation(value = "群文件列表")
@@ -246,7 +260,9 @@ public class ChatController {
         if (d.netUrl != null) {
             return ResponseEntity.status(302).location(URI.create(d.netUrl)).build();
         }
-        ContentDisposition cd = ContentDisposition.attachment()
+        // 图片用 inline 便于 <img> 内联显示；其余按附件下载
+        boolean inline = "image".equals(f.getCategory());
+        ContentDisposition cd = (inline ? ContentDisposition.inline() : ContentDisposition.attachment())
                 .filename(d.fileName != null ? d.fileName : "file", StandardCharsets.UTF_8).build();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentDisposition(cd);

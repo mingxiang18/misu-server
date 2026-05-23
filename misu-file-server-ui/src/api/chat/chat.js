@@ -81,6 +81,25 @@ export function setBotAvatarApi(avatar) {
     return request({ url: '/fileServer/chat/bot/profile/avatar', method: 'post', data: { avatar } });
 }
 
+// 上传文件到磁盘，返回 {id, fileName, mimeType, size, category}（消息里放引用）
+export function uploadChatFile(conversationId, file, category) {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (category) fd.append('category', category);
+    return request({
+        url: `/fileServer/chat/conversation/${conversationId}/file/upload`,
+        method: 'post',
+        data: fd,
+        headers: { 'Content-Type': 'multipart/form-data' }
+    });
+}
+
+// 群文件下载地址（cookie 鉴权，可直接用于 <img src> / <a href>）
+export function chatFileUrl(fileId) {
+    const base = import.meta.env.VITE_BASE_API || '/';
+    return `${base}fileServer/chat/file/${fileId}/download`;
+}
+
 // 群文件列表
 export function listGroupFiles(conversationId) {
     return request({ url: `/fileServer/chat/conversation/${conversationId}/file/list`, method: 'get' });

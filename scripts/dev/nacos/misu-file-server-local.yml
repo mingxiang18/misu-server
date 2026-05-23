@@ -86,6 +86,9 @@ chat:
   botUserId: bot
   # 群里没 @bot 时的小概率随机插话（本地演示可调大，如 0.3）
   groupRandomReplyRate: 0.1
+  # 群文件磁盘存储目录（消息只放引用，文件不再 base64 进库）
+  file:
+    path: ${user.home}/.misu-dev/files/chat/
 
 misu:
   static:

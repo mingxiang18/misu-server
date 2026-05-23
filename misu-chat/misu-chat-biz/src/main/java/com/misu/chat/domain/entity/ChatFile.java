@@ -52,7 +52,19 @@ public class ChatFile {
     @Column(name = "size")
     private Long size;
 
-    /** localFile / netFile（决定下载是解码 base64 还是跳转 url） */
+    /** image / file —— 决定前端内联渲染还是文件卡片 */
+    @Column(name = "category", length = 16)
+    private String category;
+
+    /** 磁盘相对路径（{conversationId}/{uuid.ext}）；外链文件为 null */
+    @Column(name = "store_path", length = 512)
+    private String storePath;
+
+    /** 外链 URL（bb 返回的 netFile）；磁盘文件为 null */
+    @Column(name = "net_url", length = 1024)
+    private String netUrl;
+
+    /** 兼容旧数据：localFile / netFile（旧消息内容内联 base64 的来源标记） */
     @Column(name = "source_type", length = 16)
     private String sourceType;
 

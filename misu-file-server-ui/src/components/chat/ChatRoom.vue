@@ -4,7 +4,7 @@ import { Picture, Close, Promotion, Document, Download, ArrowLeft, More, Camera,
 import { ElMessage } from 'element-plus'
 import ChatAvatar from './ChatAvatar.vue'
 import { botProfile, setBotAvatar } from './botProfile.js'
-import { getAccessToken, getServerWebSocketUrl, pageMessages } from '@/api/chat/chat'
+import { getAccessToken, getServerWebSocketUrl, pageMessages, uploadChatFile, chatFileUrl } from '@/api/chat/chat'
 import logger from '@/utils/logger'
 
 const props = defineProps({
@@ -92,9 +92,17 @@ const readBase64 = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file)
 })
 
+// 文件下载地址：新引用走磁盘下载接口；旧数据兼容（netFile 外链 / localFile base64）
 const fileHref = (c) => {
+  if (c.type === 'chatFile') return chatFileUrl(c.data)
   if (c.type === 'netFile') return c.data
   return 'data:' + (c.mimeType || 'application/octet-stream') + ';base64,' + c.data
+}
+// 图片地址：新引用走磁盘接口（cookie 鉴权内联显示）；旧数据兼容
+const imageSrc = (c) => {
+  if (c.type === 'chatImage') return chatFileUrl(c.data)
+  if (c.type === 'localImage') return 'data:' + (c.mimeType || 'image/png') + ';base64,' + c.data
+  return c.data
 }
 
 const scrollToBottom = () => {
@@ -150,17 +158,21 @@ const sendMessage = async () => {
   const content = []
   if (newMessage.value && newMessage.value.trim()) content.push({ type: 'text', data: newMessage.value })
   try {
+    // 附件先上传到磁盘，消息里只放引用（fileId），不再内联 base64
+    // fileId 放在 data 字段（content 走 bb SDK 的 BbMessageContent，只认 type/data/fileName/mimeType/size）
     if (imageList.value.length > 0) {
       const raw = imageList.value[0].raw
-      content.push({ type: 'localImage', data: await readBase64(raw), fileName: raw.name, mimeType: raw.type, size: raw.size })
+      const d = (await uploadChatFile(props.conversation.id, raw, 'image')).data
+      content.push({ type: 'chatImage', data: d.id, fileName: d.fileName, mimeType: d.mimeType, size: d.size })
     }
     if (fileList.value.length > 0) {
       const raw = fileList.value[0].raw
-      content.push({ type: 'localFile', data: await readBase64(raw), fileName: raw.name, mimeType: raw.type, size: raw.size })
+      const d = (await uploadChatFile(props.conversation.id, raw, 'file')).data
+      content.push({ type: 'chatFile', data: d.id, fileName: d.fileName, mimeType: d.mimeType, size: d.size })
     }
   } catch (err) {
-    logger.error('附件读取失败:', err)
-    ElMessage.error('附件读取失败，请重试')
+    logger.error('附件上传失败:', err)
+    ElMessage.error('附件上传失败，请重试')
     return
   }
 
@@ -451,9 +463,9 @@ const insertMention = (m) => {
               <div class="bot-bubble" :class="{ self: message.isSelf, bot: message.senderType === 'BOT' }">
                 <template v-for="(content, ci) in message.content" :key="ci">
                   <span v-if="content.type === 'text'" class="bot-text" :class="{ 'bot-text-streaming': message.streaming }" v-html="formatText(content.data)"></span>
-                  <img v-else-if="content.type === 'netImage' || content.type === 'localImage'" class="bot-image"
-                       :src="content.type === 'localImage' ? ('data:' + (content.mimeType || 'image/png') + ';base64,' + content.data) : content.data" alt="" />
-                  <a v-else-if="content.type === 'netFile' || content.type === 'localFile'" class="bot-file" :href="fileHref(content)" :download="content.fileName || 'file'" target="_blank" rel="noopener">
+                  <img v-else-if="content.type === 'chatImage' || content.type === 'netImage' || content.type === 'localImage'" class="bot-image"
+                       :src="imageSrc(content)" alt="" />
+                  <a v-else-if="content.type === 'chatFile' || content.type === 'netFile' || content.type === 'localFile'" class="bot-file" :href="fileHref(content)" :download="content.fileName || 'file'" target="_blank" rel="noopener">
                     <span class="bot-file-icon"><Document /></span>
                     <span class="bot-file-meta">
                       <span class="bot-file-name">{{ content.fileName || '文件' }}</span>

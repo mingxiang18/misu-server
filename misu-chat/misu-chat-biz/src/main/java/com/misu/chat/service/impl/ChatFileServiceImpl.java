@@ -11,25 +11,38 @@ import com.misu.chat.repository.ChatFileRepository;
 import com.misu.chat.repository.ChatMessageRepository;
 import com.misu.chat.service.ChatFileService;
 import com.misu.chat.service.UserInfoService;
+import com.misu.common.constant.HttpStatus;
+import com.misu.common.exception.ServiceException;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 public class ChatFileServiceImpl implements ChatFileService {
 
-    private static final String TYPE_LOCAL_FILE = "localFile";
-    private static final String TYPE_NET_FILE = "netFile";
+    private static final String CAT_IMAGE = "image";
+    private static final String CAT_FILE = "file";
+
+    @Value("${chat.file.path:}")
+    private String configuredPath;
 
     @Resource
     private ChatFileRepository fileRepository;
@@ -37,6 +50,63 @@ public class ChatFileServiceImpl implements ChatFileService {
     private ChatMessageRepository messageRepository;
     @Resource
     private UserInfoService userInfoService;
+
+    private Path baseDir() {
+        String p = StringUtils.hasText(configuredPath)
+                ? configuredPath
+                : System.getProperty("user.home") + "/.misu-dev/files/chat/";
+        return Paths.get(p);
+    }
+
+    @Override
+    @Transactional("chatTransactionManager")
+    public FileDto saveUploaded(Long conversationId, String uploaderUserId, String senderType,
+                                MultipartFile file, String category) {
+        if (file == null || file.isEmpty()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "文件为空");
+        }
+        String original = file.getOriginalFilename() != null ? file.getOriginalFilename() : "file";
+        String cat = CAT_IMAGE.equals(category) ? CAT_IMAGE : CAT_FILE;
+        String ext = "";
+        int dot = original.lastIndexOf('.');
+        if (dot >= 0) {
+            ext = original.substring(dot);
+        }
+        String diskName = UUID.randomUUID().toString().replace("-", "") + ext;
+        String relPath = conversationId + "/" + diskName;
+        try {
+            Path dir = baseDir().resolve(String.valueOf(conversationId));
+            Files.createDirectories(dir);
+            file.transferTo(dir.resolve(diskName).toFile());
+        } catch (IOException e) {
+            log.error("保存群文件失败", e);
+            throw new ServiceException(HttpStatus.ERROR, "文件保存失败");
+        }
+
+        ChatFile f = new ChatFile();
+        f.setConversationId(conversationId);
+        f.setUploaderUserId(uploaderUserId);
+        f.setSenderType(senderType);
+        f.setFileName(original);
+        f.setMimeType(file.getContentType());
+        f.setSize(file.getSize());
+        f.setCategory(cat);
+        f.setStorePath(relPath);
+        f.setDeleted(false);
+        f.setCreateTime(LocalDateTime.now());
+        ChatFile saved = fileRepository.save(f);
+
+        FileDto dto = new FileDto();
+        dto.setId(saved.getId());
+        dto.setFileName(saved.getFileName());
+        dto.setMimeType(saved.getMimeType());
+        dto.setSize(saved.getSize());
+        dto.setCategory(saved.getCategory());
+        dto.setSenderType(senderType);
+        dto.setUploaderUserId(uploaderUserId);
+        dto.setCreateTime(saved.getCreateTime());
+        return dto;
+    }
 
     @Override
     @Transactional("chatTransactionManager")
@@ -55,8 +125,8 @@ public class ChatFileServiceImpl implements ChatFileService {
         }
         for (int i = 0; i < arr.size(); i++) {
             JSONObject c = arr.getJSONObject(i);
-            String type = c.getString("type");
-            if (!TYPE_LOCAL_FILE.equals(type) && !TYPE_NET_FILE.equals(type)) {
+            // 只索引 bb 返回的外链文件；磁盘文件在上传时已登记
+            if (!"netFile".equals(c.getString("type"))) {
                 continue;
             }
             ChatFile f = new ChatFile();
@@ -67,7 +137,9 @@ public class ChatFileServiceImpl implements ChatFileService {
             f.setFileName(c.getString("fileName") != null ? c.getString("fileName") : "文件");
             f.setMimeType(c.getString("mimeType"));
             f.setSize(c.getLong("size"));
-            f.setSourceType(type);
+            f.setCategory(CAT_FILE);
+            f.setNetUrl(c.getString("data"));
+            f.setSourceType("netFile");
             f.setDeleted(false);
             f.setCreateTime(LocalDateTime.now());
             fileRepository.save(f);
@@ -77,11 +149,13 @@ public class ChatFileServiceImpl implements ChatFileService {
     @Override
     @Transactional(value = "chatTransactionManager", readOnly = true)
     public List<FileDto> listFiles(Long conversationId, String currentUserId, String conversationOwnerId) {
-        List<ChatFile> files = fileRepository.findByConversationIdAndDeletedFalseOrderByCreateTimeDesc(conversationId);
+        // 群文件面板只列「文件」，图片在聊天里内联显示不进列表
+        List<ChatFile> files = fileRepository.findByConversationIdAndDeletedFalseOrderByCreateTimeDesc(conversationId)
+                .stream().filter(f -> !CAT_IMAGE.equals(f.getCategory())).collect(Collectors.toList());
         Set<String> uploaderIds = files.stream()
-                .map(ChatFile::getUploaderUserId).filter(java.util.Objects::nonNull)
+                .map(ChatFile::getUploaderUserId).filter(Objects::nonNull)
                 .collect(Collectors.toCollection(HashSet::new));
-        Map<String, UserBriefDto> userMap = userInfoService.batchGet(uploaderIds);
+        java.util.Map<String, UserBriefDto> userMap = userInfoService.batchGet(uploaderIds);
         boolean isOwner = currentUserId != null && currentUserId.equals(conversationOwnerId);
 
         return files.stream().map(f -> {
@@ -90,6 +164,7 @@ public class ChatFileServiceImpl implements ChatFileService {
             dto.setFileName(f.getFileName());
             dto.setMimeType(f.getMimeType());
             dto.setSize(f.getSize());
+            dto.setCategory(f.getCategory());
             dto.setSenderType(f.getSenderType());
             dto.setUploaderUserId(f.getUploaderUserId());
             dto.setCreateTime(f.getCreateTime());
@@ -114,35 +189,43 @@ public class ChatFileServiceImpl implements ChatFileService {
     @Transactional(value = "chatTransactionManager", readOnly = true)
     public FileDownload download(Long fileId) {
         ChatFile f = fileRepository.findById(fileId).orElse(null);
-        if (f == null || Boolean.TRUE.equals(f.getDeleted()) || f.getMessageId() == null) {
+        if (f == null || Boolean.TRUE.equals(f.getDeleted())) {
             return null;
         }
-        ChatMessage msg = messageRepository.findById(f.getMessageId()).orElse(null);
-        if (msg == null || msg.getContentJson() == null) {
-            return null;
+        FileDownload d = new FileDownload();
+        d.fileName = f.getFileName();
+        d.mimeType = f.getMimeType() != null ? f.getMimeType() : "application/octet-stream";
+
+        // 1) 磁盘文件
+        if (StringUtils.hasText(f.getStorePath())) {
+            try {
+                d.bytes = Files.readAllBytes(baseDir().resolve(f.getStorePath()));
+                return d;
+            } catch (IOException e) {
+                log.error("读取磁盘文件失败: {}", f.getStorePath(), e);
+                return null;
+            }
         }
-        JSONArray arr = JSON.parseArray(msg.getContentJson());
-        for (int i = 0; i < arr.size(); i++) {
-            JSONObject c = arr.getJSONObject(i);
-            String type = c.getString("type");
-            if (!f.getSourceType().equals(type)) {
-                continue;
-            }
-            // 同消息可能多文件：用 fileName 进一步匹配
-            String fn = c.getString("fileName");
-            if (f.getFileName() != null && fn != null && !f.getFileName().equals(fn)) {
-                continue;
-            }
-            FileDownload d = new FileDownload();
-            d.fileName = f.getFileName();
-            d.mimeType = f.getMimeType() != null ? f.getMimeType() : "application/octet-stream";
-            if (TYPE_NET_FILE.equals(type)) {
-                d.netUrl = c.getString("data");
-            } else {
-                String base64 = c.getString("data");
-                d.bytes = base64 != null ? Base64.getDecoder().decode(base64) : new byte[0];
-            }
+        // 2) 外链
+        if (StringUtils.hasText(f.getNetUrl())) {
+            d.netUrl = f.getNetUrl();
             return d;
+        }
+        // 3) 兼容旧数据：base64 内联在消息 content_json
+        if (f.getMessageId() != null) {
+            ChatMessage msg = messageRepository.findById(f.getMessageId()).orElse(null);
+            if (msg != null && msg.getContentJson() != null) {
+                JSONArray arr = JSON.parseArray(msg.getContentJson());
+                for (int i = 0; i < arr.size(); i++) {
+                    JSONObject c = arr.getJSONObject(i);
+                    String fn = c.getString("fileName");
+                    if (f.getFileName() != null && f.getFileName().equals(fn)) {
+                        String base64 = c.getString("data");
+                        d.bytes = base64 != null ? Base64.getDecoder().decode(base64) : new byte[0];
+                        return d;
+                    }
+                }
+            }
         }
         return null;
     }

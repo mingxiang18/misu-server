@@ -13,6 +13,8 @@ public class FileDto {
     private String fileName;
     private String mimeType;
     private Long size;
+    /** image / file */
+    private String category;
     private String senderType;
     private String uploaderUserId;
     private String uploaderName;

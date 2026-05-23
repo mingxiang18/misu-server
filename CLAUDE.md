@@ -11,7 +11,7 @@
 | MySQL | 3316 | — |
 | Nacos | 8848 | `nacos/nacos` |
 
-模块：`misu-framework`（含 `misu-security` JWT 过滤链）、`misu-net`（Nacos/Cloud 公共配置）、`misu-chat`（聊天 / 群聊 / bb 机器人接入，旧名 misu-bot；包 `com.misu.chat`）、`misu-web`。配置分两层刻意区分：**`bot.*`**（bb 机器人连接 + 它的 WS 桥，prod Nacos 已有不改：`bot.enable`/`bot.serverPort`=30201/`bot.serverWebSocketUrl`/`bot.token.expireTtl`/`bot.bbConnection.*`）；**`chat.*`**（聊天数据层新增：`spring.datasource.chat` 指向库 `misu_chat`，群聊参数 `chat.groupRandomReplyRate`/`chat.botUserId`）。
+模块：`misu-framework`（含 `misu-security` JWT 过滤链）、`misu-net`（Nacos/Cloud 公共配置）、`misu-chat`（聊天 / 群聊 / bb 机器人接入，旧名 misu-bot；包 `com.misu.chat`）、`misu-web`。配置分两层刻意区分：**`bot.*`**（bb 机器人连接 + 它的 WS 桥，prod Nacos 已有不改：`bot.enable`/`bot.serverPort`=30201/`bot.serverWebSocketUrl`/`bot.token.expireTtl`/`bot.bbConnection.*`）；**`chat.*`**（聊天数据层新增：`spring.datasource.chat` 指向库 `misu_chat`，群聊参数 `chat.groupRandomReplyRate`/`chat.botUserId`，群文件磁盘目录 `chat.file.path`——文件/图片存盘、消息只放引用 fileId，**prod 需挂持久卷**）。
 
 ## 本机工具链（per-machine，禁止改进脚本）
 
