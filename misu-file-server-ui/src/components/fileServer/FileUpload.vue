@@ -46,6 +46,8 @@ const props = defineProps({
 const fileUploadStateList = ref([])
 
 const chunkSize = 1024 * 1024; // 上传分片大小为1MB
+// 高延迟链路（如 Cloudflare 隧道）下并发上传分片，吞吐随并发线性提升；后端每用户上限 8，取 4 留余量
+const UPLOAD_CONCURRENCY = 4;
 
 //将文件form封装为文件上传状态列表
 const formatFileStateList = () => {
@@ -190,12 +192,18 @@ const uploadFileAndUpdateState = async (fileUploadState, form) => {
     alreadyUploaded = new Set();
   }
 
-  // 上传每个分片
+  // 待传分片索引（跳过已落盘的），后端支持乱序上传、全片到齐才合并，故可并发
+  const pendingChunks = [];
   for (let i = 0; i < totalChunks; i++) {
-    if (alreadyUploaded.has(i)) {
-      continue; // 已传过的分片直接跳过
-    }
-    //计算分片的开始和结束位置，切割出分片
+    if (!alreadyUploaded.has(i)) pendingChunks.push(i);
+  }
+
+  let completedChunks = alreadyUploaded.size; // 已落盘的也计入进度
+  let aborted = false;
+  let abortResult = null; // { uploadState, failMessage }
+
+  // 上传单个分片
+  const uploadChunk = async (i) => {
     const start = i * chunkSize;
     const end = Math.min(start + chunkSize, file.size);
     const chunk = file.slice(start, end);
@@ -211,33 +219,40 @@ const uploadFileAndUpdateState = async (fileUploadState, form) => {
     chunkFormData.append('openType', form.get("openType"));
 
     try {
-      // 上传当前分片
       const response = await uploadFile(chunkFormData);
-
-      // 如果当前分片上传成功，更新状态
       if (response.data.uploadState === 1) {
-        // 更新进度
-        fileUploadState.progress = Math.round(((i + 1) / totalChunks) * 100);
-        //如果当前已经是该文件最后一个分片，更新状态为上传完成
-        if (i === totalChunks - 1) {
-          fileUploadState.uploadState = 2;
-          // 每上传成功，触发上传成功事件
-          emit('uploadSuccess');
-        }
+        completedChunks++;
+        fileUploadState.progress = Math.round((completedChunks / totalChunks) * 100);
       } else if (response.data.uploadState === 2) {
-        fileUploadState.uploadState = 4; // 文件已存在
-        fileUploadState.failMessage = '文件已存在';
-        break; // 终止上传
+        aborted = true;
+        abortResult = { uploadState: 4, failMessage: '文件已存在' };
       } else {
-        fileUploadState.uploadState = 3; // 上传失败
-        fileUploadState.failMessage = response.data.uploadStateMessage;
-        break; // 终止上传
+        aborted = true;
+        abortResult = { uploadState: 3, failMessage: response.data.uploadStateMessage };
       }
     } catch (error) {
-      fileUploadState.uploadState = 3; // 上传失败
-      fileUploadState.failMessage = '服务器异常';
-      break; // 终止上传
+      aborted = true;
+      abortResult = { uploadState: 3, failMessage: '服务器异常' };
     }
+  };
+
+  // 并发池：最多 UPLOAD_CONCURRENCY 片同时在飞；任一片失败即停止取新任务
+  let cursor = 0;
+  const worker = async () => {
+    while (!aborted && cursor < pendingChunks.length) {
+      await uploadChunk(pendingChunks[cursor++]);
+    }
+  };
+  const poolSize = Math.min(UPLOAD_CONCURRENCY, pendingChunks.length) || 1;
+  await Promise.all(Array.from({ length: poolSize }, () => worker()));
+
+  if (aborted) {
+    fileUploadState.uploadState = abortResult.uploadState;
+    fileUploadState.failMessage = abortResult.failMessage;
+  } else {
+    fileUploadState.progress = 100;
+    fileUploadState.uploadState = 2;
+    emit('uploadSuccess');
   }
 
   let uploadAllComplete = true;
