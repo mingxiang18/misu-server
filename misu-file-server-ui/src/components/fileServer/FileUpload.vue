@@ -45,7 +45,8 @@ const props = defineProps({
 
 const fileUploadStateList = ref([])
 
-const chunkSize = 1024 * 1024; // 上传分片大小为1MB
+// 分片 4MB：高延迟链路下摊薄每请求的建连/往返开销；单片须远小于 Cloudflare 源站 100s 超时（4MB 最坏 ~80s）
+const chunkSize = 4 * 1024 * 1024;
 // 高延迟链路（如 Cloudflare 隧道）下并发上传分片，吞吐随并发线性提升；后端每用户上限 8，取 4 留余量
 const UPLOAD_CONCURRENCY = 4;
 
