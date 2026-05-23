@@ -7,6 +7,7 @@ import com.misu.account.domain.dto.user.UserManageDto;
 import com.misu.account.domain.entity.QSysUser;
 import com.misu.account.domain.entity.SysUser;
 import com.misu.account.domain.entity.SysUserRole;
+import com.misu.account.dto.UserBriefDto;
 import com.misu.account.repository.SysUserRepository;
 import com.misu.account.repository.SysUserRoleRepository;
 import com.misu.account.service.UserService;
@@ -263,5 +264,20 @@ public class UserServiceImpl implements UserService {
         if (userRepository.exists(expression)) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "手机号已存在");
         }
+    }
+
+    @Override
+    public List<UserBriefDto> listBriefByIds(List<Long> userIds) {
+        if (CollectionUtils.isEmpty(userIds)) {
+            return Collections.emptyList();
+        }
+        return userRepository.findAllById(userIds).stream().map(u -> {
+            UserBriefDto dto = new UserBriefDto();
+            dto.setUserId(u.getUserId());
+            dto.setUserName(u.getUserName());
+            dto.setNickName(u.getNickName());
+            dto.setAvatar(u.getAvatar());
+            return dto;
+        }).collect(Collectors.toList());
     }
 }

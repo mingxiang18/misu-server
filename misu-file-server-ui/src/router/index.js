@@ -16,7 +16,7 @@ import SharedDownload from '@/components/fileServer/SharedDownload.vue';
 import AuditLogView from '@/components/fileServer/AuditLogView.vue';
 import UserDirectoryAdmin from '@/views/admin/UserDirectoryAdmin.vue';
 import StagingExplorer from '@/views/admin/StagingExplorer.vue';
-import BotChat from '@/components/bot/BotChat.vue';
+import ChatWorkspace from '@/components/chat/ChatWorkspace.vue';
 import EpubViewer from '@/components/utils/EpubViewer.vue';
 import PdfViewer from '@/components/utils/PdfViewer.vue';
 import TextViewer from '@/components/utils/TextViewer.vue';
@@ -44,7 +44,8 @@ const routes = [
             { path: 'fileServer/epubViewer', component: EpubViewer, name: 'EpubViewer' },
             { path: 'fileServer/pdfViewer', component: PdfViewer, name: 'PdfViewer' },
             { path: 'fileServer/textViewer', component: TextViewer, name: 'TextViewer' },
-            { path: 'bot', component: BotChat, name: 'BotChat' },
+            { path: 'chat', component: ChatWorkspace, name: 'ChatWorkspace' },
+            { path: 'chat/:conversationId', component: ChatWorkspace, name: 'ChatConversation' },
         ],
     },
     {   path: '/login', component: Login },

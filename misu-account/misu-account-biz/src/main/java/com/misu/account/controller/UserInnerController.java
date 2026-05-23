@@ -1,6 +1,7 @@
 package com.misu.account.controller;
 
 import com.misu.account.domain.dto.auth.LoginUserDto;
+import com.misu.account.dto.UserBriefDto;
 import com.misu.account.dto.VerifyCredentialsRequestDto;
 import com.misu.account.dto.VerifyCredentialsResponseDto;
 import com.misu.account.service.UserService;
@@ -17,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 用户相关Controller（内部接口）
@@ -86,5 +89,14 @@ public class UserInnerController {
         response.setUserName(loginUserDto.getUserName());
         response.setAuthorities(loginUserDto.getAuthorities());
         return response;
+    }
+
+    /**
+     * 按用户 id 批量查询简要信息（昵称/头像），供 chat 等服务展示成员 / 回填发送人。
+     */
+    @PostMapping("/listByIds")
+    @ApiOperation(value = "按用户id批量查询简要信息")
+    public List<UserBriefDto> listByIds(@RequestBody List<Long> userIds) {
+        return userService.listBriefByIds(userIds);
     }
 }

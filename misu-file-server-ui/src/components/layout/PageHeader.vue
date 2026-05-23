@@ -14,7 +14,7 @@ const titleByPath = {
   '/': '首页',
   '/userManagement': '用户管理',
   '/languageLearn': '语言学习',
-  '/bot': '机器人'
+  '/chat': '聊天'
 }
 
 const titleByMatch = [

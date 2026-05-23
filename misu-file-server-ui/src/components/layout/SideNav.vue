@@ -54,7 +54,7 @@ const nav = computed(() => {
     { key: 'home',      label: '首页',     icon: House,        to: '/' },
     { key: 'files',     label: '文件管理', icon: Folder,       children: filesChildren },
     { key: 'videoRoom', label: '放映室',   icon: VideoCamera,  to: '/fileServer/videoRoom', match: ['videoRoom'] },
-    { key: 'bot',       label: '机器人',   icon: ChatDotRound, to: '/bot' },
+    { key: 'bot',       label: '聊天',     icon: ChatDotRound, to: '/chat' },
     { key: 'learn',     label: '学习',     icon: Memo,         to: '/languageLearn' }
   ]
   if (isAdmin.value) {

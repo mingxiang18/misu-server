@@ -30,6 +30,16 @@ spring:
       hikari:
         maximum-pool-size: 8
         minimum-idle: 2
+    # 聊天模块第二数据源（misu_chat 库）：会话 / 成员 / 消息持久化
+    chat:
+      type: com.zaxxer.hikari.HikariDataSource
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      url: jdbc:mysql://127.0.0.1:3316/misu_chat?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowMultiQueries=true&useSSL=false&sessionVariables=sql_mode%3DNO_ENGINE_SUBSTITUTION
+      username: root
+      password: root
+      hikari:
+        maximum-pool-size: 8
+        minimum-idle: 2
 
   jpa:
     show-sql: false
@@ -53,6 +63,21 @@ token:
   expireTtl: 86400000
   refreshExpireTtl: 2592000000
   secret: vDW2/YL5VGg3wAub8ohhz2l+OUjtYa1k4twm4nNNzAY=
+
+# 聊天模块（旧名 bot；运行时配置仍走 bot.*，便于区分 bb 连接 vs chat 数据层）
+bot:
+  enable: true
+  serverPort: 30201
+  # 浏览器直接连这个 WS 服务端口（不经网关）；本地即 file-server 进程内的 WS 服务
+  serverWebSocketUrl: ws://127.0.0.1:30201
+  token:
+    expireTtl: 300000
+  # 本地无 bb 上游：用不可达地址占位。SDK 后台每 5s 重连一次，连不上不影响消息落库，
+  # 只是 bb 不会回复（前端会收到 bot_offline）。要测 bb 回复需填真实 bb 凭据。
+  bbConnection:
+    url: ws://127.0.0.1:39999
+    appId: dev
+    secret: dev
 
 misu:
   static:
