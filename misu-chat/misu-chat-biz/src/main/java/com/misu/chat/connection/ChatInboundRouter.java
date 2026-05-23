@@ -116,6 +116,13 @@ public class ChatInboundRouter {
         bm.setMessageType(isGroup ? MessageType.GROUP : MessageType.PRIVATE);
         if (isGroup) {
             bm.setGroupId(conv.getBbGroupId());
+            // 透传 @：把被 @ 的人放进 atUserList，bb 据此判断自己（botUserId）是否被呼叫。
+            // 不带这个字段，bb 收到群消息时不知道被 @，就不会回复。
+            if (msg.getAtUserIds() != null && !msg.getAtUserIds().isEmpty()) {
+                bm.setAtUserList(msg.getAtUserIds().stream()
+                        .map(uid -> new MessageUser(uid, chatConfig.getBotUserId().equals(uid)))
+                        .collect(Collectors.toList()));
+            }
         }
         bm.setUserId(userId);
         bm.setSender(new MessageUser(userId, token.getUserName()));
