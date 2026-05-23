@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed, inject, onMounted, watch } from 'vue'
+import { ref, computed, inject, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useBreakpoint } from '@/composables/useBreakpoint'
+import { chatLayout } from './chatLayout.js'
 import ConversationList from './ConversationList.vue'
 import ChatRoom from './ChatRoom.vue'
 import CreateGroupDialog from './CreateGroupDialog.vue'
@@ -13,6 +14,7 @@ import {
   listGroupFiles, downloadGroupFile, deleteGroupFile
 } from '@/api/chat/chat'
 import { loadBotProfile } from './botProfile.js'
+import { readConvList, writeConvList } from './chatCache.js'
 import { ElMessageBox } from 'element-plus'
 import logger from '@/utils/logger'
 
@@ -43,11 +45,14 @@ const existingMemberIds = computed(() => activeMembers.value.filter((m) => !m.bo
 
 const active = computed(() => conversations.value.find((c) => String(c.id) === String(activeId.value)) || null)
 
+const cacheScope = () => (currentUser.value.userName || 'me')
+
 const refreshConversations = async () => {
   try {
     await getPrivateConversation()
     const res = await listConversations()
     conversations.value = res.data || []
+    writeConvList(cacheScope(), conversations.value) // 回写缓存
     if (isDesktop.value && !activeId.value && conversations.value.length > 0) {
       activeId.value = conversations.value[0].id
     }
@@ -56,6 +61,12 @@ const refreshConversations = async () => {
   }
 }
 onMounted(() => {
+  // 先用本地缓存秒显，避免进页面时列表空白；接口返回后替换
+  const cached = readConvList(cacheScope())
+  if (cached && cached.length) {
+    conversations.value = cached
+    if (isDesktop.value && !activeId.value) activeId.value = cached[0].id
+  }
   refreshConversations()
   loadBotProfile() // 全局 bb 头像
 })
@@ -123,6 +134,12 @@ const onSelect = (c) => {
   markRead(c.id).catch(() => {})
 }
 const onBack = () => { mobileShowChat.value = false }
+
+// 移动端进入会话 → 全屏（隐藏底部 TabBar）；返回列表恢复
+watch([isMobile, mobileShowChat], ([m, show]) => {
+  chatLayout.hideTabBar = !!(m && show)
+}, { immediate: true })
+onUnmounted(() => { chatLayout.hideTabBar = false })
 
 // ChatRoom 收到任意新消息：保持当前会话已读 + 去抖刷新列表（更新其他会话未读 / 预览 / 排序）
 let refreshTimer = null

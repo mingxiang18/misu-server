@@ -277,15 +277,18 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public List<UserBriefDto> searchBrief(String keyword) {
-        // del_flag 可能为 null（注册未显式置 0），用 isNull().or(ne) 兜底，避免漏掉正常用户
-        BooleanExpression pred = QSysUser.sysUser.delFlag.isNull()
-                .or(QSysUser.sysUser.delFlag.ne(USER_DELETED));
-        if (StringUtils.hasText(keyword)) {
-            String k = keyword.trim();
-            pred = pred.and(QSysUser.sysUser.userName.containsIgnoreCase(k)
-                    .or(QSysUser.sysUser.nickName.containsIgnoreCase(k)));
+        // 隐私：必须「完整匹配」用户名或昵称才返回；空关键词不返回任何人，
+        // 防止模糊搜索枚举出所有用户名称。
+        if (!StringUtils.hasText(keyword)) {
+            return Collections.emptyList();
         }
-        return StreamSupport.stream(userRepository.findAll(pred,
+        String k = keyword.trim();
+        // del_flag 可能为 null（注册未显式置 0），用 isNull().or(ne) 兜底
+        BooleanExpression notDeleted = QSysUser.sysUser.delFlag.isNull()
+                .or(QSysUser.sysUser.delFlag.ne(USER_DELETED));
+        BooleanExpression exact = QSysUser.sysUser.userName.eq(k)
+                .or(QSysUser.sysUser.nickName.eq(k));
+        return StreamSupport.stream(userRepository.findAll(notDeleted.and(exact),
                         org.springframework.data.domain.PageRequest.of(0, 20)).spliterator(), false)
                 .map(this::toBrief)
                 .collect(Collectors.toList());

@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import ChatAvatar from './ChatAvatar.vue'
 import { botProfile, setBotAvatar } from './botProfile.js'
 import { getAccessToken, getServerWebSocketUrl, pageMessages, uploadChatFile, chatFileUrl } from '@/api/chat/chat'
+import { readMsgs, writeMsgs } from './chatCache.js'
 import logger from '@/utils/logger'
 
 const props = defineProps({
@@ -28,6 +29,10 @@ const fileUpload = ref(null)
 const showMention = ref(false)
 const mentionQuery = ref('')
 const pendingAtIds = ref([])
+const loadingMore = ref(false)
+const noMore = ref(false)
+
+const cacheScope = () => (props.currentUser && props.currentUser.userName) || 'me'
 
 const isGroup = computed(() => props.conversation && props.conversation.type === 'GROUP')
 const botName = computed(() => botProfile.name)
@@ -113,6 +118,16 @@ const scrollToBottom = () => {
 }
 watch(() => messages.value.length, scrollToBottom)
 
+// 消息变动去抖回写缓存（仅作秒显用）
+let cacheTimer = null
+const scheduleCache = () => {
+  if (!props.conversation) return
+  clearTimeout(cacheTimer)
+  const convId = props.conversation.id
+  cacheTimer = setTimeout(() => writeMsgs(cacheScope(), convId, messages.value), 800)
+}
+watch(() => messages.value.length, scheduleCache)
+
 const senderName = (m) => {
   if (m.senderType === 'BOT') return botName.value
   return (m.sender && (m.sender.nickName || m.sender.userName)) || m.senderUserId || ''
@@ -135,14 +150,57 @@ const mapServerMessage = (dto) => ({
 
 const loadHistory = async (convId) => {
   if (!convId) { messages.value = []; return }
+  noMore.value = false
+  // 先用本地缓存秒显，避免进会话时空白
+  const cached = readMsgs(cacheScope(), convId)
+  if (cached && cached.length) { messages.value = cached; scrollToBottom() }
   try {
     const res = await pageMessages(convId, { size: 50 })
     messages.value = (res.data || []).map(mapServerMessage)
+    writeMsgs(cacheScope(), convId, messages.value)
   } catch (err) {
     logger.error('加载历史消息失败:', err)
-    messages.value = []
+    if (!(cached && cached.length)) messages.value = []
   }
   scrollToBottom()
+}
+
+// 上滑到顶加载更早的消息（游标 beforeId = 当前最旧的服务端消息 id）
+const oldestServerId = () => {
+  for (const m of messages.value) {
+    if (typeof m.id === 'number') return m.id
+  }
+  return null
+}
+const loadOlder = async () => {
+  if (loadingMore.value || noMore.value || !props.conversation) return
+  const beforeId = oldestServerId()
+  if (beforeId == null) return
+  loadingMore.value = true
+  const el = messagesContainer.value
+  const prevHeight = el ? el.scrollHeight : 0
+  const prevTop = el ? el.scrollTop : 0
+  try {
+    const res = await pageMessages(props.conversation.id, { beforeId, size: 30 })
+    const older = (res.data || []).map(mapServerMessage)
+    if (older.length === 0) {
+      noMore.value = true
+    } else {
+      messages.value = [...older, ...messages.value]
+      // 保持视口位置：补回新增内容的高度
+      nextTick(() => requestAnimationFrame(() => {
+        const e2 = messagesContainer.value
+        if (e2) e2.scrollTop = prevTop + (e2.scrollHeight - prevHeight)
+      }))
+    }
+  } catch (err) {
+    logger.error('加载更早消息失败:', err)
+  } finally {
+    loadingMore.value = false
+  }
+}
+const onMessagesScroll = (e) => {
+  if (e.target.scrollTop <= 48) loadOlder()
 }
 
 watch(() => props.conversation && props.conversation.id, (id) => {
@@ -442,7 +500,7 @@ const insertMention = (m) => {
       <button class="bot-conn-retry" type="button" @click="manualReconnect">重新连接</button>
     </div>
 
-    <div ref="messagesContainer" class="bot-messages">
+    <div ref="messagesContainer" class="bot-messages" @scroll="onMessagesScroll">
       <div class="bot-messages-inner">
         <template v-for="(message, index) in messages" :key="message.id || index">
           <div class="bot-row" :class="message.isSelf ? 'self' : 'other'">
@@ -537,7 +595,9 @@ const insertMention = (m) => {
 .bot-chat { display: flex; flex-direction: column; width: 100%; flex: 1 1 0; min-height: 0; background: var(--color-bg-base); }
 
 .chat-header {
-  flex-shrink: 0; display: flex; align-items: center; gap: var(--space-3); height: 60px; padding: 0 var(--space-4);
+  flex-shrink: 0; display: flex; align-items: center; gap: var(--space-3); min-height: 60px;
+  /* 顶部留刘海/状态栏安全区（移动端全屏聊天时 header 是最顶元素，避免贴边/被遮） */
+  padding: env(safe-area-inset-top) var(--space-4) 0;
   background: var(--nav-bg); backdrop-filter: var(--nav-backdrop); -webkit-backdrop-filter: var(--nav-backdrop);
   border-bottom: 1px solid var(--nav-border);
 }
