@@ -91,7 +91,7 @@
 
         <dependency>
             <groupId>com.misu</groupId>
-            <artifactId>misu-bot-biz</artifactId>
+            <artifactId>misu-chat-biz</artifactId>
             <version>1.0-SNAPSHOT</version>
         </dependency>
 

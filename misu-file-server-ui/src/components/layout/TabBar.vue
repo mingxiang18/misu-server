@@ -73,7 +73,7 @@ const filesActive = computed(() => {
 const tabs = [
   { key: 'home',      label: '首页',     icon: House,        to: '/' },
   { key: 'videoRoom', label: '放映室',   icon: VideoCamera,  to: '/fileServer/videoRoom',  match: ['videoRoom'] },
-  { key: 'bot',       label: '机器人',   icon: ChatDotRound, to: '/bot' }
+  { key: 'bot',       label: '聊天',     icon: ChatDotRound, to: '/chat' }
 ]
 
 const isLeafActive = (tab) => {

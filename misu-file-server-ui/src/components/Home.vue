@@ -29,10 +29,10 @@ const cards = [
   },
   {
     key: 'bot',
-    title: '机器人',
-    subtitle: '与 Bot 对话',
+    title: '聊天',
+    subtitle: '群聊与冥想bb',
     icon: ChatDotRound,
-    to: '/bot'
+    to: '/chat'
   },
   {
     key: 'learn',

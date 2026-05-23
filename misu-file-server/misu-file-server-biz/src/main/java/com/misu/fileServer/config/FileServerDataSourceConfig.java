@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
@@ -29,12 +30,14 @@ import javax.sql.DataSource;
 )
 public class FileServerDataSourceConfig {
 
+    @Primary
     @Bean
     @ConfigurationProperties(prefix = "spring.datasource.file-server")
     public DataSourceProperties fileServerDataSourceProperties() {
         return new DataSourceProperties();
     }
 
+    @Primary
     @Bean(name = "fileServerDataSource")
     public DataSource fileServerDataSource() {
         return fileServerDataSourceProperties()
@@ -42,6 +45,9 @@ public class FileServerDataSourceConfig {
                 .build();
     }
 
+    // @Primary：misu-chat 引入了第二套数据源 / EMF / TM 后，file-server 现有的
+    // 无限定 @Transactional / EntityManagerFactory 注入需要一个默认 Bean，否则启动歧义。
+    @Primary
     @Bean(name = "fileServerEntityManagerFactory")
     public LocalContainerEntityManagerFactoryBean fileServerEntityManagerFactory(
             EntityManagerFactoryBuilder builder) {
@@ -52,6 +58,7 @@ public class FileServerDataSourceConfig {
                 .build();
     }
 
+    @Primary
     @Bean(name = "fileServerTransactionManager")
     public PlatformTransactionManager fileServerTransactionManager(
             @Qualifier("fileServerEntityManagerFactory") EntityManagerFactory entityManagerFactory) {

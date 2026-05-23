@@ -33,7 +33,7 @@ spec:
           ports:
             - { containerPort: 30262 }
             - { containerPort: 30263 }   # WebDAV 端口（独立 Tomcat 连接器）
-            - { containerPort: 30201 }   # bot 端口（misu-file-server-prod.yml 里 bot.serverPort: 30201）
+            - { containerPort: 30201 }   # chat WebSocket 端口（misu-file-server-prod.yml 里 bot.serverPort: 30201，运行时配置仍走 bot.*）
           env:
             - { name: JAVA_XMX, value: "768m" }
             - { name: JAVA_XMS, value: "384m" }
@@ -75,13 +75,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: misu-bot
+  name: misu-chat
   namespace: misu-server
 spec:
   type: NodePort
   selector: { app: misufileserver }
   ports:
-    - { name: bot, port: 30201, targetPort: 30201, nodePort: 30201 }
+    - { name: chat, port: 30201, targetPort: 30201, nodePort: 30201 }
 ---
 # WebDAV：用户私有目录挂载端点，独立端口、不经网关，对外用 NodePort 暴露
 apiVersion: v1

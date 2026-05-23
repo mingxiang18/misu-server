@@ -34,11 +34,11 @@ jobs:
       # push: 只发改动涉及的服务。 dispatch: 用户 services 输入覆盖（默认 all）。
       # 共享模块（misu-framework / misu-net / 根 pom）改动 → 所有 Java 服务都重发。
       # 维护规则：每个服务的过滤路径 = 它「传递依赖」到的所有仓库内模块目录。
-      # 漏一个 → 改那个模块时本服务不会重建/部署（前后端/服务间版本错配，已踩过：misu-bot、misu-account-api）。
+      # 漏一个 → 改那个模块时本服务不会重建/部署（前后端/服务间版本错配，已踩过：misu-chat、misu-account-api）。
       # 当前依赖图（mvn -pl <biz> -am 从源码编依赖）：
       #   gateway     : 无仓库内依赖（纯第三方）
       #   account     : account-biz/api + framework(web-starter/common/security)
-      #   file-server : file-server-biz/api + bot-biz + account-api + framework
+      #   file-server : file-server-biz/api + chat-biz + account-api + framework
       # 加新模块依赖时，务必同步更新对应服务的过滤路径。
       - name: Detect changed paths
         id: changes
@@ -59,7 +59,7 @@ jobs:
               - 'scripts/deploy/k8s/misu-server/misu-account.yaml'
             file_server:
               - 'misu-file-server/**'
-              - 'misu-bot/**'                     # misu-file-server-biz 依赖 misu-bot-biz
+              - 'misu-chat/**'                    # misu-file-server-biz 依赖 misu-chat-biz
               - 'misu-account/misu-account-api/**' # misu-file-server-biz 依赖 misu-account-api
               - 'misu-framework/**'
               - 'misu-net/**'

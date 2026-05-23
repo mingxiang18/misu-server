@@ -4,7 +4,10 @@ import com.misu.account.domain.dto.user.ResetPasswordRequestDto;
 import com.misu.account.domain.dto.user.UserManageDto;
 import com.misu.account.domain.dto.auth.LoginUserDto;
 import com.misu.account.domain.dto.auth.RegisterRequestDto;
+import com.misu.account.dto.UserBriefDto;
 import org.springframework.data.domain.Page;
+
+import java.util.List;
 
 /**
  * 用户相关业务
@@ -49,4 +52,14 @@ public interface UserService {
      * 管理员重置密码
      */
     void resetPassword(ResetPasswordRequestDto resetPasswordRequestDto);
+
+    /**
+     * 按用户 id 批量查询简要信息（昵称/头像），供跨服务展示。
+     */
+    List<UserBriefDto> listBriefByIds(List<Long> userIds);
+
+    /**
+     * 按昵称/账号模糊搜索用户简要信息（普通用户可用，供建群选人），上限 20 条。
+     */
+    List<UserBriefDto> searchBrief(String keyword);
 }

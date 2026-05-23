@@ -10,9 +10,15 @@ CREATE DATABASE IF NOT EXISTS `misu_file_server`
   DEFAULT CHARACTER SET utf8mb4
   DEFAULT COLLATE utf8mb4_unicode_ci;
 
+-- 聊天模块（会话 / 成员 / 消息），由 misu-chat 在 file-server 进程内用第二数据源连接
+CREATE DATABASE IF NOT EXISTS `misu_chat`
+  DEFAULT CHARACTER SET utf8mb4
+  DEFAULT COLLATE utf8mb4_unicode_ci;
+
 -- 本地 Nacos 自身需要的库（NACOS 持久化用，可选；本套环境用嵌入式 derby，所以注释掉）
 -- CREATE DATABASE IF NOT EXISTS `nacos_config` DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci;
 
 GRANT ALL PRIVILEGES ON `misu_account`.* TO 'root'@'%';
 GRANT ALL PRIVILEGES ON `misu_file_server`.* TO 'root'@'%';
+GRANT ALL PRIVILEGES ON `misu_chat`.* TO 'root'@'%';
 FLUSH PRIVILEGES;

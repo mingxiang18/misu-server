@@ -14,7 +14,7 @@
         <module>misu-account</module>
         <module>misu-net</module>
 <!--        <module>misu-web</module>-->
-        <module>misu-bot</module>
+        <module>misu-chat</module>
         <module>misu-gateway</module>
     </modules>
 
