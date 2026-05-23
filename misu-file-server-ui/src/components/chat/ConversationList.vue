@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { Plus, Search } from '@element-plus/icons-vue'
+import { Plus, Search, User } from '@element-plus/icons-vue'
 import ChatAvatar from './ChatAvatar.vue'
 import { botProfile } from './botProfile.js'
 
@@ -71,7 +71,7 @@ const fmtTime = (v) => {
             <span class="conv-item-preview">
               <span v-if="c.type === 'GROUP' && c.lastSenderName" class="conv-item-sender">{{ c.lastSenderName }}：</span>{{ c.lastMessage }}
             </span>
-            <span v-if="c.type === 'GROUP'" class="conv-item-count">{{ memberCount(c) }}</span>
+            <span v-if="c.type === 'GROUP'" class="conv-item-count" title="群成员数"><User class="conv-item-count-icon" />{{ memberCount(c) }}</span>
           </div>
         </div>
       </button>
@@ -248,16 +248,21 @@ const fmtTime = (v) => {
 
 .conv-item-count {
   flex-shrink: 0;
-  min-width: 18px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 2px;
   border-radius: var(--radius-pill);
   background: var(--color-bg-muted);
   color: var(--color-text-tertiary);
   font-size: var(--font-size-xs);
+}
+
+.conv-item-count-icon {
+  width: 11px;
+  height: 11px;
 }
 
 .conv-item.active .conv-item-count {
