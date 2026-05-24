@@ -3,12 +3,15 @@ package com.misu.fileServer.service.impl;
 import com.alibaba.fastjson2.JSON;
 import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
+import com.misu.fileServer.constant.FileType;
 import com.misu.fileServer.constant.VideoTranscodeState;
 import com.misu.fileServer.domain.dto.VideoTranscodeJobDto;
 import com.misu.fileServer.domain.dto.VideoTranscodeStatusDto;
 import com.misu.fileServer.domain.dto.VideoTranscodeTaskAdminDto;
 import com.misu.fileServer.domain.dto.VideoTranscodeTaskAdminSummaryDto;
+import com.misu.fileServer.domain.entity.FileMapping;
 import com.misu.fileServer.domain.entity.VideoTranscodeJob;
+import com.misu.fileServer.repository.FileMappingRepository;
 import com.misu.fileServer.repository.VideoTranscodeJobRepository;
 import com.misu.fileServer.service.VideoTranscodeService;
 import com.misu.security.constant.UserRole;
@@ -21,6 +24,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,10 +41,13 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -105,8 +113,26 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
     @Value("${video.transcode.passthrough.max-bitrate:5000000}")
     private long passthroughMaxBitrate;
 
+    /** 自动扫描总开关：开启后定时扫描所有视频 mapping，给尚未转码的自动入队。 */
+    @Value("${video.transcode.autoScan.enabled:true}")
+    private boolean autoScanEnabled;
+
     @Resource
     private VideoTranscodeJobRepository videoTranscodeJobRepository;
+
+    @Resource
+    private FileMappingRepository fileMappingRepository;
+
+    @Resource
+    private ThreadPoolTaskExecutor fileExecutor;
+
+    /** 自动扫描运行态（定时任务与手动触发共用，单例并发用 CAS 保护，避免重复扫描）。 */
+    private final AtomicBoolean scanRunning = new AtomicBoolean(false);
+    private volatile LocalDateTime scanStartTime;
+    private volatile LocalDateTime scanEndTime;
+    private volatile String scanLastError;
+    private final AtomicLong scanScannedCount = new AtomicLong(0L);
+    private final AtomicLong scanEnqueuedCount = new AtomicLong(0L);
 
     @Override
     public VideoTranscodeStatusDto getOrCreateTranscodeStatus(File sourceFile) {
@@ -528,6 +554,145 @@ public class VideoTranscodeServiceImpl implements VideoTranscodeService {
             }
         }
         return success;
+    }
+
+    @Override
+    public void startScanPending() {
+        checkAdmin();
+        if (!enabled) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "视频转码未启用");
+        }
+        if (!scanRunning.compareAndSet(false, true)) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "扫描任务正在执行中，请稍后再试");
+        }
+        scanStartTime = LocalDateTime.now();
+        scanEndTime = null;
+        scanLastError = null;
+        scanScannedCount.set(0L);
+        scanEnqueuedCount.set(0L);
+        fileExecutor.execute(() -> {
+            try {
+                doScanPending();
+            } catch (Exception e) {
+                scanLastError = e.getMessage();
+                log.error("视频转码自动扫描执行失败", e);
+            } finally {
+                scanEndTime = LocalDateTime.now();
+                scanRunning.set(false);
+            }
+        });
+    }
+
+    @Override
+    public Map<String, Object> getScanStatus() {
+        checkAdmin();
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("enabled", autoScanEnabled);
+        status.put("running", scanRunning.get());
+        status.put("startTime", scanStartTime);
+        status.put("endTime", scanEndTime);
+        status.put("lastError", scanLastError);
+        status.put("scannedCount", scanScannedCount.get());
+        status.put("enqueuedCount", scanEnqueuedCount.get());
+        return status;
+    }
+
+    /**
+     * 定时后台扫描：遍历所有未删除视频 mapping，给尚未转码（且未在队列 / 终态）的自动入队。
+     * 与手动触发 {@link #startScanPending()} 共用 {@link #doScanPending()}，CAS 保证不并发重入。
+     */
+    @Scheduled(cron = "${video.transcode.autoScan.cron:0 */5 * * * ?}")
+    public void autoScanScheduled() {
+        if (!enabled || !autoScanEnabled) {
+            return;
+        }
+        if (!scanRunning.compareAndSet(false, true)) {
+            return;
+        }
+        scanStartTime = LocalDateTime.now();
+        scanEndTime = null;
+        scanLastError = null;
+        scanScannedCount.set(0L);
+        scanEnqueuedCount.set(0L);
+        try {
+            doScanPending();
+        } catch (Exception e) {
+            scanLastError = e.getMessage();
+            log.error("视频转码定时扫描执行失败", e);
+        } finally {
+            scanEndTime = LocalDateTime.now();
+            scanRunning.set(false);
+        }
+    }
+
+    /**
+     * 扫描全部视频 mapping，给尚未转码的入队。队列触达 maxQueueLength 上限时提前结束本轮，
+     * 剩余视频留待下一轮——这样既不灌满磁盘，又能持续把库内视频逐步转完。
+     */
+    private void doScanPending() {
+        List<FileMapping> videos = fileMappingRepository.findByFileTypeAndDeletedFalse(FileType.VIDEO_FILE);
+        for (FileMapping mapping : videos) {
+            scanScannedCount.incrementAndGet();
+            if (transcodeQueueOverloaded()) {
+                log.info("转码队列已满，自动扫描提前结束，本轮入队 {} 个", scanEnqueuedCount.get());
+                break;
+            }
+            try {
+                if (enqueueIfPending(mapping)) {
+                    scanEnqueuedCount.incrementAndGet();
+                }
+            } catch (Exception e) {
+                log.warn("自动扫描入队失败 mappingId={} target={}", mapping.getId(), mapping.getTargetPath(), e);
+            }
+        }
+    }
+
+    /**
+     * 判断单个视频 mapping 是否需要入队：跳过物理缺失 / 目录 / 超限 / 已有产物 / DB 已是终态或在队列的，
+     * 其余调用 {@link #getOrCreateTranscodeStatus} 入队（其内部已对重复入队 / 队列满做幂等保护）。
+     *
+     * @return true 表示本次确实把它排进了等待队列
+     */
+    private boolean enqueueIfPending(FileMapping mapping) {
+        String targetPath = mapping.getTargetPath();
+        if (StringUtils.isBlank(targetPath)) {
+            return false;
+        }
+        File sourceFile = Path.of(targetPath).toAbsolutePath().normalize().toFile();
+        if (!sourceFile.exists() || sourceFile.isDirectory()) {
+            return false;
+        }
+        if (sourceFile.length() > maxBytes) {
+            return false;
+        }
+        if (getTranscodedFile(sourceFile).exists()) {
+            return false;
+        }
+        String taskId = getTaskId(sourceFile);
+        Optional<VideoTranscodeJob> existing = videoTranscodeJobRepository.findByTaskId(taskId);
+        if (existing.isPresent() && isJobSettled(existing.get())) {
+            return false;
+        }
+        VideoTranscodeStatusDto status = getOrCreateTranscodeStatus(
+                sourceFile, mapping.getOpenType(), mapping.getUserId(), mapping.getVirtualPath());
+        return VideoTranscodeState.WAITING.equals(status.getState());
+    }
+
+    /**
+     * 已"安顿"的任务不再自动入队：在队列里（WAITING/RUNNING/DONE）、或处于终态
+     * （SUCCESS/PASSTHROUGH/TOO_LARGE/UNSUPPORTED），以及 FAILED（交由管理员手动重试，避免死循环重转）。
+     */
+    private boolean isJobSettled(VideoTranscodeJob job) {
+        String queueState = job.getQueueState();
+        if ("WAITING".equals(queueState) || "RUNNING".equals(queueState) || "DONE".equals(queueState)) {
+            return true;
+        }
+        String state = job.getState();
+        return VideoTranscodeState.SUCCESS.equals(state)
+                || VideoTranscodeState.PASSTHROUGH.equals(state)
+                || VideoTranscodeState.TOO_LARGE.equals(state)
+                || VideoTranscodeState.UNSUPPORTED.equals(state)
+                || VideoTranscodeState.FAILED.equals(state);
     }
 
     /**

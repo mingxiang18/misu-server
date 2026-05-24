@@ -68,3 +68,17 @@ export function recoverRunningTasks() {
         method: 'post'
     })
 }
+
+export function startTranscodeScan() {
+    return request({
+        url: '/fileServer/videoTranscodeAdmin/scanPending',
+        method: 'post'
+    })
+}
+
+export function getTranscodeScanStatus() {
+    return request({
+        url: '/fileServer/videoTranscodeAdmin/scanStatus',
+        method: 'get'
+    })
+}

@@ -10,6 +10,7 @@
         </div>
         <div class="actions">
           <el-button :icon="Refresh" @click="loadJobs" :loading="loading">刷新</el-button>
+          <el-button type="success" :icon="Search" @click="startScan" :loading="scanStatus.running">立即扫描未转码</el-button>
           <el-button type="warning" :icon="RefreshLeft" @click="recoverRunning" :loading="recovering">恢复 running</el-button>
         </div>
       </div>
@@ -304,6 +305,50 @@
       <el-card class="backfill-card" shadow="never">
         <template #header>
           <div class="backfill-header">
+            <span>
+              自动转码扫描
+              <el-tag size="small" :type="scanStatus.enabled ? 'success' : 'info'" effect="plain">
+                {{ scanStatus.enabled ? '已开启（定时）' : '已关闭' }}
+              </el-tag>
+            </span>
+            <div class="actions">
+              <el-button :icon="Refresh" @click="loadScanStatus" :loading="scanStatusLoading">刷新状态</el-button>
+              <el-button type="success" :icon="Search" @click="startScan" :loading="scanStatus.running" :disabled="scanStatus.running">
+                立即扫描
+              </el-button>
+            </div>
+          </div>
+        </template>
+        <div class="subtitle" style="margin-bottom: var(--space-3);">
+          定时扫描全部视频，给尚未转码的自动入队（无需进入文件夹触发）；队列满时本轮提前结束，剩余视频下一轮继续。
+        </div>
+        <div class="backfill-grid">
+          <div class="summary-item">
+            <span>运行状态</span>
+            <strong>{{ scanStatus.running ? '扫描中' : '空闲' }}</strong>
+          </div>
+          <div class="summary-item">
+            <span>本轮已扫描</span>
+            <strong>{{ scanStatus.scannedCount || 0 }}</strong>
+          </div>
+          <div class="summary-item">
+            <span>本轮入队</span>
+            <strong>{{ scanStatus.enqueuedCount || 0 }}</strong>
+          </div>
+          <div class="summary-item">
+            <span>上次完成</span>
+            <strong style="font-size: var(--font-size-base);">{{ formatTime(scanStatus.endTime) }}</strong>
+          </div>
+        </div>
+        <div class="backfill-meta">
+          <div>开始时间：{{ formatTime(scanStatus.startTime) }}</div>
+          <div class="error-text" v-if="scanStatus.lastError">错误信息：{{ scanStatus.lastError }}</div>
+        </div>
+      </el-card>
+
+      <el-card class="backfill-card" shadow="never">
+        <template #header>
+          <div class="backfill-header">
             <span>文件映射回填</span>
             <div class="actions">
               <el-button :icon="Refresh" @click="loadBackfillStatus" :loading="backfillLoading">刷新状态</el-button>
@@ -348,12 +393,14 @@ import { CaretRight, CopyDocument, Delete, Refresh, RefreshLeft, RefreshRight, S
 import {
   cancelTranscodeBatch,
   getTranscodeJobs,
+  getTranscodeScanStatus,
   getTranscodeTaskSummary,
   prioritizeTranscodeBatch,
   recoverRunningTasks,
   reTranscodeBatch,
   retryFailedTask,
-  retryTranscodeBatch
+  retryTranscodeBatch,
+  startTranscodeScan
 } from '@/api/fileServer/videoTranscodeAdmin'
 import { getFileMappingBackfillStatus, startFileMappingBackfill } from '@/api/fileServer/fileAdmin'
 import { getWorkerState } from '@/api/fileServer/transcodeWorker'
@@ -403,6 +450,10 @@ const backfillLoading = ref(false)
 const startingBackfill = ref(false)
 const backfillStatus = ref({})
 let backfillTimer = null
+
+const scanStatusLoading = ref(false)
+const scanStatus = ref({})
+let scanTimer = null
 
 const workerState = ref({})
 const workerOnline = ref(false)
@@ -465,7 +516,31 @@ onBeforeUnmount(() => {
   if (backfillTimer) { clearInterval(backfillTimer); backfillTimer = null }
   if (workerTimer) { clearInterval(workerTimer); workerTimer = null }
   if (jobsTimer) { clearInterval(jobsTimer); jobsTimer = null }
+  if (scanTimer) { clearInterval(scanTimer); scanTimer = null }
 })
+
+const loadScanStatus = async () => {
+  scanStatusLoading.value = true
+  try {
+    const response = await getTranscodeScanStatus()
+    scanStatus.value = response.data || {}
+  } finally {
+    scanStatusLoading.value = false
+  }
+}
+
+const startScan = async () => {
+  await ElMessageBox.confirm('确认立即扫描所有视频并给尚未转码的自动入队？受队列上限保护，超限会留待下一轮。', '立即扫描未转码', { type: 'warning' })
+  try {
+    await startTranscodeScan()
+    ElMessage.success('扫描任务已启动')
+    loadScanStatus()
+    loadSummary()
+    loadJobs()
+  } catch (e) {
+    // 已在执行中等错误由全局拦截器提示
+  }
+}
 
 const onSelectionChange = (rows) => {
   selectedRows.value = rows
@@ -721,8 +796,10 @@ watch(isAdmin, (admin) => {
   loadJobs()
   loadSummary()
   loadBackfillStatus()
+  loadScanStatus()
   loadWorkerState()
   backfillTimer = setInterval(loadBackfillStatus, 3000)
+  scanTimer = setInterval(loadScanStatus, 5000)
   workerTimer = setInterval(loadWorkerState, 5000)
   jobsTimer = setInterval(() => {
     loadSummary()

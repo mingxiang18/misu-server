@@ -134,6 +134,11 @@ video:
     # 本地 dev 跑 Mac 上的 worker 时可以指向 127.0.0.1:18765
     worker:
       base-url: http://127.0.0.1:18765
+    # 自动转码：定时扫描所有视频，给尚未转码的自动入队（无需手动进入文件夹触发）
+    autoScan:
+      enabled: true
+      # 本地 dev 每 2 分钟扫一次，便于观察效果
+      cron: "0 */2 * * * ?"
 
 # 文件下载/上传/映射 GC（沿用 application.yml 默认值）
 file:

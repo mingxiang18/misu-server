@@ -88,4 +88,17 @@ public class VideoTranscodeAdminController {
     public AjaxResult recoverRunningTasks() {
         return AjaxResult.success(videoTranscodeService.recoverRunningTasks());
     }
+
+    @PostMapping("/scanPending")
+    @ApiOperation(value = "手动触发一轮：扫描所有视频，给尚未转码的自动入队（异步）")
+    public AjaxResult scanPending() {
+        videoTranscodeService.startScanPending();
+        return AjaxResult.success();
+    }
+
+    @GetMapping("/scanStatus")
+    @ApiOperation(value = "获取自动转码扫描状态")
+    public AjaxResult scanStatus() {
+        return AjaxResult.success(videoTranscodeService.getScanStatus());
+    }
 }

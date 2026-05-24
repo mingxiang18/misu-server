@@ -8,6 +8,7 @@ import org.springframework.data.domain.Pageable;
 
 import java.io.File;
 import java.util.List;
+import java.util.Map;
 
 public interface VideoTranscodeService {
 
@@ -76,4 +77,15 @@ public interface VideoTranscodeService {
      * @return 实际移除数量
      */
     int cancelJobsBatch(List<String> taskIds);
+
+    /**
+     * 手动触发"扫描所有视频 → 给尚未转码的入队"一轮（管理员）。异步执行，立即返回；进度见 {@link #getScanStatus()}。
+     * 与定时任务 video.transcode.autoScan 共用同一套扫描逻辑。
+     */
+    void startScanPending();
+
+    /**
+     * 自动转码扫描的运行状态（管理员）：是否开启、是否运行中、上次扫描时间 / 扫描数量 / 入队数量 / 错误。
+     */
+    Map<String, Object> getScanStatus();
 }

@@ -16,6 +16,11 @@ public interface FileMappingRepository extends JpaRepository<FileMapping, Long> 
 
     List<FileMapping> findByOpenTypeAndUserIdAndDeletedFalse(Integer openType, String userId);
 
+    /**
+     * 自动转码后台扫描：取所有未删除、指定类型（video）的 mapping，供定时任务判断哪些尚未转码并入队。
+     */
+    List<FileMapping> findByFileTypeAndDeletedFalse(String fileType);
+
     List<FileMapping> findByOpenTypeAndUserIdAndParentPathAndDeletedFalseOrderByFileTypeDescFileNameAsc(Integer openType,
                                                                                                           String userId,
                                                                                                           String parentPath);

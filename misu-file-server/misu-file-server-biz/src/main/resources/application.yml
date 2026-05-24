@@ -68,6 +68,12 @@ video:
     profile-version: hevc-aac-mp4-1080p-v1
     # Q8：转码队列总长（waiting + running）上限，超过则不再排队新任务
     maxQueueLength: 50
+    # 自动转码：定时扫描所有视频 mapping，给尚未转码的自动入队（无需手动进入文件夹触发）。
+    # 受 maxQueueLength 上限保护，队列满时本轮提前结束，剩余视频留待下一轮。
+    autoScan:
+      enabled: true
+      # 每 5 分钟扫描一次
+      cron: "0 */5 * * * ?"
 
 # Spring
 spring:
