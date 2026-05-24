@@ -8,6 +8,7 @@ import com.bb.bot.entity.bb.BbMessageContent;
 import com.bb.bot.entity.bb.BbSocketServerMessage;
 import com.misu.chat.connection.ChatBroadcaster;
 import com.misu.chat.domain.message.ChatResponseMessage;
+import com.misu.chat.service.ChatFileService;
 import com.misu.chat.service.ConversationService;
 import com.misu.chat.service.MessageService;
 import jakarta.annotation.Resource;
@@ -36,6 +37,9 @@ public class BbMessageHandler implements BbClientMessageHandler {
 
     @Resource
     private ChatBroadcaster broadcaster;
+
+    @Resource
+    private ChatFileService chatFileService;
 
     /** streamId -> 已累积文本，end 帧时合并落库 */
     private final Map<String, StringBuilder> streamBuffers = new ConcurrentHashMap<>();
@@ -73,6 +77,8 @@ public class BbMessageHandler implements BbClientMessageHandler {
                 conversationService.touchLastMessageAt(conversationId);
             }
         } else {
+            // bb 返回的 base64 内联图片/文件存盘并改成 fileId 引用：消息/DB 不再塞 base64，文件也进群文件列表
+            contentList = chatFileService.referenceBotInlineAttachments(conversationId, contentList);
             messageService.saveBotMessage(conversationId, null, JSON.toJSONString(contentList));
             conversationService.touchLastMessageAt(conversationId);
         }

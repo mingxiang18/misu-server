@@ -1,5 +1,6 @@
 package com.misu.chat.service;
 
+import com.bb.bot.entity.bb.BbMessageContent;
 import com.misu.chat.domain.dto.FileDto;
 import com.misu.chat.domain.entity.ChatFile;
 import com.misu.chat.domain.entity.ChatMessage;
@@ -8,6 +9,12 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.List;
 
 public interface ChatFileService {
+
+    /**
+     * bb 回复里的 base64 内联附件（localImage/localFile）存盘并登记 chat_file，
+     * 把内容项替换成 chatImage/chatFile + fileId 引用（避免 base64 撑大消息/DB，并让文件进群文件列表）；其余项原样返回。
+     */
+    List<BbMessageContent> referenceBotInlineAttachments(Long conversationId, List<BbMessageContent> content);
 
     /** 上传文件到磁盘并登记 chat_file，返回元数据（含 id，供消息引用） */
     FileDto saveUploaded(Long conversationId, String uploaderUserId, String senderType,

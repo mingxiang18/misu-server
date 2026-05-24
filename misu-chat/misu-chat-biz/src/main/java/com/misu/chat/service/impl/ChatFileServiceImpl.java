@@ -3,6 +3,7 @@ package com.misu.chat.service.impl;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.bb.bot.entity.bb.BbMessageContent;
 import com.misu.account.dto.UserBriefDto;
 import com.misu.chat.domain.dto.FileDto;
 import com.misu.chat.domain.entity.ChatFile;
@@ -28,6 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -254,6 +256,75 @@ public class ChatFileServiceImpl implements ChatFileService {
             f.setCreateTime(LocalDateTime.now());
             fileRepository.save(f);
         }
+    }
+
+    @Override
+    @Transactional("chatTransactionManager")
+    public List<BbMessageContent> referenceBotInlineAttachments(Long conversationId, List<BbMessageContent> content) {
+        if (content == null || content.isEmpty()) {
+            return content;
+        }
+        List<BbMessageContent> out = new ArrayList<>(content.size());
+        for (BbMessageContent c : content) {
+            String t = c.getType();
+            boolean isImage = "localImage".equals(t);
+            boolean isFile = "localFile".equals(t);
+            if ((isImage || isFile) && c.getData() != null) {
+                try {
+                    Long id = saveBotInline(conversationId, c.getData().toString(),
+                            c.getFileName(), c.getMimeType(), isImage ? CAT_IMAGE : CAT_FILE);
+                    out.add(BbMessageContent.builder()
+                            .type(isImage ? "chatImage" : "chatFile")
+                            .data(id)
+                            .fileName(c.getFileName())
+                            .mimeType(c.getMimeType())
+                            .size(c.getSize())
+                            .build());
+                } catch (Exception e) {
+                    log.warn("bb 内联附件存盘失败，保留原始内容 type={}", t, e);
+                    out.add(c);
+                }
+            } else {
+                out.add(c);
+            }
+        }
+        return out;
+    }
+
+    /** 把 bb 返回的 base64（可能带 data:;base64, 前缀）解码存盘并登记 chat_file（senderType=BOT），返回 fileId */
+    private Long saveBotInline(Long conversationId, String base64Data, String fileName, String mimeType, String category)
+            throws IOException {
+        String b64 = base64Data;
+        if (b64.startsWith("data:")) {
+            int comma = b64.indexOf(',');
+            if (comma >= 0) {
+                b64 = b64.substring(comma + 1);
+            }
+        }
+        byte[] bytes = Base64.getDecoder().decode(b64);
+        String original = StringUtils.hasText(fileName) ? fileName : (CAT_IMAGE.equals(category) ? "图片" : "文件");
+        String ext = "";
+        int dot = original.lastIndexOf('.');
+        if (dot >= 0) {
+            ext = original.substring(dot);
+        }
+        String diskName = UUID.randomUUID().toString().replace("-", "") + ext;
+        String relPath = conversationId + "/" + diskName;
+        Path dir = baseDir().resolve(String.valueOf(conversationId));
+        Files.createDirectories(dir);
+        Files.write(dir.resolve(diskName), bytes);
+
+        ChatFile f = new ChatFile();
+        f.setConversationId(conversationId);
+        f.setSenderType("BOT");
+        f.setFileName(original);
+        f.setMimeType(mimeType);
+        f.setSize((long) bytes.length);
+        f.setCategory(category);
+        f.setStorePath(relPath);
+        f.setDeleted(false);
+        f.setCreateTime(LocalDateTime.now());
+        return fileRepository.save(f).getId();
     }
 
     @Override

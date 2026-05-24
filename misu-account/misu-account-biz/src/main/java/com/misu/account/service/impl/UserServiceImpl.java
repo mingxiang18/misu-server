@@ -299,7 +299,22 @@ public class UserServiceImpl implements UserService {
         dto.setUserId(u.getUserId());
         dto.setUserName(u.getUserName());
         dto.setNickName(u.getNickName());
-        dto.setAvatar(u.getAvatar());
+        dto.setAvatar(sanitizeAvatar(u.getAvatar()));
         return dto;
+    }
+
+    /**
+     * 安全防护：avatar 字段历史上可能被脏数据污染成 BCrypt 密码哈希（$2a$/$2b$/$2y$ 开头）。
+     * 这类值既不是有效图片（前端渲染成裂图），更会经 brief 接口泄漏密码哈希——一律按「无头像」处理。
+     */
+    private String sanitizeAvatar(String avatar) {
+        if (avatar == null) {
+            return null;
+        }
+        if (avatar.matches("^\\$2[aby]\\$\\d{2}\\$.{53}$")) {
+            log.warn("用户 avatar 字段疑似被密码哈希污染，已置空不返回");
+            return null;
+        }
+        return avatar;
     }
 }
