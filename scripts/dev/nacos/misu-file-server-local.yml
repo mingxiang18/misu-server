@@ -78,6 +78,10 @@ bot:
     url: ws://127.0.0.1:39999
     appId: dev
     secret: dev
+    # bb-bot HTTP 基址（用量查询 REST），本地指向 bbtest 的 18199；prod 用集群内地址。内网直连不走代理。
+    httpUrl: http://127.0.0.1:18199
+    # 对应 bb 侧 ai-agent.billing.queryApiToken
+    usageApiToken: local-usage-token
 
 # 聊天数据层 / 群聊参数（chat.*）
 chat:

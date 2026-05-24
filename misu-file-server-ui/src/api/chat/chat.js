@@ -81,6 +81,11 @@ export function setBotAvatarApi(avatar) {
     return request({ url: '/fileServer/chat/bot/profile/avatar', method: 'post', data: { avatar } });
 }
 
+// 当前用户 bb AI 用量/额度（只查本人）
+export function getUsage(month) {
+    return request({ url: '/fileServer/chat/usage', method: 'get', params: month ? { month } : {} });
+}
+
 // 上传文件到磁盘，返回 {id, fileName, mimeType, size, category}（消息里放引用）
 export function uploadChatFile(conversationId, file, category) {
     const fd = new FormData();

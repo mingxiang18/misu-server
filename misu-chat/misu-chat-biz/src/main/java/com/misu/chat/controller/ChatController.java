@@ -10,6 +10,7 @@ import com.misu.chat.domain.dto.MemberDto;
 import com.misu.chat.domain.entity.ChatConversation;
 import com.misu.chat.domain.entity.ChatConversationMember;
 import com.misu.chat.domain.entity.ChatFile;
+import com.misu.chat.service.BbUsageService;
 import com.misu.chat.service.BotProfileService;
 import com.misu.chat.service.ChatFileService;
 import com.misu.chat.service.ChatService;
@@ -65,6 +66,8 @@ public class ChatController {
     private BotProfileService botProfileService;
     @Resource
     private ChatFileService chatFileService;
+    @Resource
+    private BbUsageService bbUsageService;
 
     /** 获取提供客户端连接的服务端的socket的url */
     @GetMapping({"/getServerWebSocketUrl"})
@@ -213,6 +216,13 @@ public class ChatController {
         }
         botProfileService.updateAvatar(req.getAvatar());
         return AjaxResult.success();
+    }
+
+    /** 当前用户的 bb AI 用量/额度（只查本人，userId 取自登录态，不接受入参） */
+    @GetMapping("/usage")
+    @ApiOperation(value = "查询本人 AI 用量/额度")
+    public AjaxResult myUsage(@RequestParam(value = "month", required = false) String month) {
+        return AjaxResult.success(bbUsageService.queryUsage(currentUserId(), month));
     }
 
     /**
