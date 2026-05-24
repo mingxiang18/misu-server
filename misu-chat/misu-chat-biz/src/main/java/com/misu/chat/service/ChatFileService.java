@@ -13,6 +13,14 @@ public interface ChatFileService {
     FileDto saveUploaded(Long conversationId, String uploaderUserId, String senderType,
                          MultipartFile file, String category);
 
+    /**
+     * 分片上传：保存单个分片，全片到齐才合并落盘并登记。支持乱序/并发上传。
+     * 仅在合并完成的那次调用返回 complete=true + FileDto，其余 complete=false。
+     */
+    ChunkUploadResult saveUploadedChunk(Long conversationId, String uploaderUserId, String senderType,
+                                        String uploadId, MultipartFile chunk, int chunkIndex, int totalChunks,
+                                        String fileName, String mimeType, Long fileSize, String category);
+
     /** bb 返回的外链文件（netFile）登记进群文件 */
     void indexFromMessage(ChatMessage message);
 
@@ -33,5 +41,19 @@ public interface ChatFileService {
         public String mimeType;
         public byte[] bytes;
         public String netUrl;
+    }
+
+    /** 分片上传结果：complete=true 时 file 为合并后的元数据，否则 file 为 null */
+    class ChunkUploadResult {
+        public boolean complete;
+        public FileDto file;
+
+        public ChunkUploadResult() {
+        }
+
+        public ChunkUploadResult(boolean complete, FileDto file) {
+            this.complete = complete;
+            this.file = file;
+        }
     }
 }

@@ -215,15 +215,28 @@ public class ChatController {
         return AjaxResult.success();
     }
 
-    /** 上传群文件到磁盘，返回元数据（含 id，前端据此在消息里放引用） */
+    /**
+     * 上传群文件。带 uploadId+chunkIndex+totalChunks 走分片上传（全片到齐才合并，返回 ChunkUploadResult{complete,file}）；
+     * 不带则单次上传（返回 FileDto，兼容旧调用）。
+     */
     @PostMapping("/conversation/{id}/file/upload")
     @ApiOperation(value = "上传群文件")
     public AjaxResult uploadFile(@PathVariable("id") Long id,
                                  @RequestParam("file") MultipartFile file,
-                                 @RequestParam(value = "category", required = false) String category) {
+                                 @RequestParam(value = "category", required = false) String category,
+                                 @RequestParam(value = "uploadId", required = false) String uploadId,
+                                 @RequestParam(value = "chunkIndex", required = false) Integer chunkIndex,
+                                 @RequestParam(value = "totalChunks", required = false) Integer totalChunks,
+                                 @RequestParam(value = "fileName", required = false) String fileName,
+                                 @RequestParam(value = "mimeType", required = false) String mimeType,
+                                 @RequestParam(value = "fileSize", required = false) Long fileSize) {
         String me = currentUserId();
         if (!conversationService.isMember(id, me)) {
             return AjaxResult.error(HttpStatus.FORBIDDEN, "无权访问该会话");
+        }
+        if (uploadId != null && totalChunks != null && chunkIndex != null) {
+            return AjaxResult.success(chatFileService.saveUploadedChunk(id, me, "USER", uploadId, file,
+                    chunkIndex, totalChunks, fileName, mimeType, fileSize, category));
         }
         return AjaxResult.success(chatFileService.saveUploaded(id, me, "USER", file, category));
     }

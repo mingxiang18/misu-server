@@ -1,10 +1,10 @@
 <script setup>
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
-import { Picture, Close, Promotion, Document, Download, ArrowLeft, More, Camera, RefreshRight, Folder } from '@element-plus/icons-vue'
+import { Picture, Close, Promotion, Document, Download, ArrowLeft, More, Camera, RefreshRight, Folder, Loading } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import ChatAvatar from './ChatAvatar.vue'
 import { botProfile, setBotAvatar } from './botProfile.js'
-import { getAccessToken, getServerWebSocketUrl, pageMessages, uploadChatFile, chatFileUrl } from '@/api/chat/chat'
+import { getAccessToken, getServerWebSocketUrl, pageMessages, uploadChatFile, uploadChatFileChunked, chatFileUrl } from '@/api/chat/chat'
 import { readMsgs, writeMsgs } from './chatCache.js'
 import logger from '@/utils/logger'
 
@@ -26,6 +26,8 @@ const imageList = ref([])
 const imageUpload = ref(null)
 const fileList = ref([])
 const fileUpload = ref(null)
+const sending = ref(false)        // 发送/上传在途：防重复点击
+const uploadProgress = ref(0)     // 附件上传进度 0-100
 const showMention = ref(false)
 const mentionQuery = ref('')
 const pendingAtIds = ref([])
@@ -215,56 +217,65 @@ watch(() => props.conversation && props.conversation.id, (id) => {
 
 /* ------------------ Send ------------------ */
 const sendMessage = async () => {
+  if (sending.value) return                       // 防重复发送：在途时忽略再次点击/回车
   if (!canSend.value || !props.conversation) return
 
   const messageId = crypto.randomUUID()
   const content = []
   if (newMessage.value && newMessage.value.trim()) content.push({ type: 'text', data: newMessage.value })
+
+  sending.value = true
+  uploadProgress.value = 0
   try {
-    // 附件先上传到磁盘，消息里只放引用（fileId），不再内联 base64
-    // fileId 放在 data 字段（content 走 bb SDK 的 BbMessageContent，只认 type/data/fileName/mimeType/size）
-    if (imageList.value.length > 0) {
-      const raw = imageList.value[0].raw
-      const d = (await uploadChatFile(props.conversation.id, raw, 'image')).data
-      content.push({ type: 'chatImage', data: d.id, fileName: d.fileName, mimeType: d.mimeType, size: d.size })
+    try {
+      // 附件先分片并发上传到磁盘，消息里只放引用（fileId），不内联 base64（避免撑大消息/DB）
+      // 机器人侧：服务端转发给 bb 时会把 fileId 读成 base64 的 localImage/localFile，bb 才能读到内容
+      if (imageList.value.length > 0) {
+        const raw = imageList.value[0].raw
+        const d = await uploadChatFileChunked(props.conversation.id, raw, 'image', p => { uploadProgress.value = p })
+        content.push({ type: 'chatImage', data: d.id, fileName: d.fileName, mimeType: d.mimeType, size: d.size })
+      }
+      if (fileList.value.length > 0) {
+        const raw = fileList.value[0].raw
+        const d = await uploadChatFileChunked(props.conversation.id, raw, 'file', p => { uploadProgress.value = p })
+        content.push({ type: 'chatFile', data: d.id, fileName: d.fileName, mimeType: d.mimeType, size: d.size })
+      }
+    } catch (err) {
+      logger.error('附件上传失败:', err)
+      ElMessage.error('附件上传失败，请重试')
+      return
     }
-    if (fileList.value.length > 0) {
-      const raw = fileList.value[0].raw
-      const d = (await uploadChatFile(props.conversation.id, raw, 'file')).data
-      content.push({ type: 'chatFile', data: d.id, fileName: d.fileName, mimeType: d.mimeType, size: d.size })
+
+    const payload = {
+      messageId,
+      conversationId: props.conversation.id,
+      atUserIds: [...pendingAtIds.value],
+      messageContentList: content
     }
-  } catch (err) {
-    logger.error('附件上传失败:', err)
-    ElMessage.error('附件上传失败，请重试')
-    return
+
+    // 本地立即回显
+    messages.value.push({
+      id: 'local-' + messageId,
+      clientMessageId: messageId,
+      content,
+      senderType: 'USER',
+      senderUserId: props.currentUser.userId,
+      isSelf: true,
+      time: nowLabel()
+    })
+    scrollToBottom()
+
+    sentMessages.set(messageId, payload)
+    enqueueAndFlush(payload)
+
+    newMessage.value = ''
+    pendingAtIds.value = []
+    handleImageRemove()
+    handleFileRemove()
+  } finally {
+    uploadProgress.value = 0
+    sending.value = false   // 无论成功/失败/异常都复位，避免按钮卡死
   }
-
-  const payload = {
-    messageId,
-    conversationId: props.conversation.id,
-    atUserIds: [...pendingAtIds.value],
-    messageContentList: content
-  }
-
-  // 本地立即回显
-  messages.value.push({
-    id: 'local-' + messageId,
-    clientMessageId: messageId,
-    content,
-    senderType: 'USER',
-    senderUserId: props.currentUser.userId,
-    isSelf: true,
-    time: nowLabel()
-  })
-  scrollToBottom()
-
-  sentMessages.set(messageId, payload)
-  enqueueAndFlush(payload)
-
-  newMessage.value = ''
-  pendingAtIds.value = []
-  handleImageRemove()
-  handleFileRemove()
 }
 
 const markFailed = (messageId) => {
@@ -561,6 +572,10 @@ const insertMention = (m) => {
           <span class="bot-file-chip-name">{{ fileList[0].name }}</span>
           <button class="bot-attach-remove static" type="button" aria-label="移除文件" @click="handleFileRemove"><Close /></button>
         </div>
+        <div v-if="sending" class="bot-attach-progress">
+          <el-progress :percentage="uploadProgress" :stroke-width="6" :text-inside="false" />
+          <span class="bot-attach-progress-label">{{ uploadProgress < 100 ? '上传中…' : '发送中…' }}</span>
+        </div>
       </div>
 
       <transition name="mention-pop">
@@ -584,7 +599,10 @@ const insertMention = (m) => {
         <el-input v-model="newMessage" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }"
                   :placeholder="isGroup ? '发送到群聊 · 输入 @ 呼叫成员' : '和冥想bb说点什么'" class="bot-input-text" resize="none"
                   @keydown.enter.exact.prevent="sendMessage" />
-        <button class="bot-input-send" type="button" :disabled="!canSend" aria-label="发送" @click="sendMessage"><Promotion /></button>
+        <button class="bot-input-send" type="button" :disabled="!canSend || sending" aria-label="发送" @click="sendMessage">
+          <Loading v-if="sending" class="bot-send-spin" />
+          <Promotion v-else />
+        </button>
       </div>
     </div>
   </div>
@@ -697,6 +715,11 @@ const insertMention = (m) => {
 .bot-input-send { flex-shrink: 0; width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-pill); background: var(--accent); color: var(--color-text-on-accent); transition: background var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard); }
 .bot-input-send:disabled { background: var(--color-border-default); cursor: not-allowed; opacity: 0.7; }
 .bot-input-send:not(:disabled):hover { background: var(--accent-strong); }
+.bot-send-spin { animation: bot-send-spin 0.8s linear infinite; }
+@keyframes bot-send-spin { to { transform: rotate(360deg); } }
+.bot-attach-progress { display: flex; align-items: center; gap: var(--space-2); width: 100%; }
+.bot-attach-progress :deep(.el-progress) { flex: 1; }
+.bot-attach-progress-label { font-size: var(--font-size-xs); color: var(--color-text-secondary); white-space: nowrap; }
 .bot-input-send :deep(svg) { width: 18px; height: 18px; }
 :deep(.bot-upload .el-upload) { width: auto; height: auto; border: none; background: transparent; }
 

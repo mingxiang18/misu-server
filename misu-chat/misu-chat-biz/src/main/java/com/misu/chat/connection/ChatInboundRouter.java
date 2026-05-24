@@ -3,6 +3,7 @@ package com.misu.chat.connection;
 import com.alibaba.fastjson2.JSON;
 import com.bb.bot.constant.BbSendMessageType;
 import com.bb.bot.constant.MessageType;
+import com.bb.bot.entity.bb.BbMessageContent;
 import com.bb.bot.entity.bb.BbSocketClientMessage;
 import com.bb.bot.entity.bb.MessageUser;
 import com.misu.account.dto.UserBriefDto;
@@ -13,6 +14,7 @@ import com.misu.chat.domain.message.ChatTokenMessage;
 import com.misu.chat.domain.message.ChatUserMessage;
 import com.misu.chat.handler.ChatMockBotResponder;
 import com.misu.chat.service.BotProfileService;
+import com.misu.chat.service.ChatFileService;
 import com.misu.chat.service.ConversationService;
 import com.misu.chat.service.MessageService;
 import com.misu.chat.service.UserInfoService;
@@ -23,6 +25,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +57,11 @@ public class ChatInboundRouter {
     private ChatConfig chatConfig;
     @Resource
     private BotProfileService botProfileService;
+    @Resource
+    private ChatFileService chatFileService;
+
+    // 转发给 bb 的内联附件大小上限：base64 走 WS 帧，过大易撑爆 / 被 bb 丢弃
+    private static final long BB_INLINE_MAX_BYTES = 10L * 1024 * 1024;
 
     public void handle(WebSocket senderWs, ChatTokenMessage token, ChatUserMessage msg) {
         String userId = token.getUserId().toString();
@@ -154,9 +162,80 @@ public class ChatInboundRouter {
             text = text.replace("@" + botName, " ");
         }
         bm.setMessage(text.replaceAll("\\s+", " ").trim());
-        bm.setMessageContentList(msg.getMessageContentList());
+        // 关键：消息里图片/文件存的是磁盘引用（chatImage/chatFile + fileId），bb 读不到。
+        // 转发前把它们读成 base64 的 localImage/localFile（bb 认这种 wire 格式），机器人才能拿到内容。
+        bm.setMessageContentList(toBbForwardContent(msg.getMessageContentList()));
         bm.setSendTime(LocalDateTime.now());
         bbWebSocket.send(JSON.toJSONString(bm));
+    }
+
+    /** 把消息内容转成 bb 能读的形式：chatImage/chatFile（磁盘引用）→ localImage/localFile（base64 内联）；其余原样。 */
+    private List<BbMessageContent> toBbForwardContent(List<BbMessageContent> src) {
+        if (src == null) {
+            return null;
+        }
+        List<BbMessageContent> out = new ArrayList<>(src.size());
+        for (BbMessageContent c : src) {
+            String type = c.getType();
+            if ("chatImage".equals(type) || "chatFile".equals(type)) {
+                out.add(inlineForBb(c, "chatImage".equals(type)));
+            } else {
+                out.add(c);
+            }
+        }
+        return out;
+    }
+
+    /** 用 fileId 取磁盘文件，转成 base64 的 localImage/localFile（无 data: 前缀，与前端旧格式一致）。 */
+    private BbMessageContent inlineForBb(BbMessageContent ref, boolean isImage) {
+        Long fileId = toLong(ref.getData());
+        String displayName = ref.getFileName() != null ? ref.getFileName() : (isImage ? "图片" : "文件");
+        try {
+            ChatFileService.FileDownload d = fileId == null ? null : chatFileService.download(fileId);
+            if (d != null && d.bytes != null) {
+                if (d.bytes.length > BB_INLINE_MAX_BYTES) {
+                    log.warn("转发 bb：附件过大不内联 fileId={} size={}", fileId, d.bytes.length);
+                    return BbMessageContent.buildTextContent("[" + (isImage ? "图片" : "文件") + "] " + displayName + "（过大，bb 无法读取）");
+                }
+                String base64 = Base64.getEncoder().encodeToString(d.bytes);
+                Long size = ref.getSize() != null ? ref.getSize() : (long) d.bytes.length;
+                String mimeType = ref.getMimeType() != null ? ref.getMimeType() : d.mimeType;
+                return BbMessageContent.builder()
+                        .type(isImage ? BbSendMessageType.LOCAL_IMAGE : BbSendMessageType.LOCAL_FILE)
+                        .data(base64)
+                        .fileName(d.fileName != null ? d.fileName : displayName)
+                        .mimeType(mimeType)
+                        .size(size)
+                        .build();
+            }
+            // 磁盘没有但有外链（理论上是 bb 自己的文件）：直接发 net 引用
+            if (d != null && d.netUrl != null) {
+                return BbMessageContent.builder()
+                        .type(isImage ? BbSendMessageType.NET_IMAGE : BbSendMessageType.NET_FILE)
+                        .data(d.netUrl)
+                        .fileName(displayName)
+                        .mimeType(ref.getMimeType())
+                        .size(ref.getSize())
+                        .build();
+            }
+        } catch (Exception e) {
+            log.warn("转发 bb：读取附件失败 fileId={}", fileId, e);
+        }
+        return BbMessageContent.buildTextContent("[" + (isImage ? "图片" : "文件") + "] " + displayName);
+    }
+
+    private Long toLong(Object o) {
+        if (o == null) {
+            return null;
+        }
+        if (o instanceof Number) {
+            return ((Number) o).longValue();
+        }
+        try {
+            return Long.parseLong(o.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** bb 的全局显示名（默认「冥想bb」）；取不到返回 null。 */

@@ -22,16 +22,21 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -40,6 +45,10 @@ public class ChatFileServiceImpl implements ChatFileService {
 
     private static final String CAT_IMAGE = "image";
     private static final String CAT_FILE = "file";
+    private static final String CHUNK_DIR = "_chunks";
+
+    /** 分片合并锁：每个 uploadId 一把，保证「检查到齐 + 合并」原子，支持乱序/并发上传 */
+    private final Map<String, Object> mergeLocks = new ConcurrentHashMap<>();
 
     @Value("${chat.file.path:}")
     private String configuredPath;
@@ -96,6 +105,93 @@ public class ChatFileServiceImpl implements ChatFileService {
         f.setCreateTime(LocalDateTime.now());
         ChatFile saved = fileRepository.save(f);
 
+        return buildDto(saved, senderType, uploaderUserId);
+    }
+
+    @Override
+    @Transactional("chatTransactionManager")
+    public ChunkUploadResult saveUploadedChunk(Long conversationId, String uploaderUserId, String senderType,
+                                               String uploadId, MultipartFile chunk, int chunkIndex, int totalChunks,
+                                               String fileName, String mimeType, Long fileSize, String category) {
+        if (chunk == null || chunk.isEmpty()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "分片为空");
+        }
+        if (!StringUtils.hasText(uploadId) || totalChunks <= 0 || chunkIndex < 0 || chunkIndex >= totalChunks) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "分片参数不合法");
+        }
+        // uploadId 前端生成，清洗防目录穿越
+        String safeUploadId = uploadId.replaceAll("[^a-zA-Z0-9_-]", "");
+        if (safeUploadId.isEmpty()) {
+            throw new ServiceException(HttpStatus.BAD_REQUEST, "uploadId 不合法");
+        }
+        Path chunkDir = baseDir().resolve(CHUNK_DIR).resolve(safeUploadId);
+        try {
+            Files.createDirectories(chunkDir);
+            chunk.transferTo(chunkDir.resolve("part" + chunkIndex).toFile());
+        } catch (IOException e) {
+            log.error("保存分片失败 uploadId={} idx={}", safeUploadId, chunkIndex, e);
+            throw new ServiceException(HttpStatus.ERROR, "分片保存失败");
+        }
+
+        Object lock = mergeLocks.computeIfAbsent(safeUploadId, k -> new Object());
+        synchronized (lock) {
+            // 全片到齐才合并（支持乱序/并发）
+            for (int i = 0; i < totalChunks; i++) {
+                if (!Files.exists(chunkDir.resolve("part" + i))) {
+                    return new ChunkUploadResult(false, null);
+                }
+            }
+            String original = StringUtils.hasText(fileName) ? fileName : "file";
+            String cat = CAT_IMAGE.equals(category) ? CAT_IMAGE : CAT_FILE;
+            String ext = "";
+            int dot = original.lastIndexOf('.');
+            if (dot >= 0) {
+                ext = original.substring(dot);
+            }
+            String diskName = UUID.randomUUID().toString().replace("-", "") + ext;
+            String relPath = conversationId + "/" + diskName;
+            long mergedSize;
+            try {
+                Path dir = baseDir().resolve(String.valueOf(conversationId));
+                Files.createDirectories(dir);
+                Path finalFile = dir.resolve(diskName);
+                try (OutputStream os = Files.newOutputStream(finalFile)) {
+                    byte[] buf = new byte[8192];
+                    for (int i = 0; i < totalChunks; i++) {
+                        try (InputStream is = Files.newInputStream(chunkDir.resolve("part" + i))) {
+                            int n;
+                            while ((n = is.read(buf)) != -1) {
+                                os.write(buf, 0, n);
+                            }
+                        }
+                    }
+                }
+                mergedSize = Files.size(finalFile);
+            } catch (IOException e) {
+                log.error("合并分片失败 uploadId={}", safeUploadId, e);
+                throw new ServiceException(HttpStatus.ERROR, "文件合并失败");
+            } finally {
+                deleteQuietly(chunkDir);
+                mergeLocks.remove(safeUploadId);
+            }
+
+            ChatFile f = new ChatFile();
+            f.setConversationId(conversationId);
+            f.setUploaderUserId(uploaderUserId);
+            f.setSenderType(senderType);
+            f.setFileName(original);
+            f.setMimeType(mimeType);
+            f.setSize(fileSize != null ? fileSize : mergedSize);
+            f.setCategory(cat);
+            f.setStorePath(relPath);
+            f.setDeleted(false);
+            f.setCreateTime(LocalDateTime.now());
+            ChatFile saved = fileRepository.save(f);
+            return new ChunkUploadResult(true, buildDto(saved, senderType, uploaderUserId));
+        }
+    }
+
+    private FileDto buildDto(ChatFile saved, String senderType, String uploaderUserId) {
         FileDto dto = new FileDto();
         dto.setId(saved.getId());
         dto.setFileName(saved.getFileName());
@@ -106,6 +202,20 @@ public class ChatFileServiceImpl implements ChatFileService {
         dto.setUploaderUserId(uploaderUserId);
         dto.setCreateTime(saved.getCreateTime());
         return dto;
+    }
+
+    private void deleteQuietly(Path dir) {
+        try {
+            if (Files.exists(dir)) {
+                Files.walk(dir).sorted(Comparator.reverseOrder()).forEach(p -> {
+                    try {
+                        Files.delete(p);
+                    } catch (IOException ignored) {
+                    }
+                });
+            }
+        } catch (IOException ignored) {
+        }
     }
 
     @Override

@@ -94,6 +94,63 @@ export function uploadChatFile(conversationId, file, category) {
     });
 }
 
+// 分片大小 4MB / 并发 4：高延迟链路（Cloudflare 隧道）下摊薄每请求往返、并发提吞吐
+const CHAT_CHUNK_SIZE = 4 * 1024 * 1024;
+const CHAT_UPLOAD_CONCURRENCY = 4;
+
+// 并发分片上传聊天附件；onProgress(0-100) 回调进度；resolve 合并后的 FileDto（含 id）
+export async function uploadChatFileChunked(conversationId, file, category, onProgress) {
+    const uploadId = (crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random())).replace(/-/g, '');
+    const totalChunks = Math.max(1, Math.ceil(file.size / CHAT_CHUNK_SIZE));
+    let completed = 0;
+    let resultFile = null;
+    let aborted = false;
+    let abortErr = null;
+
+    const uploadOne = async (i) => {
+        const start = i * CHAT_CHUNK_SIZE;
+        const end = Math.min(start + CHAT_CHUNK_SIZE, file.size);
+        const fd = new FormData();
+        fd.append('file', file.slice(start, end));
+        fd.append('uploadId', uploadId);
+        fd.append('chunkIndex', i);
+        fd.append('totalChunks', totalChunks);
+        fd.append('fileName', file.name);
+        fd.append('mimeType', file.type || 'application/octet-stream');
+        fd.append('fileSize', file.size);
+        if (category) fd.append('category', category);
+        const resp = await request({
+            url: `/fileServer/chat/conversation/${conversationId}/file/upload`,
+            method: 'post',
+            data: fd,
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        const data = resp.data;
+        if (data && data.complete && data.file) resultFile = data.file;
+        completed++;
+        if (onProgress) onProgress(Math.round((completed / totalChunks) * 100));
+    };
+
+    let cursor = 0;
+    const worker = async () => {
+        while (!aborted && cursor < totalChunks) {
+            const i = cursor++;
+            try {
+                await uploadOne(i);
+            } catch (e) {
+                aborted = true;
+                abortErr = e;
+            }
+        }
+    };
+    const poolSize = Math.min(CHAT_UPLOAD_CONCURRENCY, totalChunks);
+    await Promise.all(Array.from({ length: poolSize }, () => worker()));
+
+    if (aborted) throw abortErr;
+    if (!resultFile) throw new Error('上传未返回文件信息');
+    return resultFile;
+}
+
 // 群文件下载地址（cookie 鉴权，可直接用于 <img src> / <a href>）
 export function chatFileUrl(fileId) {
     const base = import.meta.env.VITE_BASE_API || '/';
