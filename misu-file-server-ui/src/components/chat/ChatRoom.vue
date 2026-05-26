@@ -4,6 +4,7 @@ import { Picture, Close, Promotion, Document, Download, ArrowLeft, More, Camera,
 import { ElMessage } from 'element-plus'
 import ChatAvatar from './ChatAvatar.vue'
 import ChatUsageBar from './ChatUsageBar.vue'
+import ImageViewer from '@/components/utils/ImageViewer.vue'
 import { botProfile, setBotAvatar } from './botProfile.js'
 import { getAccessToken, getServerWebSocketUrl, pageMessages, uploadChatFile, uploadChatFileChunked, chatFileUrl } from '@/api/chat/chat'
 import { readMsgs, writeMsgs } from './chatCache.js'
@@ -111,6 +112,27 @@ const imageSrc = (c) => {
   if (c.type === 'chatImage') return chatFileUrl(c.data)
   if (c.type === 'localImage') return 'data:' + (c.mimeType || 'image/png') + ';base64,' + c.data
   return c.data
+}
+const isImageContent = (c) => c.type === 'chatImage' || c.type === 'netImage' || c.type === 'localImage'
+
+/* 点击聊天图片 → 收集会话内全部图片，定位点击索引，用 ImageViewer 打开 */
+const chatViewerVisible = ref(false)
+const chatImageList = ref([])
+const chatImageIndex = ref(0)
+const openChatImage = (mi, ci) => {
+  const urls = []
+  let clicked = -1
+  messages.value.forEach((m, i) => {
+    (m.content || []).forEach((c, j) => {
+      if (!isImageContent(c)) return
+      if (i === mi && j === ci) clicked = urls.length
+      urls.push(imageSrc(c))
+    })
+  })
+  if (clicked < 0) return
+  chatImageList.value = urls
+  chatImageIndex.value = clicked
+  chatViewerVisible.value = true
 }
 
 const scrollToBottom = () => {
@@ -540,8 +562,8 @@ const insertMention = (m) => {
               <div class="bot-bubble" :class="{ self: message.isSelf, bot: message.senderType === 'BOT' }">
                 <template v-for="(content, ci) in message.content" :key="ci">
                   <span v-if="content.type === 'text'" class="bot-text" :class="{ 'bot-text-streaming': message.streaming }" v-html="formatText(content.data)"></span>
-                  <img v-else-if="content.type === 'chatImage' || content.type === 'netImage' || content.type === 'localImage'" class="bot-image"
-                       :src="imageSrc(content)" alt="" />
+                  <img v-else-if="isImageContent(content)" class="bot-image"
+                       :src="imageSrc(content)" alt="" @click="openChatImage(index, ci)" />
                   <a v-else-if="content.type === 'chatFile' || content.type === 'netFile' || content.type === 'localFile'" class="bot-file" :href="fileHref(content)" :download="content.fileName || 'file'" target="_blank" rel="noopener">
                     <span class="bot-file-icon"><Document /></span>
                     <span class="bot-file-meta">
@@ -563,6 +585,11 @@ const insertMention = (m) => {
         </template>
       </div>
     </div>
+
+    <ImageViewer v-if="chatViewerVisible"
+                 :url-list="chatImageList"
+                 :initial-index="chatImageIndex"
+                 @close="chatViewerVisible = false" />
 
     <div class="bot-input-wrap">
       <div v-if="imageList.length > 0 || fileList.length > 0" class="bot-attach-preview">
@@ -684,7 +711,7 @@ const insertMention = (m) => {
 .bot-retry-btn { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border: none; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent); font-size: 11px; cursor: pointer; }
 .bot-retry-btn :deep(svg) { width: 11px; height: 11px; }
 
-.bot-image { max-width: 240px; height: auto; border-radius: var(--radius-md); display: block; margin-top: var(--space-2); }
+.bot-image { max-width: 240px; height: auto; border-radius: var(--radius-md); display: block; margin-top: var(--space-2); cursor: zoom-in; }
 .bot-bubble > .bot-image:first-child { margin-top: 0; }
 
 .bot-file { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--color-bg-muted); border: 1px solid var(--color-border-default); color: var(--color-text-primary); text-decoration: none; max-width: 240px; }

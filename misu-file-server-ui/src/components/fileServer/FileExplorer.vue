@@ -141,15 +141,10 @@
       </el-container>
     </div>
 
-    <el-image-viewer v-if="imageViewVisible"
-                     :zoom-rate="1.2"
-                     :max-scale="7"
-                     :min-scale="0.2"
-                     :url-list="imageSrcList"
-                     :initial-index="imageIndex"
-                     :hide-on-click-modal="true"
-                     @switch="switchImageViewer"
-                     @close="closeImageViewer"/>
+    <ImageViewer v-if="imageViewVisible"
+                 :url-list="imageFullSrcList"
+                 :initial-index="imageIndex"
+                 @close="closeImageViewer"/>
 
     <!-- 拖拽区域 (移动端无拖拽场景，仅桌面渲染) -->
     <div class="fullscreen-overlay"
@@ -436,6 +431,7 @@ import {computed, defineProps, onBeforeUnmount, onMounted, ref, watch} from "vue
 import { useBreakpoint } from '@/composables/useBreakpoint';
 import VideoViewer from '@/components/fileServer/VideoViewer.vue'
 import FileUpload from '@/components/fileServer/FileUpload.vue'
+import ImageViewer from '@/components/utils/ImageViewer.vue'
 import {ElMessage, ElMessageBox} from "element-plus";
 import logger from '@/utils/logger';
 import {
@@ -516,9 +512,7 @@ const downloadBaseUrl = normalizeResourceBaseUrl(import.meta.env.VITE_RESOURCE_A
 
 // 图片组件相关参数
 const imageIndex = ref(0);
-// 图片组件用的链接列表，需要到指定图片才请求接口，会初始化一个空字符串数组，加载到指定图片时，才对指定位置链接赋值
-const imageSrcList = ref([]);
-// 与上图列表对应，是图片实际地址，加载到指定图片时，将对应位置链接赋值到上面列表对应位置
+// 当前目录全部图片的真实地址列表，传给 ImageViewer（组件内部按 current±1 窗口化加载）
 const imageFullSrcList = ref([]);
 const imageViewVisible = ref(false);
 
@@ -1219,12 +1213,9 @@ const openFile = (file) => {
       filePath.value = file.filePath + file.fileName + '/';
     }
   } else if (file.fileType === 'image') {
-    // 打开文件预览
+    // 打开图片查看器
     imageIndex.value = getImageIndex(file);
     imageViewVisible.value = true;
-
-    //加载对应的图片链接到显示链接
-    switchImageViewer(imageIndex.value);
   }else if (file.fileType === 'video') {
     openVideoFile(file);
   }else if (file.fileType === 'document' || (!!extName && extName.toLowerCase() === 'pdf')) {
@@ -1292,11 +1283,6 @@ const createVideoRoomFromFile = (file, streamLink) => {
   });
 };
 
-const switchImageViewer = (index) => {
-  //加载对应的图片链接到显示链接
-  imageSrcList.value[index] = imageFullSrcList.value[index]
-}
-
 const closeImageViewer = () => {
   imageViewVisible.value = false;
 };
@@ -1310,11 +1296,9 @@ const queryFileList = (silent = false) => {
   }
   getFileList(filePath.value, props.openType).then((response) => {
     fileList.value = response.data.sort((a, b) => a.fileName.localeCompare(b.fileName));
-    //封装图片列表
+    //封装当前目录图片真实地址列表
     imageFullSrcList.value = fileList.value.filter((file) => file.fileType === "image")
         .map((file) => downloadBaseUrl + file.streamLink);
-    //封装空图片列表，到对应图片时才加载
-    imageSrcList.value = new Array(imageFullSrcList.value.length).fill("");
   }).catch(() => {
   }).finally(() => {
     if (!silent) {
