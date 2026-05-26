@@ -182,23 +182,40 @@ const onTouchEnd = (e) => {
   if (e.touches.length === 0) mode = null
 }
 
-// ---------- 鼠标拖动平移（桌面端放大后） ----------
-let mouseDown = false, mStartX = 0, mStartY = 0, mTx = 0, mTy = 0
+// ---------- 鼠标拖动：未放大时左右拖切图，放大后拖动平移 ----------
+let mouseDown = false, mouseMode = null, mStartX = 0, mStartY = 0, mTx = 0, mTy = 0
 const onMouseDown = (e) => {
-  if (scale.value <= 1) return
   mouseDown = true
   animating.value = false
   mStartX = e.clientX; mStartY = e.clientY
   mTx = translate.x; mTy = translate.y
+  mouseMode = scale.value > 1 ? 'pan' : 'swipe'
   e.preventDefault()
 }
 const onMouseMove = (e) => {
   if (!mouseDown) return
-  translate.x = mTx + (e.clientX - mStartX)
-  translate.y = mTy + (e.clientY - mStartY)
-  clampPan()
+  if (mouseMode === 'pan') {
+    translate.x = mTx + (e.clientX - mStartX)
+    translate.y = mTy + (e.clientY - mStartY)
+    clampPan()
+  } else if (mouseMode === 'swipe') {
+    let d = e.clientX - mStartX
+    if ((index.value === 0 && d > 0) || (index.value === props.urlList.length - 1 && d < 0)) d *= 0.35
+    dragX.value = d
+  }
 }
-const onMouseUp = () => { mouseDown = false; animating.value = true }
+const onMouseUp = () => {
+  if (!mouseDown) return
+  mouseDown = false
+  animating.value = true
+  if (mouseMode === 'swipe') {
+    const threshold = (imgEl ? imgEl.clientWidth : window.innerWidth) * SWIPE_RATIO
+    if (dragX.value <= -threshold) next()
+    else if (dragX.value >= threshold) prev()
+    else dragX.value = 0
+  }
+  mouseMode = null
+}
 
 // ---------- 键盘 ----------
 const onKey = (e) => {
@@ -257,6 +274,7 @@ onBeforeUnmount(() => {
   will-change: transform;
   -webkit-user-drag: none;
 }
+.iv-img { cursor: grab; }
 .iv-img.iv-grab { cursor: grab; }
 
 .iv-toolbar {
