@@ -1,14 +1,16 @@
 <template>
-  <div ref="rootRef" class="iv-mask" @click.self="onMaskClick" @wheel.prevent="onWheel">
-    <!-- 顶部工具条 -->
-    <div class="iv-toolbar" @click.stop>
-      <span class="iv-counter" v-if="urlList.length > 1">{{ index + 1 }} / {{ urlList.length }}</span>
-      <span class="iv-spacer"></span>
-      <button class="iv-tool" type="button" aria-label="缩小" @click="zoomBy(-0.5)"><ZoomOut /></button>
-      <button class="iv-tool" type="button" aria-label="放大" @click="zoomBy(0.5)"><ZoomIn /></button>
-      <button class="iv-tool" type="button" aria-label="旋转" @click="rotate"><RefreshRight /></button>
-      <button class="iv-tool" type="button" aria-label="关闭" @click="emitClose"><Close /></button>
-    </div>
+  <div ref="rootRef" class="iv-mask" :style="maskStyle">
+    <!-- 顶部工具条（单击切换显隐） -->
+    <transition name="iv-fade">
+      <div v-show="chromeVisible" class="iv-toolbar" @click.stop @mousedown.stop @touchstart.stop>
+        <span class="iv-counter" v-if="urlList.length > 1">{{ index + 1 }} / {{ urlList.length }}</span>
+        <span class="iv-spacer"></span>
+        <button class="iv-tool" type="button" aria-label="缩小" @click="zoomBy(-0.5)"><ZoomOut /></button>
+        <button class="iv-tool" type="button" aria-label="放大" @click="zoomBy(0.5)"><ZoomIn /></button>
+        <button class="iv-tool" type="button" aria-label="旋转" @click="rotate"><RefreshRight /></button>
+        <button class="iv-tool" type="button" aria-label="关闭" @click="emitClose"><Close /></button>
+      </div>
+    </transition>
 
     <!-- 滑动轨道：translateX = -index*100% + dragX -->
     <div
@@ -32,8 +34,12 @@
     </div>
 
     <!-- 桌面端左右箭头 -->
-    <button v-if="urlList.length > 1" class="iv-arrow iv-prev" type="button" aria-label="上一张" @click.stop="prev"><ArrowLeft /></button>
-    <button v-if="urlList.length > 1" class="iv-arrow iv-next" type="button" aria-label="下一张" @click.stop="next"><ArrowRight /></button>
+    <transition name="iv-fade">
+      <button v-show="chromeVisible && urlList.length > 1" class="iv-arrow iv-prev" type="button" aria-label="上一张" @click.stop="prev" @mousedown.stop><ArrowLeft /></button>
+    </transition>
+    <transition name="iv-fade">
+      <button v-show="chromeVisible && urlList.length > 1" class="iv-arrow iv-next" type="button" aria-label="下一张" @click.stop="next" @mousedown.stop><ArrowRight /></button>
+    </transition>
   </div>
 </template>
 
@@ -51,20 +57,30 @@ const index = ref(props.initialIndex || 0)
 const scale = ref(1)
 const rotateDeg = ref(0)
 const translate = reactive({ x: 0, y: 0 })
-const dragX = ref(0)            // 横向切换拖动偏移（px）
+const dragX = ref(0)               // 横向切图拖动偏移（px）
+const dismissY = ref(0)            // 竖向「下拉/上滑关闭」偏移（px）
 const trackAnimating = ref(true)   // 轨道（切图）过渡
-const imgAnimating = ref(false)    // 图片（缩放/平移）过渡 —— 实时手势时关闭，程序变换时打开
+const imgAnimating = ref(false)    // 图片（缩放/平移/关闭回弹）过渡；实时手势时关闭
+const chromeVisible = ref(true)    // 工具栏/箭头显隐（单击切换）
+
 const MAX_SCALE = 6
 const MIN_SCALE = 1
+const ZOOM_DBLTAP = 2.5
 const SWIPE_RATIO = 0.18           // 横滑超过容器宽度比例则切图
+const DISMISS_THRESH = 110         // 竖向位移超过则关闭
 const MOVE_THRESH = 8              // 超过该位移视为「拖动」而非「点击」
 const DOUBLE_TAP_MS = 280
 
 const trackStyle = computed(() => ({
   transform: `translateX(calc(${-index.value * 100}% + ${dragX.value}px))`,
 }))
+// 关闭手势时整体缩小（仅未放大态）
+const dismissScale = computed(() => (scale.value <= 1 ? Math.max(0.6, 1 - Math.abs(dismissY.value) / 1600) : 1))
 const imgStyle = computed(() => ({
-  transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale.value}) rotate(${rotateDeg.value}deg)`,
+  transform: `translate(${translate.x}px, ${translate.y + dismissY.value}px) scale(${(scale.value * dismissScale.value).toFixed(4)}) rotate(${rotateDeg.value}deg)`,
+}))
+const maskStyle = computed(() => ({
+  backgroundColor: `rgba(0,0,0,${(0.92 * (1 - Math.min(Math.abs(dismissY.value) / 600, 0.85))).toFixed(3)})`,
 }))
 
 const rootRef = ref(null)
@@ -72,7 +88,7 @@ const rootRef = ref(null)
 const curImg = () => rootRef.value && rootRef.value.querySelector('.iv-slide:nth-child(' + (index.value + 1) + ') .iv-img')
 const curImgWidth = () => { const el = curImg(); return el ? el.clientWidth : window.innerWidth }
 
-// 平移边界钳制（基于图片渲染尺寸）
+// 平移边界钳制
 const clampPan = () => {
   const el = curImg()
   if (!el || scale.value <= 1) { translate.x = 0; translate.y = 0; return }
@@ -82,20 +98,13 @@ const clampPan = () => {
   translate.y = Math.max(-maxY, Math.min(maxY, translate.y))
 }
 
-// 复位到适应屏幕（保留旋转角）
-const fitReset = (animated = false) => {
+const fitReset = (animated = false) => {   // 复位到适应屏幕（保留旋转）
   imgAnimating.value = animated
-  scale.value = 1
-  translate.x = 0
-  translate.y = 0
+  scale.value = 1; translate.x = 0; translate.y = 0
 }
-// 切图时整体复位（含旋转，瞬时）
-const fullReset = () => {
+const fullReset = () => {                  // 切图时整体复位（瞬时）
   imgAnimating.value = false
-  scale.value = 1
-  translate.x = 0
-  translate.y = 0
-  rotateDeg.value = 0
+  scale.value = 1; translate.x = 0; translate.y = 0; rotateDeg.value = 0; dismissY.value = 0
 }
 
 watch(index, (i) => { fullReset(); emit('switch', i) }, { immediate: true })
@@ -108,12 +117,10 @@ const goTo = (i) => {
 }
 const prev = () => goTo(index.value - 1)
 const next = () => goTo(index.value + 1)
-
 const emitClose = () => emit('close')
-const onMaskClick = () => { if (scale.value <= 1) emitClose() }
 
 // ---------- 缩放 ----------
-// 朝指定屏幕坐标 (cx,cy) 缩放到 target；不传坐标则以图片中心缩放
+// 朝屏幕坐标 (cx,cy) 缩放到 target；不传坐标则按图片中心
 const zoomTo = (target, cx, cy, animated = true) => {
   const ns = Math.min(MAX_SCALE, Math.max(MIN_SCALE, +target.toFixed(3)))
   imgAnimating.value = animated
@@ -124,7 +131,6 @@ const zoomTo = (target, cx, cy, animated = true) => {
     const ox = r.left + r.width / 2
     const oy = r.top + r.height / 2
     const sOld = scale.value
-    // 锚点在「原始图片坐标系」中的位置
     const px = (cx - ox - translate.x) / sOld
     const py = (cy - oy - translate.y) / sOld
     scale.value = ns
@@ -136,39 +142,44 @@ const zoomTo = (target, cx, cy, animated = true) => {
   clampPan()
 }
 const zoomBy = (delta) => zoomTo(scale.value + delta, null, null, true)
-const onWheel = (e) => zoomTo(scale.value + (e.deltaY < 0 ? 0.3 : -0.3), e.clientX, e.clientY, false)
+const onWheel = (e) => { e.preventDefault(); zoomTo(scale.value + (e.deltaY < 0 ? 0.3 : -0.3), e.clientX, e.clientY, false) }
 const rotate = () => { imgAnimating.value = true; rotateDeg.value = (rotateDeg.value + 90) % 360 }
 
 // ---------- 单击 / 双击 ----------
 let tapTimer = null
 const handleTap = (cx, cy) => {
-  if (tapTimer) {            // 第二次 → 双击
+  if (tapTimer) {                       // 第二击 → 双击：缩放
     clearTimeout(tapTimer); tapTimer = null
     if (scale.value > 1) fitReset(true)
-    else zoomTo(2.5, cx, cy, true)
-  } else {                   // 等待是否双击；否则单击
+    else zoomTo(ZOOM_DBLTAP, cx, cy, true)
+  } else {                              // 等待是否双击；否则单击：切换工具栏
     tapTimer = setTimeout(() => {
       tapTimer = null
-      if (scale.value > 1) fitReset(true)   // 放大态：单击先复位
-      else emitClose()                       // 适应态：单击关闭
+      chromeVisible.value = !chromeVisible.value
     }, DOUBLE_TAP_MS)
   }
 }
 
+// ---------- 关闭手势（竖向拖动）----------
+const settleDismiss = () => {
+  if (Math.abs(dismissY.value) > DISMISS_THRESH) { emitClose(); return }
+  imgAnimating.value = true
+  dismissY.value = 0
+}
+
 // ---------- 触摸手势 ----------
 let startX = 0, startY = 0, startTx = 0, startTy = 0, moved = false
-let gesture = null                 // 'swipe' | 'pan' | 'pinch'
+let gesture = null                 // 'drag'(未定向) | 'swipe' | 'dismiss' | 'pan' | 'pinch'
 let pinchStartDist = 0, pinchStartScale = 1
+let lastTouchEnd = 0               // 屏蔽触摸后浏览器模拟的鼠标事件
 
 const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
 
 const onTouchStart = (e) => {
   imgAnimating.value = false
   if (e.touches.length === 2) {
-    gesture = 'pinch'
-    moved = true
-    pinchStartDist = dist(e.touches)
-    pinchStartScale = scale.value
+    gesture = 'pinch'; moved = true
+    pinchStartDist = dist(e.touches); pinchStartScale = scale.value
     if (tapTimer) { clearTimeout(tapTimer); tapTimer = null }
     return
   }
@@ -176,7 +187,7 @@ const onTouchStart = (e) => {
   startX = t.clientX; startY = t.clientY
   startTx = translate.x; startTy = translate.y
   moved = false
-  gesture = scale.value > 1 ? 'pan' : 'swipe'
+  gesture = scale.value > 1 ? 'pan' : 'drag'   // 未放大先不定向，移动后判定左右/上下
 }
 
 const onTouchMove = (e) => {
@@ -184,68 +195,72 @@ const onTouchMove = (e) => {
     zoomTo(pinchStartScale * (dist(e.touches) / pinchStartDist), null, null, false)
     return
   }
-  if (!gesture) return
+  if (!gesture || gesture === 'pinch') return
   const t = e.touches[0]
   const dx = t.clientX - startX
   const dy = t.clientY - startY
-  if (Math.abs(dx) > MOVE_THRESH || Math.abs(dy) > MOVE_THRESH) moved = true
+  if (!moved && (Math.abs(dx) > MOVE_THRESH || Math.abs(dy) > MOVE_THRESH)) {
+    moved = true
+    if (gesture === 'drag') gesture = Math.abs(dx) >= Math.abs(dy) ? 'swipe' : 'dismiss'
+  }
   if (gesture === 'pan') {
     imgAnimating.value = false
-    translate.x = startTx + dx
-    translate.y = startTy + dy
-    clampPan()
+    translate.x = startTx + dx; translate.y = startTy + dy; clampPan()
   } else if (gesture === 'swipe') {
     let d = dx
     if ((index.value === 0 && d > 0) || (index.value === props.urlList.length - 1 && d < 0)) d *= 0.35
     dragX.value = d
+  } else if (gesture === 'dismiss') {
+    dismissY.value = dy
   }
 }
 
 const onTouchEnd = (e) => {
+  lastTouchEnd = Date.now()
   if (gesture === 'swipe') {
     trackAnimating.value = true
-    if (moved) {
-      const threshold = curImgWidth() * SWIPE_RATIO
-      if (dragX.value <= -threshold) next()
-      else if (dragX.value >= threshold) prev()
-      else dragX.value = 0
-    } else {
-      dragX.value = 0
-      handleTap(startX, startY)         // 未移动 → 点击
-    }
-  } else if (gesture === 'pan') {
-    if (!moved) handleTap(startX, startY)
+    const threshold = curImgWidth() * SWIPE_RATIO
+    if (dragX.value <= -threshold) next()
+    else if (dragX.value >= threshold) prev()
+    else dragX.value = 0
+  } else if (gesture === 'dismiss') {
+    settleDismiss()
   } else if (gesture === 'pinch') {
-    if (scale.value <= 1) fitReset(true)
-    else clampPan()
+    if (scale.value <= 1) fitReset(true); else clampPan()
+  } else if ((gesture === 'drag' || gesture === 'pan') && !moved) {
+    handleTap(startX, startY)            // 未移动 → 点击
   }
   if (e.touches.length === 0) gesture = null
 }
 
-// ---------- 鼠标（桌面）----------
-let mouseDown = false, mouseMode = null, mStartX = 0, mStartY = 0, mTx = 0, mTy = 0, mMoved = false
+// ---------- 鼠标（桌面，镜像触摸逻辑）----------
+let mouseDown = false, mouseMode = null, mMoved = false
 const onMouseDown = (e) => {
+  if (Date.now() - lastTouchEnd < 700) return   // 忽略触摸模拟的鼠标
   mouseDown = true
   imgAnimating.value = false
-  mStartX = e.clientX; mStartY = e.clientY
-  mTx = translate.x; mTy = translate.y
+  startX = e.clientX; startY = e.clientY
+  startTx = translate.x; startTy = translate.y
   mMoved = false
-  mouseMode = scale.value > 1 ? 'pan' : 'swipe'
+  mouseMode = scale.value > 1 ? 'pan' : 'drag'
   e.preventDefault()
 }
 const onMouseMove = (e) => {
   if (!mouseDown) return
-  const dx = e.clientX - mStartX
-  const dy = e.clientY - mStartY
-  if (Math.abs(dx) > MOVE_THRESH || Math.abs(dy) > MOVE_THRESH) mMoved = true
+  const dx = e.clientX - startX
+  const dy = e.clientY - startY
+  if (!mMoved && (Math.abs(dx) > MOVE_THRESH || Math.abs(dy) > MOVE_THRESH)) {
+    mMoved = true
+    if (mouseMode === 'drag') mouseMode = Math.abs(dx) >= Math.abs(dy) ? 'swipe' : 'dismiss'
+  }
   if (mouseMode === 'pan') {
-    translate.x = mTx + dx
-    translate.y = mTy + dy
-    clampPan()
+    translate.x = startTx + dx; translate.y = startTy + dy; clampPan()
   } else if (mouseMode === 'swipe') {
     let d = dx
     if ((index.value === 0 && d > 0) || (index.value === props.urlList.length - 1 && d < 0)) d *= 0.35
     dragX.value = d
+  } else if (mouseMode === 'dismiss') {
+    dismissY.value = dy
   }
 }
 const onMouseUp = (e) => {
@@ -253,16 +268,13 @@ const onMouseUp = (e) => {
   mouseDown = false
   if (mouseMode === 'swipe') {
     trackAnimating.value = true
-    if (mMoved) {
-      const threshold = curImgWidth() * SWIPE_RATIO
-      if (dragX.value <= -threshold) next()
-      else if (dragX.value >= threshold) prev()
-      else dragX.value = 0
-    } else {
-      dragX.value = 0
-      handleTap(e.clientX, e.clientY)
-    }
-  } else if (mouseMode === 'pan' && !mMoved) {
+    const threshold = curImgWidth() * SWIPE_RATIO
+    if (dragX.value <= -threshold) next()
+    else if (dragX.value >= threshold) prev()
+    else dragX.value = 0
+  } else if (mouseMode === 'dismiss') {
+    settleDismiss()
+  } else if ((mouseMode === 'drag' || mouseMode === 'pan') && !mMoved) {
     handleTap(e.clientX, e.clientY)
   }
   mouseMode = null
@@ -281,6 +293,7 @@ onMounted(() => {
   document.addEventListener('keydown', onKey)
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
+  rootRef.value && rootRef.value.addEventListener('wheel', onWheel, { passive: false })
   document.body.style.overflow = 'hidden'
 })
 onBeforeUnmount(() => {
@@ -297,7 +310,7 @@ onBeforeUnmount(() => {
   position: fixed;
   inset: 0;
   z-index: 3000;
-  background: rgba(0, 0, 0, 0.9);
+  background: rgba(0, 0, 0, 0.92);
   overflow: hidden;
   touch-action: none;
   user-select: none;
@@ -327,11 +340,14 @@ onBeforeUnmount(() => {
   -webkit-user-drag: none;
   cursor: grab;
 }
-/* 缩放/平移过渡（实时手势时不加该 class，保证跟手） */
+/* 缩放/平移/回弹过渡（实时手势时不加该 class，保证跟手） */
 .iv-img.iv-anim {
   transition: transform 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .iv-img.iv-grabbing { cursor: grab; }
+
+.iv-fade-enter-active, .iv-fade-leave-active { transition: opacity 0.2s; }
+.iv-fade-enter-from, .iv-fade-leave-to { opacity: 0; }
 
 .iv-toolbar {
   position: absolute;
