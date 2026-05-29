@@ -5,7 +5,7 @@ import com.misu.common.exception.ServiceException;
 import com.misu.fileServer.constant.FileType;
 import com.misu.fileServer.domain.entity.FileMapping;
 import com.misu.fileServer.repository.FileMappingRepository;
-import com.misu.fileServer.service.FileService;
+import com.misu.fileServer.service.FileAccessService;
 import com.misu.fileServer.service.FileVersionService;
 import com.misu.fileServer.util.FilePathGuard;
 import com.misu.fileServer.util.FileTypeUtils;
@@ -54,7 +54,7 @@ public class WebDavServiceImpl implements WebDavService {
     private FileVersionService fileVersionService;
 
     @Resource
-    private FileService fileService;
+    private FileAccessService fileAccessService;
 
     @Resource
     private UploadExtensionGuard uploadExtensionGuard;
@@ -98,7 +98,7 @@ public class WebDavServiceImpl implements WebDavService {
     @Override
     public void get(String userId, String virtualPath, HttpServletRequest request, HttpServletResponse response) {
         String path = FilePathGuard.normalizeRelativePath(virtualPath);
-        fileService.accessUserFileAsUser(OPEN_TYPE, userId, path, request, response, false);
+        fileAccessService.accessUserFileAsUser(OPEN_TYPE, userId, path, request, response, false);
     }
 
     @Override

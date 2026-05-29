@@ -11,7 +11,10 @@ import com.misu.fileServer.domain.dto.FileUploadRequest;
 import com.misu.fileServer.domain.dto.HashUploadCheckRequestDto;
 import com.misu.fileServer.domain.dto.SearchFileRequestDto;
 import com.misu.fileServer.domain.dto.SharePrivateFileToPublicRequestDto;
+import com.misu.fileServer.service.FileAccessService;
 import com.misu.fileServer.service.FileService;
+import com.misu.fileServer.service.FileTextService;
+import com.misu.fileServer.service.FileTrashService;
 import com.misu.security.annotation.Anonymous;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -39,6 +42,15 @@ public class FileController {
     @Resource
     private FileService fileService;
 
+    @Resource
+    private FileAccessService fileAccessService;
+
+    @Resource
+    private FileTrashService fileTrashService;
+
+    @Resource
+    private FileTextService fileTextService;
+
     /**
      * 获取目录文件
      */
@@ -54,7 +66,7 @@ public class FileController {
     @GetMapping({"/getFileDownloadLink"})
     @ApiOperation(value="获取文件的临时下载链接")
     public AjaxResult getFileDownloadLink(@Valid FileRequestDto fileRequestDto) {
-        return AjaxResult.success(fileService.getFileDownloadLink(fileRequestDto));
+        return AjaxResult.success(fileAccessService.getFileDownloadLink(fileRequestDto));
     }
 
     /**
@@ -64,7 +76,7 @@ public class FileController {
     @GetMapping({"/downloadFile"})
     @ApiOperation(value="下载文件")
     public void downloadPublicFile(@Valid FileDownloadRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
-        fileService.downloadFile(fileRequestDto, request, response);
+        fileAccessService.downloadFile(fileRequestDto, request, response);
     }
 
     /**
@@ -73,7 +85,7 @@ public class FileController {
     @GetMapping({"/download"})
     @ApiOperation(value="登录态下载文件")
     public void downloadUserFile(@Valid FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
-        fileService.accessUserFile(fileRequestDto, request, response, true);
+        fileAccessService.accessUserFile(fileRequestDto, request, response, true);
     }
 
     /**
@@ -82,7 +94,7 @@ public class FileController {
     @GetMapping({"/stream"})
     @ApiOperation(value="登录态播放/预览原文件")
     public void streamUserFile(@Valid FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
-        fileService.accessUserFile(fileRequestDto, request, response, false);
+        fileAccessService.accessUserFile(fileRequestDto, request, response, false);
     }
 
     /**
@@ -91,7 +103,7 @@ public class FileController {
     @GetMapping({"/preview"})
     @ApiOperation(value="登录态获取图片缩略图")
     public void previewFile(@Valid FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
-        fileService.previewFile(fileRequestDto, request, response);
+        fileAccessService.previewFile(fileRequestDto, request, response);
     }
 
     /**
@@ -100,7 +112,7 @@ public class FileController {
     @GetMapping({"/videoPreview"})
     @ApiOperation(value="登录态获取视频封面")
     public void videoPreviewFile(@Valid FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
-        fileService.videoPreviewFile(fileRequestDto, request, response);
+        fileAccessService.videoPreviewFile(fileRequestDto, request, response);
     }
 
     /**
@@ -109,7 +121,7 @@ public class FileController {
     @GetMapping({"/transcodedVideo"})
     @ApiOperation(value="登录态播放转码视频")
     public void transcodedVideoFile(@Valid FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response) {
-        fileService.transcodedVideoFile(fileRequestDto, request, response);
+        fileAccessService.transcodedVideoFile(fileRequestDto, request, response);
     }
 
     /**
@@ -186,7 +198,7 @@ public class FileController {
     public AjaxResult listTrash(@RequestParam("openType") @NotNull(message = "文件公开类型不能为空") Integer openType,
                                 @RequestParam(value = "pageNumber", required = false) Integer pageNumber,
                                 @RequestParam(value = "pageSize", required = false) Integer pageSize) {
-        return AjaxResult.success(fileService.listTrash(openType, pageNumber, pageSize));
+        return AjaxResult.success(fileTrashService.listTrash(openType, pageNumber, pageSize));
     }
 
     /**
@@ -198,7 +210,7 @@ public class FileController {
     public AjaxResult restoreTrash(@RequestBody Map<String, Object> body) {
         Object idValue = body == null ? null : body.get("id");
         Long id = parseLongOrThrow(idValue);
-        fileService.restoreFromTrash(id);
+        fileTrashService.restoreFromTrash(id);
         return AjaxResult.success();
     }
 
@@ -211,7 +223,7 @@ public class FileController {
     public AjaxResult purgeTrash(@RequestBody Map<String, Object> body) {
         Object idValue = body == null ? null : body.get("id");
         Long id = parseLongOrThrow(idValue);
-        fileService.purgeFromTrash(id);
+        fileTrashService.purgeFromTrash(id);
         return AjaxResult.success();
     }
 
@@ -254,7 +266,7 @@ public class FileController {
     @GetMapping({"/downloadDirectory"})
     @ApiOperation(value="流式 ZIP 下载文件夹")
     public void downloadDirectory(@Valid FileRequestDto fileRequestDto, HttpServletResponse response) {
-        fileService.downloadDirectoryAsZip(fileRequestDto, response);
+        fileAccessService.downloadDirectoryAsZip(fileRequestDto, response);
     }
 
     // ===================== M5：配额 + 哈希秒传 =====================
@@ -288,7 +300,7 @@ public class FileController {
     public AjaxResult textContent(
             @RequestParam("openType") @NotNull(message = "文件公开类型不能为空") Integer openType,
             @RequestParam("filePath") @jakarta.validation.constraints.NotBlank(message = "文件路径不能为空") String filePath) {
-        return AjaxResult.success(fileService.getTextContent(openType, filePath));
+        return AjaxResult.success(fileTextService.getTextContent(openType, filePath));
     }
 
     /**
@@ -300,7 +312,7 @@ public class FileController {
             openTypeExpr = "#request.openType",
             virtualPathExpr = "#request.filePath")
     public AjaxResult saveText(@Valid @RequestBody com.misu.fileServer.domain.dto.SaveTextRequestDto request) {
-        fileService.saveTextContent(request);
+        fileTextService.saveTextContent(request);
         return AjaxResult.success();
     }
 

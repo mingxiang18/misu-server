@@ -10,7 +10,7 @@ import com.misu.fileServer.domain.entity.FileMapping;
 import com.misu.fileServer.domain.entity.FileShare;
 import com.misu.fileServer.repository.FileMappingRepository;
 import com.misu.fileServer.repository.FileShareRepository;
-import com.misu.fileServer.service.FileService;
+import com.misu.fileServer.service.FileAccessService;
 import com.misu.fileServer.service.FileShareService;
 import com.misu.fileServer.util.FilePathGuard;
 import com.misu.security.dto.LoginUser;
@@ -58,7 +58,7 @@ public class FileShareServiceImpl implements FileShareService {
     private FileMappingRepository fileMappingRepository;
 
     @Resource
-    private FileService fileService;
+    private FileAccessService fileAccessService;
 
     @Resource
     private PasswordEncoder passwordEncoder;
@@ -188,7 +188,7 @@ public class FileShareServiceImpl implements FileShareService {
         fileShareRepository.incrementDownloadCount(share.getId(), LocalDateTime.now());
 
         // 委托既有的"按用户视角访问文件"，绕过登录态用 sourceUserId
-        fileService.accessUserFileAsUser(share.getOpenType(), share.getSourceUserId(),
+        fileAccessService.accessUserFileAsUser(share.getOpenType(), share.getSourceUserId(),
                 share.getSourceVirtualPath(), request, response, true);
     }
 

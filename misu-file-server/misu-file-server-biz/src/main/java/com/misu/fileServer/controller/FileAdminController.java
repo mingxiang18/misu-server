@@ -2,7 +2,7 @@ package com.misu.fileServer.controller;
 
 import com.misu.common.domain.AjaxResult;
 import com.misu.fileServer.domain.dto.ShareStagingRequestDto;
-import com.misu.fileServer.service.FileService;
+import com.misu.fileServer.service.FileAdminService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import jakarta.annotation.Resource;
@@ -22,19 +22,19 @@ import org.springframework.web.bind.annotation.RestController;
 public class FileAdminController {
 
     @Resource
-    private FileService fileService;
+    private FileAdminService fileAdminService;
 
     @PostMapping("/startFileMappingBackfill")
     @ApiOperation(value = "启动 file_mapping 回填任务")
     public AjaxResult startFileMappingBackfill() {
-        fileService.startFileMappingBackfill();
+        fileAdminService.startFileMappingBackfill();
         return AjaxResult.success();
     }
 
     @GetMapping("/getFileMappingBackfillStatus")
     @ApiOperation(value = "获取 file_mapping 回填任务状态")
     public AjaxResult getFileMappingBackfillStatus() {
-        return AjaxResult.success(fileService.getFileMappingBackfillStatus());
+        return AjaxResult.success(fileAdminService.getFileMappingBackfillStatus());
     }
 
     @GetMapping("/listUserFiles")
@@ -42,39 +42,39 @@ public class FileAdminController {
     public AjaxResult listUserFiles(@RequestParam("openType") Integer openType,
                                     @RequestParam(value = "userId", required = false) String userId,
                                     @RequestParam(value = "parentPath", required = false) String parentPath) {
-        return AjaxResult.success(fileService.listFilesAsAdmin(openType, userId, parentPath));
+        return AjaxResult.success(fileAdminService.listFilesAsAdmin(openType, userId, parentPath));
     }
 
     @GetMapping("/getUserStorageUsage")
     @ApiOperation(value = "管理员视角：查看指定用户在指定 openType 下的存储用量")
     public AjaxResult getUserStorageUsage(@RequestParam("openType") Integer openType,
                                           @RequestParam(value = "userId", required = false) String userId) {
-        return AjaxResult.success(fileService.getStorageUsageAsAdmin(openType, userId));
+        return AjaxResult.success(fileAdminService.getStorageUsageAsAdmin(openType, userId));
     }
 
     @GetMapping("/getStagingRoot")
     @ApiOperation(value = "查看 staging 物理目录根路径")
     public AjaxResult getStagingRoot() {
-        return AjaxResult.success(fileService.getStagingRoot());
+        return AjaxResult.success(fileAdminService.getStagingRoot());
     }
 
     @GetMapping("/listStaging")
     @ApiOperation(value = "列出 staging 物理目录下的文件 / 子目录")
     public AjaxResult listStaging(@RequestParam(value = "subPath", required = false) String subPath) {
-        return AjaxResult.success(fileService.listStaging(subPath));
+        return AjaxResult.success(fileAdminService.listStaging(subPath));
     }
 
     @PostMapping("/shareStagingToPublic")
     @ApiOperation(value = "将 staging 物理文件 / 目录共享到公共目录")
     public AjaxResult shareStagingToPublic(@Valid @RequestBody ShareStagingRequestDto request) {
-        fileService.shareStagingToPublic(request);
+        fileAdminService.shareStagingToPublic(request);
         return AjaxResult.success();
     }
 
     @PostMapping("/shareStagingToUser")
     @ApiOperation(value = "将 staging 物理文件 / 目录共享到指定用户的私人目录")
     public AjaxResult shareStagingToUser(@Valid @RequestBody ShareStagingRequestDto request) {
-        fileService.shareStagingToUser(request);
+        fileAdminService.shareStagingToUser(request);
         return AjaxResult.success();
     }
 }

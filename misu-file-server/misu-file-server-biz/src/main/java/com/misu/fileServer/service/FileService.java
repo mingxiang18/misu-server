@@ -1,12 +1,9 @@
 package com.misu.fileServer.service;
 
 import com.misu.fileServer.domain.dto.*;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 文件相关Service
@@ -19,48 +16,6 @@ public interface FileService {
      * 获取指定目录下文件列表
      */
     List<FileResponseDto> getFileList(FileRequestDto fileRequestDto);
-
-    /**
-     * 获取文件的临时访问链接
-     */
-    String getFileDownloadLink(FileRequestDto fileRequestDto);
-
-    /**
-     * 下载文件
-     */
-    void downloadFile(FileDownloadRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response);
-
-    /**
-     * 访问登录用户可见文件。
-     */
-    void accessUserFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response, boolean attachment);
-
-    /**
-     * 访问指定用户文件，用于放映室把房主文件共享给房间观众。
-     */
-    void accessUserFileAsUser(Integer openType, String userId, String filePath,
-                              HttpServletRequest request, HttpServletResponse response, boolean attachment);
-
-    /**
-     * 访问指定用户可见转码视频，用于放映室共享播放。
-     */
-    void transcodedVideoFileAsUser(Integer openType, String userId, String filePath,
-                                   HttpServletRequest request, HttpServletResponse response);
-
-    /**
-     * 访问登录用户可见图片缩略图。
-     */
-    void previewFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response);
-
-    /**
-     * 访问登录用户可见视频封面。
-     */
-    void videoPreviewFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response);
-
-    /**
-     * 访问登录用户可见转码视频。
-     */
-    void transcodedVideoFile(FileRequestDto fileRequestDto, HttpServletRequest request, HttpServletResponse response);
 
     /**
      * 上传文件
@@ -93,39 +48,9 @@ public interface FileService {
     Boolean deleteFile(FileRequestDto fileRequestDto);
 
     /**
-     * 管理员触发 file_mapping 回填任务（异步）。
-     */
-    void startFileMappingBackfill();
-
-    /**
-     * 获取 file_mapping 回填任务状态。
-     */
-    Map<String, Object> getFileMappingBackfillStatus();
-
-    /**
-     * 校验指定用户视角下的文件是否存在并可访问。
-     */
-    boolean existsUserFile(Integer openType, String userId, String filePath, boolean allowDirectory);
-
-    /**
      * 文件搜索（按文件名模糊匹配，分页）。
      */
     PageResponseDto<FileResponseDto> searchFiles(SearchFileRequestDto request);
-
-    /**
-     * 回收站列表（已逻辑删除项），按删除时间倒序。
-     */
-    PageResponseDto<TrashFileResponseDto> listTrash(Integer openType, Integer pageNumber, Integer pageSize);
-
-    /**
-     * 从回收站还原指定 mapping。
-     */
-    void restoreFromTrash(Long id);
-
-    /**
-     * 永久删除回收站中的某条 mapping（含物理文件，若无其他 active 映射引用）。
-     */
-    void purgeFromTrash(Long id);
 
     /**
      * 批量软删除。逐项处理，单项失败不阻塞其他项；返回成功 / 失败明细。
@@ -138,44 +63,9 @@ public interface FileService {
     BatchOperationResultDto batchMove(BatchFileRequestDto request);
 
     /**
-     * 流式打包下载文件夹为 ZIP（不落临时文件，不支持 Range，使用分块编码）。
-     */
-    void downloadDirectoryAsZip(FileRequestDto fileRequestDto, HttpServletResponse response);
-
-    /**
      * 当前用户存储用量。openType=0 私人，1 公共。
      */
     StorageUsageResponseDto getStorageUsage(Integer openType);
-
-    /**
-     * 管理员视角：查看指定用户在指定 openType 下的存储用量。
-     */
-    StorageUsageResponseDto getStorageUsageAsAdmin(Integer openType, String userId);
-
-    /**
-     * 管理员视角：列出指定用户在指定 openType / parentPath 下的文件。openType=1 公共时 userId 自动归一为 "public"。
-     */
-    List<FileResponseDto> listFilesAsAdmin(Integer openType, String userId, String parentPath);
-
-    /**
-     * 获取 staging 物理根目录（管理员维护用的物理目录入口）。
-     */
-    String getStagingRoot();
-
-    /**
-     * 列出 staging 物理目录下的条目，不依赖 file_mapping，按目录优先 + 文件名升序排序。
-     */
-    List<StagingEntryDto> listStaging(String subPath);
-
-    /**
-     * 把 staging 物理文件 / 目录共享到公共目录。
-     */
-    void shareStagingToPublic(ShareStagingRequestDto request);
-
-    /**
-     * 把 staging 物理文件 / 目录共享到指定用户的私人目录。
-     */
-    void shareStagingToUser(ShareStagingRequestDto request);
 
     /**
      * 哈希秒传校验：命中则直接落 mapping 复用底层物理文件，不命中再走完整分片上传。
@@ -186,14 +76,4 @@ public interface FileService {
      * 续传探测：返回已经落盘的分片索引；前端可据此跳过已传分片。
      */
     UploadStatusResponseDto getUploadStatus(Integer openType, String fileName, String filePath, Integer totalChunks);
-
-    /**
-     * 读取文本文件内容（限 1 MB，UTF-8 解码）。
-     */
-    TextContentResponseDto getTextContent(Integer openType, String filePath);
-
-    /**
-     * 覆盖保存文本文件（UTF-8）。
-     */
-    void saveTextContent(SaveTextRequestDto request);
 }

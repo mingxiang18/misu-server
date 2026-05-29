@@ -8,7 +8,7 @@ import com.misu.fileServer.domain.dto.*;
 import com.misu.fileServer.domain.entity.VideoRoom;
 import com.misu.fileServer.domain.entity.VideoRoomEvent;
 import com.misu.fileServer.repository.VideoRoomEventRepository;
-import com.misu.fileServer.service.FileService;
+import com.misu.fileServer.service.FileAccessService;
 import com.misu.fileServer.service.VideoRoomService;
 import com.misu.fileServer.util.FilePathGuard;
 import com.misu.security.dto.LoginUser;
@@ -43,7 +43,7 @@ public class VideoRoomServiceImpl implements VideoRoomService {
     private VideoRoomDao videoRoomDao;
 
     @Resource
-    private FileService fileService;
+    private FileAccessService fileAccessService;
 
     @Resource
     private VideoRoomEventRepository videoRoomEventRepository;
@@ -338,9 +338,9 @@ public class VideoRoomServiceImpl implements VideoRoomService {
         }
         String ownerUserId = internalPath.openType() == 1 ? "public" : videoRoom.getCreatorId();
         if ("transcodedVideo".equals(internalPath.action())) {
-            fileService.transcodedVideoFileAsUser(internalPath.openType(), ownerUserId, internalPath.filePath(), request, response);
+            fileAccessService.transcodedVideoFileAsUser(internalPath.openType(), ownerUserId, internalPath.filePath(), request, response);
         } else {
-            fileService.accessUserFileAsUser(internalPath.openType(), ownerUserId, internalPath.filePath(), request, response, false);
+            fileAccessService.accessUserFileAsUser(internalPath.openType(), ownerUserId, internalPath.filePath(), request, response, false);
         }
     }
 
@@ -535,7 +535,7 @@ public class VideoRoomServiceImpl implements VideoRoomService {
     }
 
     private void validatePlayMyVideoRequest(PlayMyVideoRequestDto requestDto, LoginUser loginUser) {
-        boolean fileExists = fileService.existsUserFile(requestDto.getDirectoryOpenFlag(),
+        boolean fileExists = fileAccessService.existsUserFile(requestDto.getDirectoryOpenFlag(),
                 loginUser.getUserId().toString(), requestDto.getFilePath(), false);
         if (!fileExists) {
             throw new ServiceException(HttpStatus.BAD_REQUEST, "视频文件不存在或已被删除");
