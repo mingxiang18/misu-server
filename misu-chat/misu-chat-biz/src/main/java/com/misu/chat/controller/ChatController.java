@@ -19,20 +19,18 @@ import com.misu.chat.service.MessageService;
 import com.misu.chat.service.UserInfoService;
 import com.misu.common.constant.HttpStatus;
 import com.misu.common.domain.AjaxResult;
+import com.misu.framework.web.HttpFileResponder;
 import com.misu.security.dto.LoginUser;
 import com.misu.security.utils.LoginMessageUtil;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import jakarta.annotation.Resource;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.SneakyThrows;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -68,6 +66,8 @@ public class ChatController {
     private ChatFileService chatFileService;
     @Resource
     private BbUsageService bbUsageService;
+    @Resource
+    private HttpFileResponder httpFileResponder;
 
     /** 获取提供客户端连接的服务端的socket的url */
     @GetMapping({"/getServerWebSocketUrl"})
@@ -264,33 +264,40 @@ public class ChatController {
         return AjaxResult.success(chatFileService.listFiles(id, me, ownerId));
     }
 
-    /** 下载群文件（成员可下载；走 axios 带鉴权） */
+    /** 下载群文件（成员可下载；走 axios 带鉴权）。流式直写 response，支持 Range/ETag/304（磁盘文件） */
     @GetMapping("/file/{fileId}/download")
     @ApiOperation(value = "下载群文件")
-    public ResponseEntity<byte[]> downloadFile(@PathVariable("fileId") Long fileId) {
+    @SneakyThrows
+    public void downloadFile(@PathVariable("fileId") Long fileId,
+                             HttpServletRequest req, HttpServletResponse resp) {
         ChatFile f = chatFileService.getById(fileId);
         if (f == null || Boolean.TRUE.equals(f.getDeleted())) {
-            return ResponseEntity.notFound().build();
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+            return;
         }
         if (!conversationService.isMember(f.getConversationId(), currentUserId())) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            resp.sendError(HttpServletResponse.SC_FORBIDDEN);
+            return;
         }
         ChatFileService.FileDownload d = chatFileService.download(fileId);
         if (d == null) {
-            return ResponseEntity.notFound().build();
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+            return;
         }
-        // netFile：跳转到外链
+        // netFile：302 跳转到外链
         if (d.netUrl != null) {
-            return ResponseEntity.status(302).location(URI.create(d.netUrl)).build();
+            resp.sendRedirect(d.netUrl);
+            return;
         }
         // 图片用 inline 便于 <img> 内联显示；其余按附件下载
         boolean inline = "image".equals(f.getCategory());
-        ContentDisposition cd = (inline ? ContentDisposition.inline() : ContentDisposition.attachment())
-                .filename(d.fileName != null ? d.fileName : "file", StandardCharsets.UTF_8).build();
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentDisposition(cd);
-        headers.setContentType(MediaType.parseMediaType(d.mimeType));
-        return new ResponseEntity<>(d.bytes, headers, org.springframework.http.HttpStatus.OK);
+        if (d.diskFile != null) {
+            httpFileResponder.write(req, resp, d.diskFile, d.fileName, d.mimeType, !inline);
+        } else if (d.bytes != null) {
+            httpFileResponder.writeBytes(resp, d.bytes, d.fileName, d.mimeType, !inline);
+        } else {
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+        }
     }
 
     /** 删除群文件（群主或上传者） */

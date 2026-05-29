@@ -42,12 +42,13 @@ public interface ChatFileService {
     /** 删除（软删）：群主或上传者可删；返回是否成功 */
     boolean delete(Long fileId, String currentUserId, String conversationOwnerId);
 
-    /** 下载内容载体：磁盘文件用 bytes，netFile 用 netUrl */
+    /** 下载内容载体：磁盘文件用 diskFile（流式），netFile 用 netUrl，旧 base64 兜底用 bytes */
     class FileDownload {
         public String fileName;
         public String mimeType;
         public byte[] bytes;
         public String netUrl;
+        public java.io.File diskFile;
     }
 
     /** 分片上传结果：complete=true 时 file 为合并后的元数据，否则 file 为 null */
