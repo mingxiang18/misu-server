@@ -163,10 +163,74 @@ class ChunkedUploadAssemblerTest {
         assertEquals(0, internalLocks().size(), "并发结束后锁不应泄漏");
     }
 
+    @Test
+    void abandoned_lock_is_collected_by_cleanupStaleLocks(@TempDir Path tmp) throws Exception {
+        // 「永不到齐的上传」：传一半就跑路，mergeIfComplete 提前 return -1，锁条目遗留
+        Path chunkDir = tmp.resolve("abandoned");
+        assembler.storeChunk(chunkDir, 0, part("a"));
+        assertEquals(-1L, assembler.mergeIfComplete("abandoned", chunkDir, 3, tmp.resolve("x.bin")));
+        assertTrue(internalLocks().containsKey("abandoned"), "未到齐时锁条目应遗留（待 GC）");
+        assertTrue(internalAccessTimes().containsKey("abandoned"));
+
+        // 把访问时间改成 10 分钟前，再以 5 分钟阈值回收
+        internalAccessTimes().put("abandoned", System.currentTimeMillis() - 10 * 60 * 1000L);
+        int removed = assembler.cleanupStaleLocks(5 * 60 * 1000L);
+
+        assertEquals(1, removed);
+        assertFalse(internalLocks().containsKey("abandoned"), "空闲超阈值的遗弃锁应被回收");
+        assertFalse(internalAccessTimes().containsKey("abandoned"), "访问时间记录也应被回收");
+    }
+
+    @Test
+    void active_lock_is_not_collected(@TempDir Path tmp) throws Exception {
+        // 活跃上传刚访问过，不应被回收
+        Path chunkDir = tmp.resolve("active");
+        assembler.storeChunk(chunkDir, 0, part("a"));
+        assembler.mergeIfComplete("active", chunkDir, 3, tmp.resolve("y.bin")); // 刷新访问时间
+
+        int removed = assembler.cleanupStaleLocks(60 * 1000L); // 1 分钟阈值
+
+        assertEquals(0, removed, "刚访问过的活跃锁不应被回收");
+        assertTrue(internalLocks().containsKey("active"));
+    }
+
+    @Test
+    void completed_merge_leaves_no_access_time_record(@TempDir Path tmp) throws Exception {
+        Path chunkDir = tmp.resolve("done");
+        assembler.storeChunk(chunkDir, 0, part("a"));
+        assembler.storeChunk(chunkDir, 1, part("b"));
+        assembler.mergeIfComplete("done", chunkDir, 2, tmp.resolve("z/out.bin"));
+
+        assertEquals(0, internalLocks().size(), "合并后锁 map 应为空");
+        assertEquals(0, internalAccessTimes().size(), "合并后访问时间 map 也应清空，无泄漏");
+    }
+
+    @Test
+    void mergeIfComplete_opportunistically_sweeps_stale_ghost(@TempDir Path tmp) throws Exception {
+        // 预埋一个 1 小时前的遗弃 ghost 锁（超过默认 30 分钟阈值）
+        internalLocks().put("ghost", new Object());
+        internalAccessTimes().put("ghost", System.currentTimeMillis() - 60 * 60 * 1000L);
+
+        // 任意一次正常 mergeIfComplete 调用会顺手清掉 ghost
+        Path chunkDir = tmp.resolve("fresh");
+        assembler.storeChunk(chunkDir, 0, part("a"));
+        assembler.mergeIfComplete("fresh", chunkDir, 3, tmp.resolve("f.bin"));
+
+        assertFalse(internalLocks().containsKey("ghost"), "机会式回收应清掉超阈值的 ghost 锁");
+        assertFalse(internalAccessTimes().containsKey("ghost"));
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> internalLocks() throws Exception {
         Field f = ChunkedUploadAssembler.class.getDeclaredField("mergeLocks");
         f.setAccessible(true);
         return (Map<String, Object>) f.get(assembler);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Long> internalAccessTimes() throws Exception {
+        Field f = ChunkedUploadAssembler.class.getDeclaredField("lockAccessTime");
+        f.setAccessible(true);
+        return (Map<String, Long>) f.get(assembler);
     }
 }

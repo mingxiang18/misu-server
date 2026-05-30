@@ -28,6 +28,12 @@ public class ChunkedUploadAssembler {
     /** 分片合并锁：每个 mergeKey 一把，保证「检查到齐 + 合并」原子，支持乱序/并发上传 */
     private final Map<String, Object> mergeLocks = new ConcurrentHashMap<>();
 
+    /** 每个 mergeKey 最近一次被访问的时间戳，用于回收「永不到齐的上传」遗弃下来的锁条目。 */
+    private final Map<String, Long> lockAccessTime = new ConcurrentHashMap<>();
+
+    /** 遗弃合并锁的空闲过期阈值（默认 30 分钟）：超过未访问即被 GC，避免锁 map 无界增长。 */
+    private static final long DEFAULT_STALE_LOCK_MILLIS = 30 * 60 * 1000L;
+
     /** 写第 index 个分片到 chunkDir/part{index}（自动建目录）。 */
     public void storeChunk(Path chunkDir, int index, MultipartFile part) {
         try {
@@ -54,6 +60,11 @@ public class ChunkedUploadAssembler {
      * 返回合并后字节数并清理 chunkDir；若未到齐，返回 -1。
      */
     public long mergeIfComplete(String mergeKey, Path chunkDir, int total, Path target) {
+        // 机会式回收：每次调用顺手清掉长期未访问的遗弃锁，避免「永不到齐的上传」泄漏锁条目。
+        // 活跃上传会频繁调到这里刷新自己的访问时间，不会被误回收。
+        lockAccessTime.put(mergeKey, System.currentTimeMillis());
+        cleanupStaleLocks(DEFAULT_STALE_LOCK_MILLIS);
+
         Object lock = mergeLocks.computeIfAbsent(mergeKey, k -> new Object());
         synchronized (lock) {
             // 全片到齐才合并（支持乱序/并发）
@@ -83,8 +94,29 @@ public class ChunkedUploadAssembler {
             } finally {
                 deleteQuietly(chunkDir);
                 mergeLocks.remove(mergeKey);
+                lockAccessTime.remove(mergeKey);
             }
         }
+    }
+
+    /**
+     * 回收空闲超过 maxIdleMillis 的遗弃合并锁（含其访问时间记录），返回回收条目数。
+     *
+     * <p>「永不到齐的上传」（用户传一半就跑路）的 mergeIfComplete 会提前 return -1，不进合并 finally，
+     * 锁条目会留存；本方法按空闲时长把这类条目清掉，避免锁 map 无界增长。活跃上传因频繁刷新访问时间不会被回收。
+     * mergeIfComplete 每次调用会机会式调用本方法；也可由外部定时任务调用。
+     */
+    public int cleanupStaleLocks(long maxIdleMillis) {
+        long now = System.currentTimeMillis();
+        int removed = 0;
+        for (Map.Entry<String, Long> e : lockAccessTime.entrySet()) {
+            if (now - e.getValue() > maxIdleMillis) {
+                lockAccessTime.remove(e.getKey());
+                mergeLocks.remove(e.getKey());
+                removed++;
+            }
+        }
+        return removed;
     }
 
     private void deleteQuietly(Path dir) {
