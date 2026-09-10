@@ -44,6 +44,16 @@ public class NacosUpstreamAuthService {
         if (!StringUtils.hasText(sessionId)) {
             throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维会话无效或已过期");
         }
+        boolean hasUsername = StringUtils.hasText(properties.getNacosUsername());
+        boolean hasPassword = StringUtils.hasText(properties.getNacosPassword());
+        if (!hasUsername && !hasPassword) {
+            tokens.clear();
+            return null;
+        }
+        if (hasUsername != hasPassword) {
+            tokens.clear();
+            throw new ServiceException(HttpStatus.ERROR, "Nacos 上游认证配置不完整");
+        }
         CachedToken token = tokens.compute(sessionId, (key, current) ->
                 current != null && current.expiresAt().isAfter(Instant.now())
                         ? current : login());
@@ -67,10 +77,6 @@ public class NacosUpstreamAuthService {
     }
 
     private CachedToken login() {
-        if (!StringUtils.hasText(properties.getNacosUsername())
-                || !StringUtils.hasText(properties.getNacosPassword())) {
-            throw new ServiceException(HttpStatus.ERROR, "Nacos 上游认证未配置");
-        }
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("username", properties.getNacosUsername());
         form.add("password", properties.getNacosPassword());

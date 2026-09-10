@@ -60,7 +60,8 @@ class ConsoleWebSocketBridgeServiceTest {
             OpsSessionStore.Ticket ticket = sessions.issueTicket(
                     new LoginUser(1L, "admin", java.util.List.of("ADMIN")), ConsoleTarget.NACOS);
             OpsSessionStore.ConsoleSession session = sessions.createConsoleSession(ticket);
-            ConsoleWebSocketBridgeService service = new ConsoleWebSocketBridgeService(properties, sessions);
+            ConsoleWebSocketBridgeService service = new ConsoleWebSocketBridgeService(properties, sessions,
+                    new NacosUpstreamAuthService(properties));
 
             HttpHeaders headers = new HttpHeaders();
             headers.set(ConsoleWebSocketBridgeService.ORIGINAL_URI_HEADER,
@@ -76,6 +77,7 @@ class ConsoleWebSocketBridgeServiceTest {
             assertEquals("GET /nacos/socket?x=a%2Fb HTTP/1.1", upstream.requestLine());
             assertEquals("console.v1, console.v2", upstream.requestedProtocol());
             org.junit.jupiter.api.Assertions.assertFalse(upstream.handshake().contains("User-Token"));
+            org.junit.jupiter.api.Assertions.assertFalse(upstream.handshake().contains("Authorization:"));
 
             WebSocketSession downstream = mock(WebSocketSession.class);
             when(downstream.isOpen()).thenReturn(true);

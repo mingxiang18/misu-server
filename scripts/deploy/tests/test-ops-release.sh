@@ -83,9 +83,28 @@ cp "${CAPTURE_DIR}/misu-ops-nginx-config.yaml" "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'name: misu-ops-nacos-auth' "${TMP_DIR}/normal-misu-ops.yaml"
 rg -q 'key: username' "${TMP_DIR}/normal-misu-ops.yaml"
 rg -q 'key: password' "${TMP_DIR}/normal-misu-ops.yaml"
-rg -q "sub_filter '.*login_page_enabled.*true" "${TMP_DIR}/normal-nginx.yaml"
+rg -Fq "sub_filter '\"login_page_enabled\":true'" "${TMP_DIR}/normal-nginx.yaml"
+rg -Fq "sub_filter '\"login_page_enabled\": true'" "${TMP_DIR}/normal-nginx.yaml"
+rg -Fq "sub_filter '\"login_page_enabled\":\"true\"'" "${TMP_DIR}/normal-nginx.yaml"
+rg -Fq "sub_filter '\"login_page_enabled\": \"true\"'" "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header Authorization \$ops_upstream_authorization' "${TMP_DIR}/normal-nginx.yaml"
 echo 'Nacos server-side auth Secret and login bootstrap: PASS'
+
+ruby - "${TMP_DIR}/normal-nginx.yaml" <<'RB'
+config = File.read(ARGV.fetch(0))
+patterns = [
+  ['"login_page_enabled":true', '"login_page_enabled":false'],
+  ['"login_page_enabled": true', '"login_page_enabled": false'],
+  ['"login_page_enabled":"true"', '"login_page_enabled":"false"'],
+  ['"login_page_enabled": "true"', '"login_page_enabled": "false"']
+]
+patterns.each do |from, to|
+  abort "missing sub_filter #{from}" unless config.include?("sub_filter '#{from}' '#{to}'")
+  transformed = %({#{from}:ignored}).sub(from, to)
+  abort "bootstrap did not disable #{from}" unless transformed.include?(to)
+end
+puts 'Nacos Boolean/string state bootstrap fixtures: PASS'
+RB
 
 ruby - "${TMP_DIR}/normal-misu-ops.yaml" "${TMP_DIR}/normal-nginx.yaml" "${sha}" <<'RB'
 require 'yaml'

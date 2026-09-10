@@ -148,6 +148,8 @@ data:
           sub_filter_types application/json;
           sub_filter '"login_page_enabled":true' '"login_page_enabled":false';
           sub_filter '"login_page_enabled": true' '"login_page_enabled": false';
+          sub_filter '"login_page_enabled":"true"' '"login_page_enabled":"false"';
+          sub_filter '"login_page_enabled": "true"' '"login_page_enabled": "false"';
           sub_filter_once on;
         }
 

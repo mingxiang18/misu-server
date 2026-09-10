@@ -3,6 +3,7 @@ package com.misu.ops.controller;
 import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
+import com.misu.ops.console.NacosUpstreamAuthService;
 import com.misu.ops.security.OpsOriginPolicy;
 import com.misu.ops.security.CurrentAccountVerifier;
 import com.misu.ops.session.ConsoleTarget;
@@ -38,7 +39,7 @@ class ProxyAuthControllerTest {
                 new LoginUser(1L, "admin", java.util.List.of("ADMIN")), ConsoleTarget.NACOS);
         OpsSessionStore.ConsoleSession session = store.createConsoleSession(ticket);
         ProxyAuthController controller = new ProxyAuthController(properties, store,
-                new OpsOriginPolicy(properties));
+                new OpsOriginPolicy(properties), new NacosUpstreamAuthService(properties));
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setRemoteAddr("127.0.0.1");
