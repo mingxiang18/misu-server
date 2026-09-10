@@ -17,7 +17,7 @@
 | 2 构建与检查 | PASS | 后端 17 tests 通过；前端 production build 通过；deploy harness PASS；敏感路径和值扫描通过。 |
 | 3 misu-ops 与网关 | PASS | `misu-ops` Deployment 1/1、Pod 双容器 Ready、Service `10.98.237.214`；应用镜像 `0055a13`，digest 前缀 `a17d946e`；Nacos 唯一 `misu-ops-api` 路由已写入并完成 `misu-gateway` rollout。 |
 | 4 内部验收 | PARTIAL | 健康、Host、未登录、上游连通和日志检查通过；真实 ADMIN 票据/控制台会话/SSH 只读命令待可用生产 ADMIN 登录上下文。 |
-| 5 前端 | ROLLED BACK | production build 通过并曾发布；因首页 HTTP 403 已从备份时间戳 `20260910T110417Z` 恢复，当前 `misu-server-nginx` 1/1。 |
+| 5 前端 | PASS / UI PENDING | 修复权限后的 production build 已重新发布（tag `18378d6`）；新备份时间戳 `20260910T111035Z`，首页与实际引用 JS/CSS 均 HTTP 200，`misu-server-nginx` 1/1。等待浏览器完成真实 ADMIN 菜单与 SSH 页面验收。 |
 
 ## 已执行的内部检查
 
@@ -37,6 +37,7 @@
 - 前端备份目录 `/root/backups/20260910T110417Z/html` 存在（73 个文件）；live `index.html` 已更新，ops 页面标记可见。
 - 回滚后集群内 `server.misu.chat` 首页 HTTP 200，静态 JS 资源 HTTP 200；回滚未触碰 `misu-ops` 或 gateway。
 - 403 原因：发布命令使用 `umask 077`，Vite `dist` 多数文件为 mode 0600，`rsync -a` 保留该权限，nginx 无法读取；备份和回滚后的静态文件为 mode 0644。
+- 修复后在同样的严格 umask 下重新发布：备份 `/root/backups/20260910T111035Z/html`，live `index.html` mode 0644；首页、`/assets/index-ChAEgX-x.js`、`/assets/index-sXMHlQSs.css` 均 HTTP 200，nginx rollout `ready=1/1`。
 
 ## 未完成项
 
