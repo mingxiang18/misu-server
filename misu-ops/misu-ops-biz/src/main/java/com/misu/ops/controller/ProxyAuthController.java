@@ -4,6 +4,7 @@ import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
 import com.misu.ops.console.ConsoleWebSocketBridgeService;
+import com.misu.ops.console.NacosUpstreamAuthService;
 import com.misu.ops.security.OpsOriginPolicy;
 import com.misu.ops.session.ConsoleTarget;
 import com.misu.ops.session.OpsSessionStore;
@@ -27,11 +28,19 @@ public class ProxyAuthController {
     private final OpsProperties properties;
     private final OpsSessionStore sessions;
     private final OpsOriginPolicy originPolicy;
+    private final NacosUpstreamAuthService nacosAuth;
 
     public ProxyAuthController(OpsProperties properties, OpsSessionStore sessions, OpsOriginPolicy originPolicy) {
+        this(properties, sessions, originPolicy, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProxyAuthController(OpsProperties properties, OpsSessionStore sessions,
+                               OpsOriginPolicy originPolicy, NacosUpstreamAuthService nacosAuth) {
         this.properties = properties;
         this.sessions = sessions;
         this.originPolicy = originPolicy;
+        this.nacosAuth = nacosAuth;
     }
 
     @GetMapping("/proxy-auth")
@@ -50,14 +59,15 @@ public class ProxyAuthController {
         }
         HttpHeaders responseHeaders = new HttpHeaders();
         String cookieHeader = CookieSupport.header(request);
-        String cookie = CookieSupport.filterUpstreamCookies(cookieHeader,
-                blockedCookieNames());
+        String cookie = consoleTarget == ConsoleTarget.NACOS ? null
+                : CookieSupport.filterUpstreamCookies(cookieHeader, blockedCookieNames());
         if (cookie != null) {
             responseHeaders.set(ConsoleWebSocketBridgeService.UPSTREAM_COOKIE_HEADER, cookie);
         }
-        String authorization = CookieSupport.filterUpstreamAuthorization(
-                request.getHeader(HttpHeaders.AUTHORIZATION), cookieHeader,
-                blockedCookieNames());
+        String authorization = consoleTarget == ConsoleTarget.NACOS && nacosAuth != null
+                ? nacosAuth.authorization(session.id())
+                : CookieSupport.filterUpstreamAuthorization(request.getHeader(HttpHeaders.AUTHORIZATION),
+                cookieHeader, blockedCookieNames());
         if (authorization != null) {
             responseHeaders.set(ConsoleWebSocketBridgeService.UPSTREAM_AUTH_HEADER, authorization);
         }

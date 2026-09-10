@@ -26,6 +26,7 @@
 - [x] SSH 在 channel.connect 前取得流；页面在建连时关闭要释放资源；校验 UTF-8/emoji 跨读取边界输出。
 - [x] 完成有意义的测试和 Maven 打包，报告实际测试数及限制；不要只提供 mock 验证结论。
 - [x] 向部署子任务提供最终桥接路径、内部鉴权请求头及过滤后的响应头契约。
+- [x] Nacos 2.5.0 使用服务端只读 Secret 凭据按 ops session 获取/缓存短时 token；Nacos legacy console 的 `login_page_enabled` bootstrap 使 ADMIN 直接进入，浏览器不接收 Nacos 凭据或 token。
 
 后端实现契约：Java context 为 `/ops`；控制台 WS 为 `/ops/ws/console/{nacos|headlamp}`，由运维 Nginx 内部 `/_ops/ws` 转发。HTTP/WS auth_request 使用 loopback + `X-Ops-Proxy-Key`，目标使用 `X-Ops-Target`/`X-Ops-Console-Target`；校验后的上游凭据只通过 `X-Ops-Upstream-Cookie` 与 `X-Ops-Upstream-Authorization` 响应/请求头传递，主站 JWT、运维 Cookie 和重复 Cookie 均会过滤。
 
@@ -39,6 +40,7 @@
 - [x] 对齐 X-Ops-Upstream-Cookie / X-Ops-Upstream-Authorization 契约，清除重复和多余代理头。
 - [x] 检查正常发布及 config-only 发布的 OPS_CONFIG_TAG 替换、版本化 ConfigMap、旧 Deployment 与配置共同回滚。
 - [x] 检查 JWT 签名 Secret、代理 Secret、SSH Secret、loopback 服务健康探针及资源配置。
+- [x] 增加 `misu-ops-nacos-auth` Secret 模板引用及 Nacos 2.5.0 免二次登录说明；Headlamp 保留 `-in-cluster` 行为。
 - [x] 验证 nginx 配置语法及路由行为、YAML 渲染、shell 语法；尽可能用本地模拟请求证明鉴权、HTTP/WS 分流和未知 Host 拒绝。
 - [x] 文档明确 DNS/TLS、现有边缘入口接入、生产密钥准备及真实服务验收步骤；不将共享父域 Cookie 描述为完整安全隔离。
 

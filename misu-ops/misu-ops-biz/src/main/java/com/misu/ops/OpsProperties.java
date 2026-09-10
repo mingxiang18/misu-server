@@ -18,6 +18,11 @@ public class OpsProperties {
     private String nacosUrl = "";
     private String headlampUrl = "";
     private String nacosUpstreamUrl = "";
+    /** Server-side Nacos console account; never expose these values to a browser. */
+    private String nacosUsername = "";
+    private String nacosPassword = "";
+    /** Optional override for the Nacos auth endpoint, useful for isolated tests. */
+    private String nacosAuthUrl = "";
     private String headlampUpstreamUrl = "";
     private String publicBaseUrl = "";
     private String proxySharedSecret = "";

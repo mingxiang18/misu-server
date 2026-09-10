@@ -59,13 +59,21 @@ public class ConsoleWebSocketBridgeService {
 
     private final OpsProperties properties;
     private final OpsSessionStore sessions;
+    private final NacosUpstreamAuthService nacosAuth;
     private final HttpClient httpClient;
     private final Map<String, Bridge> bridges = new ConcurrentHashMap<>();
     private final AtomicInteger activeCount = new AtomicInteger();
 
     public ConsoleWebSocketBridgeService(OpsProperties properties, OpsSessionStore sessions) {
+        this(properties, sessions, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ConsoleWebSocketBridgeService(OpsProperties properties, OpsSessionStore sessions,
+                                         NacosUpstreamAuthService nacosAuth) {
         this.properties = properties;
         this.sessions = sessions;
+        this.nacosAuth = nacosAuth;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(properties.getConsoleWebSocketConnectTimeoutMillis()))
                 .build();
@@ -88,7 +96,7 @@ public class ConsoleWebSocketBridgeService {
             WebSocket.Builder builder = httpClient.newWebSocketBuilder()
                     .connectTimeout(Duration.ofMillis(properties.getConsoleWebSocketConnectTimeoutMillis()))
                     .header("Origin", originOf(target.url(properties)));
-            addUpstreamHeaders(builder, headers);
+            addUpstreamHeaders(builder, headers, target, consoleSession.id());
             if (!requestedProtocols.isEmpty()) {
                 builder.subprotocols(requestedProtocols.get(0),
                         requestedProtocols.subList(1, requestedProtocols.size()).toArray(String[]::new));
@@ -163,10 +171,11 @@ public class ConsoleWebSocketBridgeService {
         });
     }
 
-    private void addUpstreamHeaders(WebSocket.Builder builder, HttpHeaders headers) {
+    private void addUpstreamHeaders(WebSocket.Builder builder, HttpHeaders headers,
+                                    ConsoleTarget target, String sessionId) {
         String browserCookies = joinHeaderValues(headers, HttpHeaders.COOKIE);
-        String cookie = headers.getFirst(UPSTREAM_COOKIE_HEADER);
-        if (cookie == null) {
+        String cookie = target == ConsoleTarget.NACOS ? null : headers.getFirst(UPSTREAM_COOKIE_HEADER);
+        if (cookie == null && target != ConsoleTarget.NACOS) {
             cookie = CookieSupport.filterUpstreamCookies(browserCookies,
                     blockedCookieNames());
         } else {
@@ -177,7 +186,8 @@ public class ConsoleWebSocketBridgeService {
         if (safeHeaderValue(cookie)) {
             builder.header(HttpHeaders.COOKIE, cookie);
         }
-        String authorization = headers.getFirst(UPSTREAM_AUTH_HEADER);
+        String authorization = target == ConsoleTarget.NACOS && nacosAuth != null
+                ? nacosAuth.authorization(sessionId) : headers.getFirst(UPSTREAM_AUTH_HEADER);
         authorization = CookieSupport.filterUpstreamAuthorization(authorization, browserCookies,
                 blockedCookieNames());
         if (safeHeaderValue(authorization)) {

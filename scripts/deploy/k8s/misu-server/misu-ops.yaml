@@ -43,6 +43,18 @@ spec:
             - { name: OPS_NACOS_URL, value: "https://ops-nacos.misu.chat/nacos/" }
             - { name: OPS_HEADLAMP_URL, value: "https://ops-k8s.misu.chat/" }
             - { name: OPS_NACOS_UPSTREAM_URL, value: "http://nacos.misu-server.svc.cluster.local:8848/nacos/" }
+            # Read by Java only; never expose these values through HTTP or the
+            # browser. Create misu-ops-nacos-auth outside the repository.
+            - name: OPS_NACOS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: misu-ops-nacos-auth
+                  key: username
+            - name: OPS_NACOS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: misu-ops-nacos-auth
+                  key: password
             - { name: OPS_HEADLAMP_UPSTREAM_URL, value: "http://headlamp.kuboard.svc.cluster.local:80/" }
             - { name: OPS_PUBLIC_BASE_URL, value: "https://api.misu.chat" }
             # Must be the same HMAC secret used by misu-account to sign User-Token.

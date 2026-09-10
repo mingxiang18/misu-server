@@ -3,10 +3,12 @@ package com.misu.ops.session;
 import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
+import com.misu.ops.console.NacosUpstreamAuthService;
 import com.misu.ops.security.CurrentAccountVerifier;
 import com.misu.security.dto.LoginUser;
 import org.springframework.stereotype.Component;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -21,6 +23,7 @@ public class OpsSessionStore {
 
     private final OpsProperties properties;
     private final CurrentAccountVerifier accountVerifier;
+    private final NacosUpstreamAuthService nacosAuth;
     private final SecureRandom secureRandom = new SecureRandom();
     private final Object lifecycleLock = new Object();
     private final Map<String, Ticket> tickets = new ConcurrentHashMap<>();
@@ -28,8 +31,15 @@ public class OpsSessionStore {
     private final Map<String, SshSession> sshSessions = new ConcurrentHashMap<>();
 
     public OpsSessionStore(OpsProperties properties, CurrentAccountVerifier accountVerifier) {
+        this(properties, accountVerifier, null);
+    }
+
+    @Autowired
+    public OpsSessionStore(OpsProperties properties, CurrentAccountVerifier accountVerifier,
+                           NacosUpstreamAuthService nacosAuth) {
         this.properties = properties;
         this.accountVerifier = accountVerifier;
+        this.nacosAuth = nacosAuth;
     }
 
     public Ticket issueTicket(LoginUser currentUser, ConsoleTarget target) {
@@ -109,6 +119,7 @@ public class OpsSessionStore {
             synchronized (lifecycleLock) {
                 consoleSessions.remove(sessionId);
             }
+            removeNacosAuth(sessionId);
         }
     }
 
@@ -182,8 +193,13 @@ public class OpsSessionStore {
         }
         synchronized (lifecycleLock) {
             tickets.values().removeIf(ticket -> ticket.userId().equals(userId));
+            List<String> revokedConsoleSessions = consoleSessions.values().stream()
+                    .filter(session -> session.userId().equals(userId))
+                    .map(ConsoleSession::id)
+                    .toList();
             consoleSessions.values().removeIf(session -> session.userId().equals(userId));
             sshSessions.values().removeIf(session -> session.userId().equals(userId));
+            revokedConsoleSessions.forEach(this::removeNacosAuth);
         }
     }
 
@@ -191,8 +207,16 @@ public class OpsSessionStore {
     public void removeExpiredSessions() {
         Instant now = Instant.now();
         tickets.values().removeIf(ticket -> ticket.expiresAt().isBefore(now));
+        List<String> expiredConsoleSessions = consoleSessions.values().stream()
+                .filter(this::expired)
+                .map(ConsoleSession::id)
+                .toList();
         consoleSessions.values().removeIf(this::expired);
+        expiredConsoleSessions.forEach(this::removeNacosAuth);
         sshSessions.values().removeIf(session -> !session.claimed() && expired(session));
+        if (nacosAuth != null) {
+            nacosAuth.removeSessionsExcept(consoleSessions.keySet());
+        }
     }
 
     private <T extends ExpiringSession> void validateAndTouch(T session, Map<String, T> sessions) {
@@ -204,6 +228,9 @@ public class OpsSessionStore {
         Instant now = Instant.now();
         if (sessions.get(session.id()) != session || expired(session)) {
             sessions.remove(session.id(), session);
+            if (session instanceof ConsoleSession) {
+                removeNacosAuth(session.id());
+            }
             throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维会话无效或已过期");
         }
         if (session.lastRoleCheck().plusSeconds(properties.getRoleCheckSeconds()).isBefore(now)) {
@@ -212,8 +239,17 @@ public class OpsSessionStore {
                 session.markRoleChecked(now);
             } catch (RuntimeException ex) {
                 sessions.remove(session.id(), session);
+                if (session instanceof ConsoleSession) {
+                    removeNacosAuth(session.id());
+                }
                 throw ex;
             }
+        }
+    }
+
+    private void removeNacosAuth(String sessionId) {
+        if (nacosAuth != null) {
+            nacosAuth.removeSession(sessionId);
         }
     }
 

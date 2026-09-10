@@ -37,6 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "ops.proxy-shared-secret=integration-secret",
         "ops.cookie-secure=false",
         "ops.nacos-url=http://localhost:1/nacos/",
+        "ops.nacos-username=test-nacos-user",
+        "ops.nacos-password=test-nacos-password",
         "ops.allowed-origins=http://localhost",
         "ops.console-web-socket-connect-timeout-millis=2000"
 })
@@ -55,6 +57,9 @@ class ConsoleWebSocketTomcatIntegrationTest {
     private ConsoleWebSocketBridgeService bridges;
 
     @Autowired
+    private NacosUpstreamAuthService nacosAuth;
+
+    @Autowired
     private List<AbstractUrlHandlerMapping> handlerMappings;
 
     @MockBean
@@ -62,10 +67,15 @@ class ConsoleWebSocketTomcatIntegrationTest {
 
     @Test
     void tomcatNegotiatesProtocolAndAdminRoleRevocationClosesDownstreamAndUpstream() throws Exception {
-        try (ControlledWebSocketServer upstream = new ControlledWebSocketServer()) {
-            TestConnection connection = connect(upstream);
+        try (ControlledWebSocketServer upstream = new ControlledWebSocketServer();
+             NacosLoginServer auth = new NacosLoginServer()) {
+            TestConnection connection = connect(upstream, auth);
             assertEquals("console.v1", connection.client().protocol);
             assertTrue(upstream.handshake.get(2, TimeUnit.SECONDS));
+            assertTrue(auth.login.get(2, TimeUnit.SECONDS));
+            assertEquals("username=test-nacos-user&password=test-nacos-password", auth.body);
+            assertEquals("Bearer nacos-test-token", upstream.authorization);
+            assertEquals("Bearer nacos-test-token", nacosAuth.authorization(connection.session().id()));
             assertEquals("GET /nacos/socket?x=a%2Fb HTTP/1.1", upstream.requestLine);
             assertEquals("console.v1, console.v2", upstream.requestedProtocol);
 
@@ -77,14 +87,18 @@ class ConsoleWebSocketTomcatIntegrationTest {
             assertTrue(connection.closed().get(3, TimeUnit.SECONDS));
             assertTrue(upstream.closed.get(3, TimeUnit.SECONDS));
             assertEquals(0, bridges.activeBridgeCount());
+            assertEquals(0, nacosAuth.cachedSessionCount());
         }
     }
 
     @Test
     void tomcatClosesBothEndsWhenSessionExpires() throws Exception {
-        try (ControlledWebSocketServer upstream = new ControlledWebSocketServer()) {
-            TestConnection connection = connect(upstream);
+        try (ControlledWebSocketServer upstream = new ControlledWebSocketServer();
+             NacosLoginServer auth = new NacosLoginServer()) {
+            TestConnection connection = connect(upstream, auth);
             assertEquals("console.v1", connection.client().protocol);
+            assertTrue(auth.login.get(2, TimeUnit.SECONDS));
+            assertEquals("Bearer nacos-test-token", nacosAuth.authorization(connection.session().id()));
 
             properties.setSessionIdleSeconds(0);
             bridges.revalidateBridges();
@@ -92,10 +106,11 @@ class ConsoleWebSocketTomcatIntegrationTest {
             assertTrue(connection.closed().get(3, TimeUnit.SECONDS));
             assertTrue(upstream.closed.get(3, TimeUnit.SECONDS));
             assertEquals(0, bridges.activeBridgeCount());
+            assertEquals(0, nacosAuth.cachedSessionCount());
         }
     }
 
-    private TestConnection connect(ControlledWebSocketServer upstream) throws Exception {
+    private TestConnection connect(ControlledWebSocketServer upstream, NacosLoginServer auth) throws Exception {
         properties.setSessionIdleSeconds(900);
         properties.setRoleCheckSeconds(60);
         assertTrue(handlerMappings.stream().anyMatch(mapping -> mapping.getHandlerMap().keySet().stream()
@@ -105,6 +120,7 @@ class ConsoleWebSocketTomcatIntegrationTest {
         properties.setProxySharedSecret("integration-secret");
         properties.setNacosUrl("http://localhost:" + port + "/nacos/");
         properties.setNacosUpstreamUrl("http://127.0.0.1:" + upstream.port() + "/nacos/");
+        properties.setNacosAuthUrl("http://127.0.0.1:" + auth.port() + "/nacos/");
         OpsSessionStore.Ticket ticket = sessions.issueTicket(
                 new LoginUser(7L, "admin", List.of("ADMIN")), ConsoleTarget.NACOS);
         OpsSessionStore.ConsoleSession session = sessions.createConsoleSession(ticket);
@@ -214,6 +230,7 @@ class ConsoleWebSocketTomcatIntegrationTest {
         private final CompletableFuture<Boolean> closed = new CompletableFuture<>();
         private volatile String requestLine;
         private volatile String requestedProtocol;
+        private volatile String authorization;
 
         private ControlledWebSocketServer() throws IOException {
             server = new ServerSocket(0);
@@ -231,6 +248,7 @@ class ConsoleWebSocketTomcatIntegrationTest {
                 requestLine = lines[0];
                 String key = header(request, "Sec-WebSocket-Key");
                 requestedProtocol = header(request, "Sec-WebSocket-Protocol");
+                authorization = header(request, "Authorization");
                 String accept = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-1")
                         .digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
                                 .getBytes(StandardCharsets.US_ASCII)));
@@ -301,6 +319,69 @@ class ConsoleWebSocketTomcatIntegrationTest {
         }
 
         private record Frame(int opcode, byte[] payload) {
+        }
+    }
+
+    private static final class NacosLoginServer implements AutoCloseable {
+        private final ServerSocket server;
+        private final Thread thread;
+        private final CompletableFuture<Boolean> login = new CompletableFuture<>();
+        private volatile String body;
+
+        private NacosLoginServer() throws IOException {
+            server = new ServerSocket(0);
+            thread = new Thread(this::serve, "ops-nacos-login-test");
+            thread.start();
+        }
+
+        int port() {
+            return server.getLocalPort();
+        }
+
+        private void serve() {
+            try (Socket socket = server.accept()) {
+                socket.setSoTimeout(5000);
+                String request = readHeaders(socket);
+                int contentLength = Integer.parseInt(header(request, "Content-Length"));
+                body = new String(socket.getInputStream().readNBytes(contentLength), StandardCharsets.UTF_8);
+                String responseBody = "{\"accessToken\":\"nacos-test-token\",\"tokenTtl\":1800,\"username\":\"test\"}";
+                String response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        + "Content-Length: " + responseBody.getBytes(StandardCharsets.US_ASCII).length
+                        + "\r\nConnection: close\r\n\r\n" + responseBody;
+                socket.getOutputStream().write(response.getBytes(StandardCharsets.US_ASCII));
+                socket.getOutputStream().flush();
+                login.complete(true);
+            } catch (Exception ex) {
+                login.completeExceptionally(ex);
+            }
+        }
+
+        private static String readHeaders(Socket socket) throws IOException {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] end = {13, 10, 13, 10};
+            int matched = 0;
+            while (matched < end.length) {
+                int value = socket.getInputStream().read();
+                if (value < 0) throw new IOException("EOF in auth request");
+                out.write(value);
+                matched = value == end[matched] ? matched + 1 : (value == end[0] ? 1 : 0);
+            }
+            return out.toString(StandardCharsets.US_ASCII);
+        }
+
+        private static String header(String request, String name) {
+            for (String line : request.split("\\r\\n")) {
+                if (line.regionMatches(true, 0, name + ":", 0, name.length() + 1)) {
+                    return line.substring(name.length() + 1).trim();
+                }
+            }
+            return "";
+        }
+
+        @Override
+        public void close() throws Exception {
+            server.close();
+            thread.join(3000);
         }
     }
 }

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ProxyAuthControllerTest {
@@ -48,9 +49,8 @@ class ProxyAuthControllerTest {
         request.addHeader("Cookie", "User-Token=main; NACOS_AUTH_TOKEN=upstream; User-Info=bad; custom=ok; MISU_OPS_SESSION=ops");
         var response = controller.authorizeProxy(request);
         assertEquals(204, response.getStatusCode().value());
-        assertEquals("NACOS_AUTH_TOKEN=upstream; custom=ok",
-                response.getHeaders().getFirst("X-Ops-Upstream-Cookie"));
-        assertEquals(null, response.getHeaders().getFirst("X-Ops-Upstream-Authorization"));
+        assertNull(response.getHeaders().getFirst("X-Ops-Upstream-Cookie"));
+        assertNull(response.getHeaders().getFirst("X-Ops-Upstream-Authorization"));
 
         MockHttpServletRequest wrongSecret = new MockHttpServletRequest();
         wrongSecret.setRemoteAddr("127.0.0.1");

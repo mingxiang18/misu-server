@@ -80,6 +80,13 @@ run_release --skip-build misu-ops
 cp "${CAPTURE_DIR}/misu-ops.yaml" "${TMP_DIR}/normal-misu-ops.yaml"
 cp "${CAPTURE_DIR}/misu-ops-nginx-config.yaml" "${TMP_DIR}/normal-nginx.yaml"
 
+rg -q 'name: misu-ops-nacos-auth' "${TMP_DIR}/normal-misu-ops.yaml"
+rg -q 'key: username' "${TMP_DIR}/normal-misu-ops.yaml"
+rg -q 'key: password' "${TMP_DIR}/normal-misu-ops.yaml"
+rg -q "sub_filter '.*login_page_enabled.*true" "${TMP_DIR}/normal-nginx.yaml"
+rg -q 'proxy_set_header Authorization \$ops_upstream_authorization' "${TMP_DIR}/normal-nginx.yaml"
+echo 'Nacos server-side auth Secret and login bootstrap: PASS'
+
 ruby - "${TMP_DIR}/normal-misu-ops.yaml" "${TMP_DIR}/normal-nginx.yaml" "${sha}" <<'RB'
 require 'yaml'
 deployment = YAML.load_stream(File.read(ARGV[0])).first

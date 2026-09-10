@@ -73,6 +73,17 @@ kubectl -n misu-server create secret generic misu-account-signing \
 
 `misu-ops-config`（`proxy-shared-secret`）和 `misu-account-signing`（`token-secret`）都是必需 Secret；缺失或 key 名错误时 Pod 不会拿到相应环境变量，控制台鉴权/代理不会成功。发布前应先确认三个 Secret（另有 `misu-ops-ssh`）存在且权限为只读。生产密钥应使用专用运维账号；若继续使用 root，页面必须明确显示目标节点和账号。
 
+Nacos 免二次登录还需要单独的 `misu-ops-nacos-auth` Secret，key 为 `username` 和 `password`，值是专用的 Nacos 2.5.0 运维账号。该 Secret 只以环境变量挂载到 Java 容器，Nginx 不读取，仓库不保存真实值：
+
+```bash
+kubectl -n misu-server create secret generic misu-ops-nacos-auth \
+  --from-literal=username='受控文件中的 Nacos 运维用户名' \
+  --from-literal=password='受控文件中的 Nacos 运维密码' \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Nacos 2.5.0 legacy console 会根据 `/nacos/v1/console/server/state` 的 `login_page_enabled` 决定是否显示登录页；sidecar 只对已通过 ADMIN 运维 session 鉴权的该响应改为 `false`。所有 Nacos API/WS 请求仍由 Java session 校验和服务端短时 `Authorization` 注入保护。浏览器不会得到 Nacos 用户名、密码或 token；Headlamp 继续依赖其 `-in-cluster` 直接进入行为。
+
 常用发布命令：
 
 ```bash

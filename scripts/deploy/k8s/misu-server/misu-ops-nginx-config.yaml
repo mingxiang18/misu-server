@@ -127,6 +127,30 @@ data:
         location ^~ /ops/ { return 404; }
         location ^~ /ops { return 404; }
 
+        # Nacos 2.5.0's legacy console stores its login token in
+        # localStorage and routes to #/login when login_page_enabled is true.
+        # The server-side Authorization header above already authenticates
+        # every request, so bootstrap only this state response to disable the
+        # browser login route. No Nacos token or password is sent to the page.
+        location = /nacos/v1/console/server/state {
+          auth_request /_ops/auth;
+          auth_request_set $ops_upstream_cookie $upstream_http_x_ops_upstream_cookie;
+          auth_request_set $ops_upstream_authorization $upstream_http_x_ops_upstream_authorization;
+          proxy_pass http://misu_ops_nacos$ops_original_uri;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header Authorization $ops_upstream_authorization;
+          proxy_set_header Cookie $ops_upstream_cookie;
+          proxy_set_header Accept-Encoding "";
+          proxy_buffering on;
+          sub_filter_types application/json;
+          sub_filter '"login_page_enabled":true' '"login_page_enabled":false';
+          sub_filter '"login_page_enabled": true' '"login_page_enabled": false';
+          sub_filter_once on;
+        }
+
         location / {
           rewrite ^ $ops_console_dispatch last;
         }

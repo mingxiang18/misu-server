@@ -74,7 +74,8 @@ flowchart LR
 
 ### 上游认证
 
-- Nacos 第一版保留自己的登录和权限体系，不向浏览器注入预置管理员密码。
+- Nacos 2.5.0 仍使用自己的权限体系，但运维入口由 Java 服务端使用只读 Kubernetes Secret 中的专用 Nacos 账号登录 `v1/auth/users/login`，按每个 ops session 缓存短时 `accessToken`，并通过内部代理注入 `Authorization: Bearer ...`。账号、密码和 token 均不进入浏览器、Cookie、URL 或日志；logout、撤销、角色失效和过期会清理 session 缓存，Nacos token 随其服务端 TTL 失效。
+- Nacos 2.5.0 legacy console 前端在 `console-ui/src/pages/Login/Login.jsx` 看到 `localStorage.token` 会跳转首页，而 `console-ui/src/globalLib.js` 在 `login_page_enabled=false` 时不要求浏览器 token。sidecar 仅对经过 auth_request 的 `/nacos/v1/console/server/state` 将该字段从 `true` 改为 `false`，同时继续给每个上游请求注入服务端 Authorization；这是直接进入控制台所需的最小 bootstrap，不把短时上游 token 降级暴露给浏览器。
 - Headlamp 第一版保留现有 Kubernetes 登录。后续若要免登录，先固定实际版本，验证该版本是否支持身份感知代理，再设计 Kubernetes 身份/RBAC 映射；主站 JWT 不能直接当 Kubernetes Token。
 - 所有原有内网管理入口保持原有认证边界；本模块的 ADMIN 限制针对新增网站入口。若后续启用上游“信任代理免登录”，必须同时禁止未鉴权路径直接访问那个受信任实例，必要时单独部署 Headlamp 实例。
 
