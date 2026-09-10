@@ -64,14 +64,23 @@ public class AccountCurrentUserClient implements CurrentAccountVerifier {
                 || !Objects.equals(userName, current.getUserName())) {
             throw new ServiceException(HttpStatus.FORBIDDEN, "账号不存在或已失效");
         }
-        if (!"0".equals(current.getStatus())
-                || !(current.getDelFlag() == null || "0".equals(current.getDelFlag()))) {
+        if (isDisabledOrDeleted(current)) {
             throw new ServiceException(HttpStatus.FORBIDDEN, "账号已停用");
         }
         if (current.getAuthorities() == null || !current.getAuthorities().contains(UserRole.ADMIN)) {
             throw new ServiceException(HttpStatus.FORBIDDEN, "仅管理员可以使用运维中心");
         }
         return current;
+    }
+
+    /**
+     * Account's existing internal and credential-verification APIs treat only
+     * explicit disabled/deleted markers as unavailable. Legacy rows may leave
+     * either marker null, which is equivalent to the active state there.
+     */
+    static boolean isDisabledOrDeleted(LoginUser current) {
+        return current != null
+                && ("1".equals(current.getStatus()) || "2".equals(current.getDelFlag()));
     }
 
     private boolean hasText(String value) {
