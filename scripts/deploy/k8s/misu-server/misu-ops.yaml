@@ -50,11 +50,13 @@ spec:
                 secretKeyRef:
                   name: misu-ops-nacos-auth
                   key: username
+                  optional: true
             - name: OPS_NACOS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: misu-ops-nacos-auth
                   key: password
+                  optional: true
             - { name: OPS_HEADLAMP_UPSTREAM_URL, value: "http://headlamp.kuboard.svc.cluster.local:80/" }
             - { name: OPS_PUBLIC_BASE_URL, value: "https://api.misu.chat" }
             # Must be the same HMAC secret used by misu-account to sign User-Token.

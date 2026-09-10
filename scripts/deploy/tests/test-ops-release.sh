@@ -83,6 +83,15 @@ cp "${CAPTURE_DIR}/misu-ops-nginx-config.yaml" "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'name: misu-ops-nacos-auth' "${TMP_DIR}/normal-misu-ops.yaml"
 rg -q 'key: username' "${TMP_DIR}/normal-misu-ops.yaml"
 rg -q 'key: password' "${TMP_DIR}/normal-misu-ops.yaml"
+ruby - "${TMP_DIR}/normal-misu-ops.yaml" <<'RB'
+require 'yaml'
+deployment = YAML.load_stream(File.read(ARGV.fetch(0))).first
+env = deployment.dig('spec', 'template', 'spec', 'containers').first.fetch('env')
+auth_refs = env.select { |entry| entry['valueFrom']&.dig('secretKeyRef', 'name') == 'misu-ops-nacos-auth' }
+raise 'expected both optional Nacos auth Secret refs' unless auth_refs.size == 2
+raise 'Nacos auth Secret is not optional' unless auth_refs.all? { |entry| entry.dig('valueFrom', 'secretKeyRef', 'optional') == true }
+puts 'Nacos auth Secret absent: optional refs allow Pod startup: PASS'
+RB
 rg -Fq "sub_filter '\"login_page_enabled\":true'" "${TMP_DIR}/normal-nginx.yaml"
 rg -Fq "sub_filter '\"login_page_enabled\": true'" "${TMP_DIR}/normal-nginx.yaml"
 rg -Fq "sub_filter '\"login_page_enabled\":\"true\"'" "${TMP_DIR}/normal-nginx.yaml"
