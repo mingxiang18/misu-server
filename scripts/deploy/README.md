@@ -8,7 +8,7 @@
 ```
 合并到 master  →  在开发机执行 scripts/deploy/release.sh
    │
-   ├─ 1. Maven 构建 3 个 Java 服务 → docker buildx 构建镜像
+   ├─ 1. Maven 构建 4 个 Java 服务（含 misu-ops）→ docker buildx 构建镜像
    │     → 推送到私有 registry，tag = master 的 git short SHA
    ├─ 2. vite build 构建前端
    ├─ 3. SSH 主节点(10.8.0.1)：
@@ -26,8 +26,11 @@
 
 ## 覆盖范围
 
-- 自动部署：`misu-gateway`、`misu-account`、`misu-file-server` 三个 Java 服务
+- 自动部署：`misu-gateway`、`misu-account`、`misu-file-server`、`misu-ops` 四个 Java 服务
   + 前端 `misu-file-server-ui`。
+- `misu-ops` 使用 Nginx sidecar，清单同时维护 `misu-ops-nginx-config.yaml`；两个控制台 Host
+  由现有边缘入口转发到 `misu-ops` ClusterIP Service。SSH Secret 不在仓库中，见
+  [`docs/ops-deployment.md`](../../docs/ops-deployment.md)。
 - 前端由集群里现有的 `misu-server-nginx` Deployment（挂载 hostPath
   `/mnt/misu/misu-server/html`）提供，发布只覆盖静态文件、无需改清单。
 - **不含 `misu-web`**：它被根 `pom.xml` 的 `<modules>` 注释掉、且无 Dockerfile /
@@ -51,9 +54,10 @@ vi scripts/deploy/deploy.conf      # 填 SSH key 路径、两台节点、registr
 合并 PR 到 master 后，在仓库根目录执行。**不带目标 = 全部发布；带目标 = 按需发布**：
 
 ```bash
-scripts/deploy/release.sh                        # 全部：3 个 Java 服务 + 前端
+scripts/deploy/release.sh                        # 全部：4 个 Java 服务 + 前端 + worker
 scripts/deploy/release.sh misu-gateway           # 只发布单个服务
 scripts/deploy/release.sh misu-account frontend  # 发布多个指定目标
+scripts/deploy/release.sh misu-ops               # 只发布运维模块
 scripts/deploy/release.sh frontend               # 只发布前端
 scripts/deploy/release.sh --dry-run              # 只构建，不推送、不碰服务器（验证用）
 scripts/deploy/release.sh misu-gateway --skip-build  # 镜像已推过，只重新部署
@@ -66,17 +70,19 @@ scripts/deploy/release.sh misu-gateway --skip-build  # 镜像已推过，只重�
 每个服务的 k8s 清单拆成两个文件：
 
 - `misu-<svc>.yaml` —— Deployment + Service，**日常 `release.sh` 只覆盖它**（镜像 tag 变更）。
-- `misu-<svc>-config.yaml` —— ConfigMap（nacos 接入配置），日常发布**不会动它**。
+- Java 服务的 `misu-<svc>-config.yaml` —— Nacos 接入 ConfigMap，日常发布**不会动它**；
+  `misu-ops` 使用 `misu-ops-nginx-config.yaml` 维护 sidecar 路由配置。
 
 所以普通发布不会覆盖或重置 ConfigMap。改了 nacos 接入配置后，单独下发：
 
 ```bash
-scripts/deploy/release.sh --config                # 下发全部 3 个服务的 ConfigMap
+scripts/deploy/release.sh --config                # 下发全部 4 个服务的配置清单
 scripts/deploy/release.sh --config misu-gateway   # 只下发单个
+scripts/deploy/release.sh --config misu-ops       # 只下发 Nginx sidecar 配置并重启
 ```
 
-`--config` 会备份旧 ConfigMap → apply 新的 → `kubectl rollout restart`（ConfigMap 走
-subPath 挂载，kubelet 不热更新，必须重启 pod 才生效）。
+`--config` 会备份旧 ConfigMap；对 `misu-ops` 还会导出并清理当前 live Deployment，生成符合 Kubernetes DNS 命名规则的不可变 ConfigMap 名称，更新其引用并保存实际运行中的镜像、环境变量和探针，再等待 rollout。ConfigMap 走
+subPath 挂载，kubelet 不热更新，必须重启 pod 才生效。主节点需要 `jq` 用于清理 live Deployment 的 server fields；缺少时脚本会拒绝 config-only 发布。这样用该时间戳回滚时会一起恢复配置引用和镜像。
 
 ## 回滚
 
@@ -86,14 +92,15 @@ scripts/deploy/release.sh --rollback 20260517T083000Z
 ```
 
 回滚会用指定备份恢复 `/root/k8s/misu-server/` 的清单与前端 html 并重新 apply。
-部署中途 rollout 失败时，`release.sh` 会**自动回滚**到本次部署前的状态。
+部署中途 rollout 失败时，`release.sh` 会**自动回滚**到本次部署前的状态；`misu-ops` 的 ConfigMap 或 Deployment apply 失败也会恢复两份旧清单。其它服务的清单 apply 失败时不会继续等待 rollout，应先修复清单再重试。
 
 ## k8s 清单的真源
 
 `scripts/deploy/k8s/misu-server/` 下每个服务两个文件，是清单的唯一真源，内容取自集群现有清单：
 
 - `misu-<svc>.yaml`（Deployment+Service）—— 镜像行参数化为 `${REGISTRY_PULL}/misuaa/<服务>:${IMAGE_TAG}`，发布时 `envsubst` 渲染。
-- `misu-<svc>-config.yaml`（ConfigMap）—— 无模板变量，`--config` 时原样下发。
+- `misu-<svc>-config.yaml`（ConfigMap）—— `--config` 时下发；`misu-ops` 的文件名是
+  `misu-ops-nginx-config.yaml`，其名称由小写的 `OPS_CONFIG_TAG` 渲染为 immutable 版本。
 
 要改部署配置（副本数、资源、探针等）改前者、改 nacos 接入配置改后者，合并到 master 后分别用
 `release.sh` / `release.sh --config` 生效。`misu-server-nginx.yaml`、`nacos.yaml` 等其它清单

@@ -1,0 +1,13 @@
+FROM 192.168.50.227:30500/library/amazoncorretto:17-alpine3.20-jdk
+
+WORKDIR /app/
+
+COPY target/*.jar /app/application.jar
+
+RUN echo "Asia/Shanghai" > /etc/timezone
+
+ENV JAVA_XMS=256m
+ENV JAVA_XMX=512m
+ENV JAVA_OPTS=""
+
+ENTRYPOINT ["sh", "-c", "exec java -Xms${JAVA_XMS} -Xmx${JAVA_XMX} ${JAVA_OPTS} -jar /app/application.jar --spring.profiles.active=prod"]

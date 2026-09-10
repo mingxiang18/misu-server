@@ -17,7 +17,8 @@ import {
   Files,
   Box,
   Menu as IconMenu,
-  SwitchButton
+  SwitchButton,
+  Monitor
 } from '@element-plus/icons-vue'
 import { Close } from '@element-plus/icons-vue'
 import { logOut } from '@/api/auth/auth'
@@ -58,6 +59,7 @@ const moreItems = computed(() => {
   ]
   if (isAdmin.value) {
     base.push({ key: 'users', label: '用户管理', icon: User, to: '/userManagement' })
+    base.push({ key: 'ops', label: '运维中心', icon: Monitor, to: '/ops' })
   }
   return base
 })

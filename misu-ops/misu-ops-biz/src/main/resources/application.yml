@@ -1,0 +1,43 @@
+server:
+  address: ${OPS_BIND_ADDRESS:127.0.0.1}
+  port: ${OPS_SERVER_PORT:30264}
+  servlet:
+    context-path: /ops
+
+spring:
+  application:
+    name: misu-ops
+
+ops:
+  account-base-url: ${OPS_ACCOUNT_BASE_URL:http://localhost:30261/account}
+  nacos-url: ${OPS_NACOS_URL:}
+  headlamp-url: ${OPS_HEADLAMP_URL:}
+  nacos-upstream-url: ${OPS_NACOS_UPSTREAM_URL:}
+  headlamp-upstream-url: ${OPS_HEADLAMP_UPSTREAM_URL:}
+  public-base-url: ${OPS_PUBLIC_BASE_URL:}
+  proxy-shared-secret: ${OPS_PROXY_SHARED_SECRET:}
+  known-hosts-path: ${OPS_KNOWN_HOSTS_PATH:}
+  private-key-path: ${OPS_PRIVATE_KEY_PATH:}
+  cookie-secure: ${OPS_COOKIE_SECURE:true}
+  ssh-handshake-ttl-seconds: ${OPS_SSH_HANDSHAKE_TTL_SECONDS:30}
+  max-ssh-sessions: ${OPS_MAX_SSH_SESSIONS:4}
+  max-console-web-sockets: ${OPS_MAX_CONSOLE_WEBSOCKETS:8}
+  console-web-socket-connect-timeout-millis: ${OPS_CONSOLE_WS_CONNECT_TIMEOUT_MILLIS:5000}
+  main-cookie-names: ${OPS_MAIN_COOKIE_NAMES:User-Token,User-Refresh-Token,User-Info}
+  allowed-origins: ${OPS_ALLOWED_ORIGINS:https://server.misu.chat}
+  ssh:
+    user: ${OPS_SSH_USER:root}
+    port: ${OPS_SSH_PORT:22}
+    nodes:
+      master:
+        id: master
+        name: 主节点
+        host: ${OPS_MASTER_HOST:10.8.0.1}
+        port: ${OPS_MASTER_PORT:22}
+      worker:
+        id: worker
+        name: 工作节点
+        host: ${OPS_WORKER_HOST:10.8.0.26}
+        port: ${OPS_WORKER_PORT:22}
+token:
+  secret: ${OPS_TOKEN_SECRET}

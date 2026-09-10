@@ -1,0 +1,234 @@
+---
+# misu-ops sidecar Nginx 配置。
+# 外部 TLS/域名入口由现有边缘 Nginx 负责，这里只接收集群内的 HTTP 30264。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: misu-ops-nginx-config-${OPS_CONFIG_TAG}
+  namespace: misu-server
+data:
+  nginx.conf.template: |
+    worker_processes 1;
+    pid /tmp/nginx.pid;
+
+    events {
+      worker_connections 512;
+    }
+
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+      # Never log $request/$request_uri: console query strings and one-time
+      # tickets must not end up in the sidecar log stream.
+      log_format ops_sanitized '$remote_addr $host "$request_method $uri" $status $body_bytes_sent $request_time';
+      access_log /dev/stdout ops_sanitized;
+      # Upstream connection errors include the request line (and therefore
+      # query strings) at warn/error. Keep the sidecar at crit so ticket or
+      # SSH path details cannot be copied into error logs.
+      error_log /dev/stderr crit;
+
+      map $http_upgrade $connection_upgrade {
+        default upgrade;
+        '' close;
+      }
+
+      # Only these two console hosts are allowed to select an upstream. The
+      # default server below rejects every other Host with 421.
+      map $host $ops_console_target {
+        default "";
+        ops-nacos.misu.chat nacos;
+        ops-k8s.misu.chat headlamp;
+      }
+
+      map $http_upgrade $ops_is_websocket {
+        default 0;
+        websocket 1;
+      }
+
+      map $ops_console_target $ops_console_upstream {
+        default "";
+        nacos http://misu_ops_nacos;
+        headlamp http://misu_ops_headlamp;
+      }
+
+      map $ops_is_websocket $ops_console_dispatch {
+        default /_ops/http;
+        1 /_ops/ws;
+      }
+
+      upstream misu_ops_backend {
+        server 127.0.0.1:30264;
+      }
+      upstream misu_ops_nacos {
+        server nacos.misu-server.svc.cluster.local:8848;
+      }
+      upstream misu_ops_headlamp {
+        server headlamp.kuboard.svc.cluster.local:80;
+      }
+
+      # 未知 Host 不得成为开放代理。
+      server {
+        listen 8080 default_server;
+        server_name _;
+        return 421;
+      }
+
+      server {
+        listen 8080;
+        server_name ops-nacos.misu.chat ops-k8s.misu.chat;
+        add_header Content-Security-Policy "frame-ancestors https://server.misu.chat" always;
+        # Keep the browser URI across the internal HTTP/WS dispatch so query
+        # parameters reach the upstream but never appear in access logs.
+        set $ops_original_uri $request_uri;
+
+        # 仅暴露精确健康路径；不通过此路径绕过控制台鉴权。
+        location = /_ops/healthz {
+          proxy_pass http://misu_ops_backend/ops/internal/health;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header X-Real-IP $remote_addr;
+        }
+
+        # auth_request 的内部子请求，Java 服务负责校验 ADMIN 运维会话，
+        # 并用 X-Ops-Upstream-* 响应头返回经过校验的上游凭据。
+        location = /_ops/auth {
+          internal;
+          proxy_pass http://misu_ops_backend/ops/internal/proxy-auth;
+          proxy_pass_request_body off;
+          proxy_set_header Content-Length "";
+          proxy_set_header Host $host;
+          proxy_set_header X-Original-URI $ops_original_uri;
+          proxy_set_header X-Original-Method $request_method;
+          proxy_set_header X-Original-Host $host;
+          proxy_set_header X-Original-Origin $http_origin;
+          proxy_set_header X-Original-Referer $http_referer;
+          proxy_set_header X-Original-Upgrade $http_upgrade;
+          proxy_set_header X-Ops-Target $ops_console_target;
+          proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header Cookie $http_cookie;
+          proxy_set_header Authorization $http_authorization;
+        }
+
+        location = /ops/api/console-sessions/exchange {
+          proxy_pass http://misu_ops_backend;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header Cookie "";
+        }
+
+        # 控制台 Host 不承载 Java REST API；SSH/API 只能从 api.misu.chat 进入。
+        location ^~ /ops/internal/ { return 404; }
+        location ^~ /ops/api/ { return 404; }
+        location ^~ /ops/ws/ { return 404; }
+        location ^~ /ops/ { return 404; }
+        location ^~ /ops { return 404; }
+
+        location / {
+          rewrite ^ $ops_console_dispatch last;
+        }
+
+        location = /_ops/http {
+          internal;
+          auth_request /_ops/auth;
+          auth_request_set $ops_user $upstream_http_x_ops_user;
+          auth_request_set $ops_upstream_cookie $upstream_http_x_ops_upstream_cookie;
+          auth_request_set $ops_upstream_authorization $upstream_http_x_ops_upstream_authorization;
+          proxy_pass $ops_console_upstream$ops_original_uri;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header Upgrade "";
+          proxy_set_header Connection "";
+          proxy_set_header Authorization $ops_upstream_authorization;
+          proxy_set_header Cookie $ops_upstream_cookie;
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
+        }
+
+        location = /_ops/ws {
+          internal;
+          auth_request /_ops/auth;
+          auth_request_set $ops_user $upstream_http_x_ops_user;
+          auth_request_set $ops_upstream_cookie $upstream_http_x_ops_upstream_cookie;
+          auth_request_set $ops_upstream_authorization $upstream_http_x_ops_upstream_authorization;
+          proxy_pass http://misu_ops_backend/ops/ws/console/$ops_console_target;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header Origin $http_origin;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
+          proxy_set_header Cookie $http_cookie;
+          proxy_set_header Authorization "";
+          proxy_set_header X-Ops-User $ops_user;
+          proxy_set_header X-Ops-Console-Target $ops_console_target;
+          proxy_set_header X-Ops-Original-URI $ops_original_uri;
+          proxy_set_header X-Ops-Original-Host $host;
+          proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header X-Ops-Upstream-Cookie $ops_upstream_cookie;
+          proxy_set_header X-Ops-Upstream-Authorization $ops_upstream_authorization;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
+        }
+      }
+
+      # 主站 API 网关将 /ops/api/** 和 /ops/ws/** 路由到本 Service。
+      # Java 自己校验 JWT/单次会话；这里仅禁止内部代理接口被外部访问。
+      server {
+        listen 8080;
+        server_name api.misu.chat;
+
+        location ^~ /ops/internal/ { return 404; }
+
+        location ^~ /ops/ws/ssh/ {
+          access_log off;
+          proxy_pass http://misu_ops_backend;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Original-Upgrade $http_upgrade;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
+        }
+
+        location ^~ /ops/api/ {
+          proxy_pass http://misu_ops_backend;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header Authorization $http_authorization;
+          proxy_set_header Cookie "";
+        }
+
+        location / { return 404; }
+      }
+    }

@@ -21,6 +21,8 @@ import EpubViewer from '@/components/utils/EpubViewer.vue';
 import PdfViewer from '@/components/utils/PdfViewer.vue';
 import TextViewer from '@/components/utils/TextViewer.vue';
 import LanguageLearn from "@/components/languageLearn/LanguageLearn.vue";
+import OpsConsole from '@/views/ops/OpsConsole.vue';
+import { getUserInfo } from '@/api/user/user';
 
 const routes = [
     {
@@ -46,6 +48,7 @@ const routes = [
             { path: 'fileServer/textViewer', component: TextViewer, name: 'TextViewer' },
             { path: 'chat', component: ChatWorkspace, name: 'ChatWorkspace' },
             { path: 'chat/:conversationId', component: ChatWorkspace, name: 'ChatConversation' },
+            { path: 'ops', component: OpsConsole, name: 'OpsConsole', meta: { adminOnly: true } },
         ],
     },
     {   path: '/login', component: Login },
@@ -65,10 +68,13 @@ router.beforeEach((to, from, next) => {
 
     const isAuthenticated = getToken() || getRefreshToken()
     const isAnonymous = to.matched.some(r => r.meta && r.meta.anonymous);
+    const isAdminOnly = to.matched.some(r => r.meta && r.meta.adminOnly);
 
     if (to.path !== '/login' && !isAnonymous && !isAuthenticated) {
         // 未登录时跳转到登录页（外链分享等匿名页放行）
         next('/login');
+    } else if (isAdminOnly && !(getUserInfo()?.authorities || []).includes('ADMIN')) {
+        next('/');
     } else {
         next();
     }

@@ -1,0 +1,4 @@
+ops:
+  allowed-origins:
+    - https://server.misu.chat
+    - http://localhost:5173

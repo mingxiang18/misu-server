@@ -1,0 +1,146 @@
+---
+# misu-ops Deployment + Service。
+# Java 只监听 Pod localhost:30264；Service 只暴露 Nginx sidecar :8080。
+# SSH Secret 不在仓库中，见 docs/ops-deployment.md。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: misu-ops
+  namespace: misu-server
+  labels: { app: misuops }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: misuops }
+  template:
+    metadata:
+      labels: { app: misuops }
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [misu-maco]
+      containers:
+        - name: misu-ops
+          image: ${REGISTRY_PULL}/misuaa/misu-ops:${IMAGE_TAG}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: backend, containerPort: 30264, protocol: TCP }
+          env:
+            - { name: JAVA_XMS, value: "256m" }
+            - { name: JAVA_XMX, value: "512m" }
+            - { name: OPS_BIND_ADDRESS, value: "127.0.0.1" }
+            - { name: OPS_SERVER_PORT, value: "30264" }
+            - { name: OPS_ACCOUNT_BASE_URL, value: "http://misu-account:30261/account" }
+            - { name: OPS_NACOS_URL, value: "https://ops-nacos.misu.chat/nacos/" }
+            - { name: OPS_HEADLAMP_URL, value: "https://ops-k8s.misu.chat/" }
+            - { name: OPS_NACOS_UPSTREAM_URL, value: "http://nacos.misu-server.svc.cluster.local:8848/nacos/" }
+            - { name: OPS_HEADLAMP_UPSTREAM_URL, value: "http://headlamp.kuboard.svc.cluster.local:80/" }
+            - { name: OPS_PUBLIC_BASE_URL, value: "https://api.misu.chat" }
+            # Must be the same HMAC secret used by misu-account to sign User-Token.
+            - name: OPS_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: misu-account-signing
+                  key: token-secret
+            - { name: OPS_PRIVATE_KEY_PATH, value: "/etc/misu-ops/ssh/id_ed25519" }
+            - { name: OPS_KNOWN_HOSTS_PATH, value: "/etc/misu-ops/ssh/known_hosts" }
+            - { name: OPS_SSH_USER, value: "root" }
+            - { name: OPS_PROXY_SHARED_SECRET, valueFrom: { secretKeyRef: { name: misu-ops-config, key: proxy-shared-secret } } }
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits:   { cpu: 1,    memory: 768Mi }
+          # The JVM binds only to loopback. Probe the Nginx sidecar through the
+          # shared Pod network instead of probing PodIP:30264 directly.
+          startupProbe:
+            httpGet:
+              path: /_ops/healthz
+              port: 8080
+              httpHeaders:
+                - { name: Host, value: ops-nacos.misu.chat }
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /_ops/healthz
+              port: 8080
+              httpHeaders:
+                - { name: Host, value: ops-nacos.misu.chat }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /_ops/healthz
+              port: 8080
+              httpHeaders:
+                - { name: Host, value: ops-nacos.misu.chat }
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - { name: ssh, mountPath: /etc/misu-ops/ssh, readOnly: true }
+        - name: nginx
+          image: nginx:1.27-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: NGINX_ENVSUBST_OUTPUT_DIR, value: "/etc/nginx" }
+            - { name: OPS_PROXY_SHARED_SECRET, valueFrom: { secretKeyRef: { name: misu-ops-config, key: proxy-shared-secret } } }
+          ports:
+            - { name: http, containerPort: 8080, protocol: TCP }
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits:   { cpu: 250m, memory: 128Mi }
+          startupProbe:
+            httpGet:
+              path: /_ops/healthz
+              port: 8080
+              httpHeaders:
+                - { name: Host, value: ops-nacos.misu.chat }
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /_ops/healthz
+              port: 8080
+              httpHeaders:
+                - { name: Host, value: ops-nacos.misu.chat }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /_ops/healthz
+              port: 8080
+              httpHeaders:
+                - { name: Host, value: ops-nacos.misu.chat }
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - { name: nginx-config, mountPath: /etc/nginx/templates/nginx.conf.template, subPath: nginx.conf.template, readOnly: true }
+      volumes:
+        - name: nginx-config
+          configMap: { name: "misu-ops-nginx-config-${OPS_CONFIG_TAG}" }
+        - name: ssh
+          secret:
+            secretName: misu-ops-ssh
+            defaultMode: 0400
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: misu-ops
+  namespace: misu-server
+  labels: { app: misuops }
+spec:
+  type: ClusterIP
+  selector: { app: misuops }
+  ports:
+    - { name: http, port: 30264, targetPort: http }

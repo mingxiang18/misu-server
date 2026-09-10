@@ -2,7 +2,7 @@
 # release.sh —— 开发机一键自动部署（可按需选择服务）。
 #
 # 用法：
-#   scripts/deploy/release.sh                       # 全部：3 个 Java 服务 + 前端 + ffmpeg-worker
+#   scripts/deploy/release.sh                       # 全部：4 个 Java 服务 + 前端 + ffmpeg-worker
 #   scripts/deploy/release.sh misu-gateway          # 只发布单个服务
 #   scripts/deploy/release.sh misu-account frontend # 发布多个指定目标
 #   scripts/deploy/release.sh frontend              # 只发布前端
@@ -13,18 +13,19 @@
 #   misu-gateway      (gateway)
 #   misu-account      (account)
 #   misu-file-server  (file-server)
+#   misu-ops          (ops)
 #   frontend          (front / ui)
 #   ffmpeg-worker     (worker)
 #
 # 选项：
 #   --dry-run        # 只构建，不推送、不碰服务器
 #   --skip-build     # 不重新构建镜像，直接用已推送的 tag 部署
-#   --config         # 只下发 ConfigMap（nacos 接入配置）并重启服务，不构建/发镜像
+#   --config         # 只下发配置清单并重启服务，不构建/发镜像
 #   --rollback <ts>  # 回滚到某次备份时间戳
 #   --list-backups   # 列出可回滚的备份时间戳
 #
-# ConfigMap 与 Deployment 解耦：日常发布只覆盖 misu-<svc>.yaml（Deployment+Service），
-# 不动 ConfigMap；改了 nacos 接入配置才用 --config 单独下发 misu-<svc>-config.yaml。
+# ConfigMap 与 Deployment 解耦：日常 Java 发布只覆盖 misu-<svc>.yaml（Deployment+Service），
+# 不动 ConfigMap；运维代理配置使用 --config misu-ops 单独下发。
 #
 # 单步流程：构建镜像→推私有 registry→SSH 主节点备份+覆盖清单+apply+rollout；
 #           前端：vite build→SSH 工作节点备份+覆盖 html。任一步失败自动回滚。
@@ -33,8 +34,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}"
-CONF="${ROOT_DIR}/scripts/deploy/deploy.conf"
-LOG_FILE="${ROOT_DIR}/scripts/deploy/deploy.log"
+CONF="${DEPLOY_CONF:-${ROOT_DIR}/scripts/deploy/deploy.conf}"
+LOG_FILE="${DEPLOY_LOG_FILE:-${ROOT_DIR}/scripts/deploy/deploy.log}"
 
 log() { local m; m="$(date '+%F %T') $*"; printf '\033[1;34m[release]\033[0m %s\n' "${m}"; echo "${m}" >>"${LOG_FILE}"; }
 err() { local m; m="$(date '+%F %T') ERROR $*"; printf '\033[1;31m[release]\033[0m %s\n' "${m}" >&2; echo "${m}" >>"${LOG_FILE}"; }
@@ -67,6 +68,7 @@ SERVICES=(
   "misu-gateway|misu-gateway|DockerfileLocal"
   "misu-account|misu-account/misu-account-biz|DockerfileLocal"
   "misu-file-server|misu-file-server/misu-file-server-biz|DockerfileLocal"
+  "misu-ops|misu-ops/misu-ops-biz|DockerfileLocal"
 )
 
 # ---- SSH 封装 --------------------------------------------------------------
@@ -80,10 +82,18 @@ canon_service() {
     misu-gateway|gateway)                 echo misu-gateway ;;
     misu-account|account)                 echo misu-account ;;
     misu-file-server|file-server|fileserver) echo misu-file-server ;;
+    misu-ops|ops)                         echo misu-ops ;;
     *) echo "" ;;
   esac
 }
 in_selected() { local x; for x in "${SEL_SVCS[@]:-}"; do [[ "${x}" == "$1" ]] && return 0; done; return 1; }
+
+config_manifest_for() {
+  case "$1" in
+    misu-ops) echo misu-ops-nginx-config.yaml ;;
+    *)        echo "$1-config.yaml" ;;
+  esac
+}
 
 # ============================================================================
 # 构建
@@ -149,17 +159,49 @@ deploy_k8s() {
   for entry in "${SERVICES[@]}"; do
     name="${entry%%|*}"; in_selected "${name}" || continue
     mssh "cp -a '${MASTER_K8S_DIR}/${name}.yaml' '${MASTER_BACKUP_DIR}/${TS}/k8s/' 2>/dev/null || true"
+    if [[ "${name}" == "misu-ops" ]]; then
+      mssh "cp -a '${MASTER_K8S_DIR}/misu-ops-nginx-config.yaml' '${MASTER_BACKUP_DIR}/${TS}/k8s/' 2>/dev/null || true"
+    fi
   done
 
   tmp="$(mktemp -d)"
-  export REGISTRY_PULL IMAGE_TAG="${TAG}"
+  export REGISTRY_PULL IMAGE_TAG="${TAG}" OPS_CONFIG_TAG="${TAG}"
   log "主节点：覆盖清单 + kubectl apply（tag=${TAG}）"
   for entry in "${SERVICES[@]}"; do
     name="${entry%%|*}"; in_selected "${name}" || continue
-    envsubst '${REGISTRY_PULL} ${IMAGE_TAG}' \
+    if [[ "${name}" == "misu-ops" ]]; then
+      envsubst '${OPS_CONFIG_TAG}' \
+        <"${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-ops-nginx-config.yaml" \
+        >"${tmp}/misu-ops-nginx-config.yaml"
+      if ! scp "${SSH_OPTS[@]}" "${tmp}/misu-ops-nginx-config.yaml" \
+        "${MASTER_SSH}:${MASTER_K8S_DIR}/misu-ops-nginx-config.yaml"; then
+        err "misu-ops ConfigMap 上传失败 —— 回滚配置和 Deployment"
+        restore_k8s "${TS}"
+        die "misu-ops 发布失败并已回滚。"
+      fi
+      if ! mssh "kubectl apply -f '${MASTER_K8S_DIR}/misu-ops-nginx-config.yaml'"; then
+        err "misu-ops ConfigMap apply 失败 —— 回滚配置和 Deployment"
+        restore_k8s "${TS}"
+        die "misu-ops 发布失败并已回滚。"
+      fi
+    fi
+    envsubst '${REGISTRY_PULL} ${IMAGE_TAG} ${OPS_CONFIG_TAG}' \
       <"${ROOT_DIR}/scripts/deploy/k8s/misu-server/${name}.yaml" >"${tmp}/${name}.yaml"
-    scp "${SSH_OPTS[@]}" "${tmp}/${name}.yaml" "${MASTER_SSH}:${MASTER_K8S_DIR}/${name}.yaml"
-    mssh "kubectl apply -f '${MASTER_K8S_DIR}/${name}.yaml'"
+    if [[ "${name}" == "misu-ops" ]]; then
+      if ! scp "${SSH_OPTS[@]}" "${tmp}/${name}.yaml" "${MASTER_SSH}:${MASTER_K8S_DIR}/${name}.yaml"; then
+        err "misu-ops Deployment 上传失败 —— 回滚配置和 Deployment"
+        restore_k8s "${TS}"
+        die "misu-ops 发布失败并已回滚。"
+      fi
+      if ! mssh "kubectl apply -f '${MASTER_K8S_DIR}/${name}.yaml'"; then
+        err "misu-ops Deployment apply 失败 —— 回滚配置和 Deployment"
+        restore_k8s "${TS}"
+        die "misu-ops 发布失败并已回滚。"
+      fi
+    else
+      scp "${SSH_OPTS[@]}" "${tmp}/${name}.yaml" "${MASTER_SSH}:${MASTER_K8S_DIR}/${name}.yaml"
+      mssh "kubectl apply -f '${MASTER_K8S_DIR}/${name}.yaml'"
+    fi
   done
   rm -rf "${tmp}"
 
@@ -178,10 +220,56 @@ restore_k8s() {
   local ts="$1" entry name
   for entry in "${SERVICES[@]}"; do
     name="${entry%%|*}"
-    mssh "test -f '${MASTER_BACKUP_DIR}/${ts}/k8s/${name}.yaml' && \
-      cp -a '${MASTER_BACKUP_DIR}/${ts}/k8s/${name}.yaml' '${MASTER_K8S_DIR}/${name}.yaml' && \
-      kubectl apply -f '${MASTER_K8S_DIR}/${name}.yaml'" || err "回滚 ${name} 失败，请人工介入"
+    if [[ "${name}" == "misu-ops" ]] && mssh "test -f '${MASTER_BACKUP_DIR}/${ts}/k8s/misu-ops-nginx-config.yaml'"; then
+      mssh "cp -a '${MASTER_BACKUP_DIR}/${ts}/k8s/misu-ops-nginx-config.yaml' '${MASTER_K8S_DIR}/misu-ops-nginx-config.yaml' && \
+        kubectl apply -f '${MASTER_K8S_DIR}/misu-ops-nginx-config.yaml'"
+    fi
+    if mssh "test -f '${MASTER_BACKUP_DIR}/${ts}/k8s/${name}.yaml'"; then
+      mssh "cp -a '${MASTER_BACKUP_DIR}/${ts}/k8s/${name}.yaml' '${MASTER_K8S_DIR}/${name}.yaml' && \
+        kubectl apply -f '${MASTER_K8S_DIR}/${name}.yaml'" || err "回滚 ${name} 失败，请人工介入"
+    else
+      log "${name} 没有旧清单备份，跳过回滚。"
+    fi
+    if [[ "${name}" == "misu-ops" ]]; then
+      if ! mssh "test -f '${MASTER_BACKUP_DIR}/${ts}/k8s/misu-ops-nginx-config.yaml'"; then
+        log "misu-ops 没有旧 Nginx 配置备份，跳过回滚。"
+      fi
+    fi
   done
+}
+
+restore_config_only() {
+  local ts="$1" entry name config_file
+  for entry in "${SERVICES[@]}"; do
+    name="${entry%%|*}"; in_selected "${name}" || continue
+    config_file="$(config_manifest_for "${name}")"
+    if mssh "test -f '${MASTER_BACKUP_DIR}/${ts}/k8s/${config_file}'"; then
+      mssh "cp -a '${MASTER_BACKUP_DIR}/${ts}/k8s/${config_file}' '${MASTER_K8S_DIR}/${config_file}' && \
+        kubectl apply -f '${MASTER_K8S_DIR}/${config_file}'" \
+        || err "回滚 ${name} 配置失败，请人工介入"
+      if [[ "${name}" != "misu-ops" ]]; then
+        mssh "kubectl -n '${NAMESPACE}' rollout restart 'deployment/${name}'" \
+          || err "回滚 ${name} 后重启失败，请人工介入"
+      fi
+    else
+      log "${name} 没有旧配置备份，跳过配置回滚。"
+    fi
+  done
+  if in_selected misu-ops && mssh "test -f '${MASTER_BACKUP_DIR}/${ts}/k8s/misu-ops.yaml'"; then
+    mssh "cp -a '${MASTER_BACKUP_DIR}/${ts}/k8s/misu-ops.yaml' '${MASTER_K8S_DIR}/misu-ops.yaml' && \
+      kubectl apply -f '${MASTER_K8S_DIR}/misu-ops.yaml'" \
+      || err "回滚 misu-ops Deployment 失败，请人工介入"
+  fi
+}
+
+export_live_ops_deployment() {
+  local destination="$1"
+  local temporary="${destination}.tmp.$$"
+  local cleaned="${destination}.cleaned.$$"
+  # Export through temporary files so a kubectl/jq failure cannot leave a
+  # truncated manifest that looks like a successful backup. jq -e plus the
+  # non-empty check also rejects a different resource or empty JSON output.
+  mssh "set -eu; tmp='${temporary}'; clean='${cleaned}'; trap 'rm -f \"\$tmp\" \"\$clean\"' EXIT; kubectl -n '${NAMESPACE}' get deployment/misu-ops -o json >\"\$tmp\" && jq -e 'if .kind == \"Deployment\" and .metadata.name == \"misu-ops\" then del(.metadata.creationTimestamp, .metadata.generation, .metadata.managedFields, .metadata.resourceVersion, .metadata.uid, .metadata.selfLink, .status) else empty end' \"\$tmp\" >\"\$clean\" && test -s \"\$clean\" && mv -f \"\$clean\" '${destination}'"
 }
 
 # ============================================================================
@@ -274,34 +362,91 @@ cmd_rollback() {
 # 单独下发 ConfigMap（与日常镜像发布解耦）
 # ============================================================================
 cmd_config() {
-  local entry name ts
+  local entry name ts config_file current_tag config_tag tmp
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  log "下发 ConfigMap：服务=[${SEL_SVCS[*]}]  ts=${ts}"
+  current_tag="$(git rev-parse --short HEAD)"
+  # ConfigMap metadata.name is a DNS subdomain; lower-case the UTC marker
+  # before using it in Kubernetes, while retaining the upper-case timestamp
+  # for the human-readable backup directory.
+  config_tag="$(printf 'cfg-%s-%s' "${current_tag}" "${ts}" | tr '[:upper:]' '[:lower:]')"
+  export OPS_CONFIG_TAG="${config_tag}"
+  tmp="$(mktemp -d)"
+  log "下发 ConfigMap：服务=[${SEL_SVCS[*]}]  config=${config_tag}  ts=${ts}"
   mssh "mkdir -p '${MASTER_BACKUP_DIR}/${ts}/k8s'"
+  if in_selected misu-ops; then
+    if ! mssh "command -v jq >/dev/null 2>&1"; then
+      die "config-only 需要主节点安装 jq，用于保存 live misu-ops Deployment"
+    fi
+    # A config-only rollout changes the Deployment's ConfigMap reference. Keep
+    # the live Deployment (including its current image) in the same backup so
+    # --rollback restores the image and config reference together.
+    if ! export_live_ops_deployment "${MASTER_BACKUP_DIR}/${ts}/k8s/misu-ops.yaml"; then
+      die "无法保存当前 misu-ops Deployment，拒绝 config-only 发布"
+    fi
+  fi
   for entry in "${SERVICES[@]}"; do
     name="${entry%%|*}"; in_selected "${name}" || continue
-    mssh "cp -a '${MASTER_K8S_DIR}/${name}-config.yaml' '${MASTER_BACKUP_DIR}/${ts}/k8s/' 2>/dev/null || true"
+    config_file="$(config_manifest_for "${name}")"
+    if ! mssh "cp -a '${MASTER_K8S_DIR}/${config_file}' '${MASTER_BACKUP_DIR}/${ts}/k8s/'"; then
+      die "无法保存 ${name} 旧配置，拒绝 config-only 发布"
+    fi
   done
 
   log "主节点：覆盖 ConfigMap 清单 + kubectl apply"
   for entry in "${SERVICES[@]}"; do
     name="${entry%%|*}"; in_selected "${name}" || continue
-    scp "${SSH_OPTS[@]}" "${ROOT_DIR}/scripts/deploy/k8s/misu-server/${name}-config.yaml" \
-      "${MASTER_SSH}:${MASTER_K8S_DIR}/${name}-config.yaml"
-    mssh "kubectl apply -f '${MASTER_K8S_DIR}/${name}-config.yaml'"
+    config_file="$(config_manifest_for "${name}")"
+    if [[ "${name}" == "misu-ops" ]]; then
+      envsubst '${OPS_CONFIG_TAG}' \
+        <"${ROOT_DIR}/scripts/deploy/k8s/misu-server/${config_file}" \
+        >"${tmp}/${config_file}"
+    else
+      cp "${ROOT_DIR}/scripts/deploy/k8s/misu-server/${config_file}" "${tmp}/${config_file}"
+    fi
+    if ! scp "${SSH_OPTS[@]}" "${tmp}/${config_file}" \
+      "${MASTER_SSH}:${MASTER_K8S_DIR}/${config_file}"; then
+      err "${name} 配置清单上传失败 —— 回滚配置和 Deployment"
+      restore_config_only "${ts}"
+      die "${name} 配置下发失败并已回滚。"
+    fi
+    if ! mssh "kubectl apply -f '${MASTER_K8S_DIR}/${config_file}'"; then
+      err "${name} ConfigMap apply 失败 —— 回滚配置和 Deployment"
+      restore_config_only "${ts}"
+      die "${name} ConfigMap 下发失败并已回滚。"
+    fi
+    if [[ "${name}" == "misu-ops" ]]; then
+      if ! mssh "kubectl -n '${NAMESPACE}' patch deployment/misu-ops --type='strategic' -p '{\"spec\":{\"template\":{\"spec\":{\"volumes\":[{\"name\":\"nginx-config\",\"configMap\":{\"name\":\"misu-ops-nginx-config-${config_tag}\"}}]}}}}'"; then
+        err "misu-ops Deployment patch 失败 —— 回滚配置和 Deployment"
+        restore_config_only "${ts}"
+        die "misu-ops 配置下发失败并已回滚。"
+      fi
+      # Persist the exact live Deployment after the patch. This preserves the
+      # real image (including a digest or a different registry), env, probes,
+      # and any cluster-side fields that the repository template does not know.
+      if ! export_live_ops_deployment "${MASTER_K8S_DIR}/misu-ops.yaml"; then
+        err "misu-ops live Deployment 备份失败 —— 回滚配置和 Deployment"
+        restore_config_only "${ts}"
+        die "misu-ops 配置下发失败并已回滚。"
+      fi
+    fi
   done
 
   # ConfigMap 走 subPath 挂载，kubelet 不会热更新，必须重启 pod 才能生效
   log "主节点：重启 deployment 让新配置生效"
   for entry in "${SERVICES[@]}"; do
     name="${entry%%|*}"; in_selected "${name}" || continue
+    [[ "${name}" == "misu-ops" ]] && continue
     mssh "kubectl -n '${NAMESPACE}' rollout restart 'deployment/${name}'"
   done
   for entry in "${SERVICES[@]}"; do
     name="${entry%%|*}"; in_selected "${name}" || continue
-    mssh "kubectl -n '${NAMESPACE}' rollout status 'deployment/${name}' --timeout='${ROLLOUT_TIMEOUT}'" \
-      || err "${name} 重启后 rollout 未就绪"
+    if ! mssh "kubectl -n '${NAMESPACE}' rollout status 'deployment/${name}' --timeout='${ROLLOUT_TIMEOUT}'"; then
+      err "${name} 配置更新后 rollout 未就绪 —— 回滚配置和 Deployment"
+      restore_config_only "${ts}"
+      die "${name} ConfigMap 下发失败并已回滚。"
+    fi
   done
+  rm -rf "${tmp}"
   log "ConfigMap 下发完成（备份时间戳 ${ts}）。"
 }
 
@@ -323,7 +468,7 @@ main() {
       ffmpeg-worker|ffmpegworker|worker) DO_WORKER=1; any_target=1 ;;
       *)
         c="$(canon_service "$1")"
-        [[ -n "${c}" ]] || die "未知目标：$1（可选 misu-gateway/misu-account/misu-file-server/frontend/ffmpeg-worker）"
+        [[ -n "${c}" ]] || die "未知目标：$1（可选 misu-gateway/misu-account/misu-file-server/misu-ops/frontend/ffmpeg-worker）"
         in_selected "${c}" || SEL_SVCS+=("${c}")
         any_target=1 ;;
     esac
@@ -335,7 +480,7 @@ main() {
 
   # 未指定目标 → 全部
   if [[ "${any_target}" -eq 0 ]]; then
-    SEL_SVCS=(misu-gateway misu-account misu-file-server); DO_FRONTEND=1; DO_WORKER=1
+    SEL_SVCS=(misu-gateway misu-account misu-file-server misu-ops); DO_FRONTEND=1; DO_WORKER=1
   fi
 
   if [[ "${action}" == "config" ]]; then

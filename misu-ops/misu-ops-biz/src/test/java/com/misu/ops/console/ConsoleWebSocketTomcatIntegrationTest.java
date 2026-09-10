@@ -1,0 +1,306 @@
+package com.misu.ops.console;
+
+import com.misu.ops.OpsApplication;
+import com.misu.ops.OpsProperties;
+import com.misu.ops.security.CurrentAccountVerifier;
+import com.misu.ops.session.ConsoleTarget;
+import com.misu.ops.session.OpsSessionStore;
+import com.misu.security.dto.LoginUser;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.web.servlet.handler.AbstractUrlHandlerMapping;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Base64;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/** Exercises the actual Spring MVC/Tomcat WebSocket handshake and close path. */
+@SpringBootTest(classes = OpsApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@TestPropertySource(properties = {
+        "token.secret=01234567890123456789012345678901",
+        "server.servlet.context-path=/ops",
+        "ops.proxy-shared-secret=integration-secret",
+        "ops.cookie-secure=false",
+        "ops.nacos-url=http://localhost:1/nacos/",
+        "ops.allowed-origins=http://localhost",
+        "ops.console-web-socket-connect-timeout-millis=2000"
+})
+class ConsoleWebSocketTomcatIntegrationTest {
+
+    @LocalServerPort
+    private int port;
+
+    @Autowired
+    private OpsProperties properties;
+
+    @Autowired
+    private OpsSessionStore sessions;
+
+    @Autowired
+    private ConsoleWebSocketBridgeService bridges;
+
+    @Autowired
+    private List<AbstractUrlHandlerMapping> handlerMappings;
+
+    @MockBean
+    private CurrentAccountVerifier accountVerifier;
+
+    @Test
+    void tomcatNegotiatesProtocolAndAdminRoleRevocationClosesDownstreamAndUpstream() throws Exception {
+        try (ControlledWebSocketServer upstream = new ControlledWebSocketServer()) {
+            TestConnection connection = connect(upstream);
+            assertEquals("console.v1", connection.client().protocol);
+            assertTrue(upstream.handshake.get(2, TimeUnit.SECONDS));
+            assertEquals("GET /nacos/socket?x=a%2Fb HTTP/1.1", upstream.requestLine);
+            assertEquals("console.v1, console.v2", upstream.requestedProtocol);
+
+            properties.setRoleCheckSeconds(0);
+            org.mockito.Mockito.doThrow(new IllegalStateException("ADMIN revoked"))
+                    .when(accountVerifier).requireAdmin(7L, "admin");
+            bridges.revalidateBridges();
+
+            assertTrue(connection.closed().get(3, TimeUnit.SECONDS));
+            assertTrue(upstream.closed.get(3, TimeUnit.SECONDS));
+            assertEquals(0, bridges.activeBridgeCount());
+        }
+    }
+
+    @Test
+    void tomcatClosesBothEndsWhenSessionExpires() throws Exception {
+        try (ControlledWebSocketServer upstream = new ControlledWebSocketServer()) {
+            TestConnection connection = connect(upstream);
+            assertEquals("console.v1", connection.client().protocol);
+
+            properties.setSessionIdleSeconds(0);
+            bridges.revalidateBridges();
+
+            assertTrue(connection.closed().get(3, TimeUnit.SECONDS));
+            assertTrue(upstream.closed.get(3, TimeUnit.SECONDS));
+            assertEquals(0, bridges.activeBridgeCount());
+        }
+    }
+
+    private TestConnection connect(ControlledWebSocketServer upstream) throws Exception {
+        properties.setSessionIdleSeconds(900);
+        properties.setRoleCheckSeconds(60);
+        assertTrue(handlerMappings.stream().anyMatch(mapping -> mapping.getHandlerMap().keySet().stream()
+                .anyMatch(path -> path.contains("/ws/console/"))),
+                () -> "WebSocket mappings: " + handlerMappings.stream()
+                        .map(AbstractUrlHandlerMapping::getHandlerMap).toList());
+        properties.setProxySharedSecret("integration-secret");
+        properties.setNacosUrl("http://localhost:" + port + "/nacos/");
+        properties.setNacosUpstreamUrl("http://127.0.0.1:" + upstream.port() + "/nacos/");
+        OpsSessionStore.Ticket ticket = sessions.issueTicket(
+                new LoginUser(7L, "admin", List.of("ADMIN")), ConsoleTarget.NACOS);
+        OpsSessionStore.ConsoleSession session = sessions.createConsoleSession(ticket);
+        RawWebSocketClient client = RawWebSocketClient.connect(
+                port, session.id(), properties.getCookieName());
+        return new TestConnection(session, client, client.closed);
+    }
+
+    private record TestConnection(OpsSessionStore.ConsoleSession session, RawWebSocketClient client,
+                                  CompletableFuture<Boolean> closed) {
+    }
+
+    /** Raw client keeps the downstream handshake proof independent of mock sessions. */
+    private static final class RawWebSocketClient implements AutoCloseable {
+        private final Socket socket;
+        private final String protocol;
+        private final CompletableFuture<Boolean> closed = new CompletableFuture<>();
+        private final Thread reader;
+
+        private RawWebSocketClient(Socket socket, String protocol) {
+            this.socket = socket;
+            this.protocol = protocol;
+            this.reader = new Thread(this::readUntilClose, "ops-tomcat-downstream-test");
+            this.reader.start();
+        }
+
+        static RawWebSocketClient connect(int port, String sessionId, String cookieName) throws Exception {
+            Socket socket = new Socket("localhost", port);
+            socket.setSoTimeout(5000);
+            String key = Base64.getEncoder().encodeToString("tomcat-test-key!".getBytes(StandardCharsets.US_ASCII));
+            String request = "GET /ops/ws/console/nacos HTTP/1.1\r\n"
+                    + "Host: localhost:" + port + "\r\n"
+                    + "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                    + "Sec-WebSocket-Key: " + key + "\r\nSec-WebSocket-Version: 13\r\n"
+                    + "Sec-WebSocket-Protocol: console.v1, console.v2\r\n"
+                    + "Origin: http://localhost:" + port + "\r\n"
+                    + "X-Ops-Proxy-Key: integration-secret\r\n"
+                    + "X-Ops-Target: nacos\r\nX-Ops-Console-Target: nacos\r\n"
+                    + "X-Ops-Original-URI: /nacos/socket?x=a%2Fb\r\n"
+                    + "Cookie: " + cookieName + "=" + sessionId + "\r\n\r\n";
+            socket.getOutputStream().write(request.getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+            String response = readHeaders(socket);
+            if (!response.startsWith("HTTP/1.1 101")) {
+                String length = header(response, "Content-Length");
+                int contentLength = length.isBlank() ? 0 : Integer.parseInt(length);
+                String body = new String(socket.getInputStream().readNBytes(contentLength), StandardCharsets.UTF_8);
+                throw new IOException("Tomcat WebSocket handshake failed: " + response + body);
+            }
+            return new RawWebSocketClient(socket, header(response, "Sec-WebSocket-Protocol"));
+        }
+
+        private static String readHeaders(Socket socket) throws IOException {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] end = {13, 10, 13, 10};
+            int matched = 0;
+            while (matched < end.length) {
+                int value = socket.getInputStream().read();
+                if (value < 0) throw new IOException("EOF in handshake");
+                out.write(value);
+                matched = value == end[matched] ? matched + 1 : (value == end[0] ? 1 : 0);
+            }
+            return out.toString(StandardCharsets.US_ASCII);
+        }
+
+        private static String header(String response, String name) {
+            for (String line : response.split("\\r\\n")) {
+                if (line.regionMatches(true, 0, name + ":", 0, name.length() + 1)) {
+                    return line.substring(name.length() + 1).trim();
+                }
+            }
+            return "";
+        }
+
+        private void readUntilClose() {
+            try {
+                while (true) {
+                    int first = socket.getInputStream().read();
+                    int second = socket.getInputStream().read();
+                    if (first < 0 || second < 0) break;
+                    int length = second & 0x7f;
+                    if (length == 126) {
+                        length = (socket.getInputStream().read() << 8) | socket.getInputStream().read();
+                    }
+                    socket.getInputStream().readNBytes(length);
+                    if ((first & 0x0f) == 0x8) break;
+                }
+                closed.complete(true);
+            } catch (SocketTimeoutException ex) {
+                closed.completeExceptionally(ex);
+            } catch (Exception ex) {
+                closed.completeExceptionally(ex);
+            }
+        }
+
+        @Override
+        public void close() throws Exception {
+            socket.close();
+            reader.join(1000);
+        }
+    }
+
+    private static final class ControlledWebSocketServer implements AutoCloseable {
+        private final ServerSocket server;
+        private final Thread thread;
+        private final CompletableFuture<Boolean> handshake = new CompletableFuture<>();
+        private final CompletableFuture<Boolean> closed = new CompletableFuture<>();
+        private volatile String requestLine;
+        private volatile String requestedProtocol;
+
+        private ControlledWebSocketServer() throws IOException {
+            server = new ServerSocket(0);
+            thread = new Thread(this::serve, "ops-tomcat-upstream-test");
+            thread.start();
+        }
+
+        int port() { return server.getLocalPort(); }
+
+        private void serve() {
+            try (Socket socket = server.accept()) {
+                socket.setSoTimeout(5000);
+                String request = readHeaders(socket);
+                String[] lines = request.split("\\r\\n");
+                requestLine = lines[0];
+                String key = header(request, "Sec-WebSocket-Key");
+                requestedProtocol = header(request, "Sec-WebSocket-Protocol");
+                String accept = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-1")
+                        .digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+                                .getBytes(StandardCharsets.US_ASCII)));
+                String response = "HTTP/1.1 101 Switching Protocols\r\n"
+                        + "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                        + "Sec-WebSocket-Accept: " + accept + "\r\n"
+                        + "Sec-WebSocket-Protocol: console.v1\r\n\r\n";
+                socket.getOutputStream().write(response.getBytes(StandardCharsets.US_ASCII));
+                socket.getOutputStream().flush();
+                handshake.complete(true);
+                while (true) {
+                    Frame frame = readFrame(socket);
+                    if ((frame.opcode() & 0x0f) == 0x8) {
+                        closed.complete(true);
+                        return;
+                    }
+                }
+            } catch (SocketTimeoutException ex) {
+                closed.completeExceptionally(ex);
+            } catch (Exception ex) {
+                closed.completeExceptionally(ex);
+            }
+        }
+
+        private static String readHeaders(Socket socket) throws IOException {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] end = {13, 10, 13, 10};
+            int matched = 0;
+            while (matched < end.length) {
+                int value = socket.getInputStream().read();
+                if (value < 0) throw new IOException("EOF in handshake");
+                out.write(value);
+                matched = value == end[matched] ? matched + 1 : (value == end[0] ? 1 : 0);
+            }
+            return out.toString(StandardCharsets.US_ASCII);
+        }
+
+        private static String header(String request, String name) {
+            for (String line : request.split("\\r\\n")) {
+                if (line.regionMatches(true, 0, name + ":", 0, name.length() + 1)) {
+                    return line.substring(name.length() + 1).trim();
+                }
+            }
+            return "";
+        }
+
+        private static Frame readFrame(Socket socket) throws IOException {
+            int first = socket.getInputStream().read();
+            int second = socket.getInputStream().read();
+            if (first < 0 || second < 0) throw new IOException("EOF in frame");
+            int length = second & 0x7f;
+            if (length == 126) {
+                length = (socket.getInputStream().read() << 8) | socket.getInputStream().read();
+            }
+            byte[] mask = socket.getInputStream().readNBytes(4);
+            byte[] payload = socket.getInputStream().readNBytes(length);
+            for (int i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
+            return new Frame(first, payload);
+        }
+
+        @Override
+        public void close() throws Exception {
+            server.close();
+            thread.join(3000);
+            if (!closed.isDone()) {
+                closed.complete(true);
+            }
+        }
+
+        private record Frame(int opcode, byte[] payload) {
+        }
+    }
+}

@@ -30,6 +30,15 @@ public class LoginUser {
     private List<String> authorities;
 
     /**
+     * Current account state returned by the account service.  These fields are
+     * intentionally not copied into JWT claims; callers that need a fresh
+     * authorization decision must read them from the account service.
+     */
+    private String status;
+
+    private String delFlag;
+
+    /**
      * 用户唯一标识
      */
     private String token;

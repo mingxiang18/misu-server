@@ -16,6 +16,7 @@
 <!--        <module>misu-web</module>-->
         <module>misu-chat</module>
         <module>misu-gateway</module>
+        <module>misu-ops</module>
     </modules>
 
     <properties>
