@@ -147,6 +147,11 @@ build_frontend() {
          --registry=https://registry.npmjs.org/ --ignore-scripts \
     && npm run build )
   [[ -d "${ROOT_DIR}/misu-file-server-ui/dist" ]] || die "前端构建未产出 dist/"
+  # The caller may use a restrictive umask for release logs and temporary
+  # files.  Static assets must still be readable by the nginx worker after
+  # rsync preserves source modes, so normalize the published tree explicitly.
+  find "${ROOT_DIR}/misu-file-server-ui/dist" -type d -exec chmod 755 {} +
+  find "${ROOT_DIR}/misu-file-server-ui/dist" -type f -exec chmod 644 {} +
 }
 
 # ============================================================================
@@ -310,6 +315,15 @@ restore_worker() {
 # 部署 —— 工作节点 前端
 # ============================================================================
 deploy_frontend() {
+  local unreadable_file unsearchable_dir
+  [[ -r "${ROOT_DIR}/misu-file-server-ui/dist/index.html" ]] \
+    || die "前端 dist/index.html 不可读，拒绝发布。"
+  unreadable_file="$(find "${ROOT_DIR}/misu-file-server-ui/dist" -type f ! -perm -o+r -print -quit)"
+  [[ -z "${unreadable_file}" ]] \
+    || die "前端静态文件缺少 other-read 权限：${unreadable_file}"
+  unsearchable_dir="$(find "${ROOT_DIR}/misu-file-server-ui/dist" -type d ! -perm -o+x -print -quit)"
+  [[ -z "${unsearchable_dir}" ]] \
+    || die "前端静态目录缺少 other-execute 权限：${unsearchable_dir}"
   log "工作节点：备份旧 html → ${WORKER_BACKUP_DIR}/${TS}/html"
   wssh "mkdir -p '${WORKER_BACKUP_DIR}/${TS}' && \
     { [ -d '${WORKER_HTML_DIR}' ] && cp -a '${WORKER_HTML_DIR}' '${WORKER_BACKUP_DIR}/${TS}/html' || true; }"

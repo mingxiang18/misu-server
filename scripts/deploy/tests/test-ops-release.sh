@@ -66,6 +66,16 @@ run_release() {
 }
 
 sha="$(git -C "${ROOT_DIR}" rev-parse --short HEAD)"
+
+# Frontend publishing must be independent of the caller's umask.  Keep these
+# source-level guards in the offline harness so a future refactor cannot
+# reintroduce nginx 403s caused by rsync preserving mode 0600/0700 artifacts.
+rg -q 'type d -exec chmod 755' "${ROOT_DIR}/scripts/deploy/release.sh"
+rg -q 'type f -exec chmod 644' "${ROOT_DIR}/scripts/deploy/release.sh"
+rg -q 'type f ! -perm -o\+r' "${ROOT_DIR}/scripts/deploy/release.sh"
+rg -q 'type d ! -perm -o\+x' "${ROOT_DIR}/scripts/deploy/release.sh"
+echo 'frontend permission normalization/preflight: PASS'
+
 run_release --skip-build misu-ops
 cp "${CAPTURE_DIR}/misu-ops.yaml" "${TMP_DIR}/normal-misu-ops.yaml"
 cp "${CAPTURE_DIR}/misu-ops-nginx-config.yaml" "${TMP_DIR}/normal-nginx.yaml"
