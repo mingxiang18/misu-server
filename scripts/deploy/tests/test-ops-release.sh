@@ -153,6 +153,15 @@ rg -q 'proxy_set_header X-Forwarded-Groups ""' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header X-Forwarded-Group ""' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header X-Forwarded-Email ""' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header X-Forwarded-Id-Token ""' "${TMP_DIR}/normal-nginx.yaml"
+ruby - "${TMP_DIR}/normal-nginx.yaml" <<'RB'
+require 'yaml'
+config = YAML.load_stream(File.read(ARGV.fetch(0))).first.fetch('data').fetch('nginx.conf.template')
+ws = config.split('location = /_ops/ws {', 2).fetch(1).split('location ', 2).first
+required = ['proxy_set_header Forwarded "";', 'proxy_set_header X-Forwarded-For "";',
+            'proxy_set_header X-Real-IP "";', 'proxy_set_header X-Forwarded-Port "";']
+abort 'WS proxy must clear forwarded remote-address headers' unless required.all? { |line| ws.include?(line) }
+puts 'WS proxy clears forwarded remote-address headers: PASS'
+RB
 echo 'Nacos server-side auth Secret and same-origin path proxy contract: PASS'
 
 ruby - "${TMP_DIR}/normal-misu-ops.yaml" "${TMP_DIR}/normal-nginx.yaml" "${sha}" <<'RB'

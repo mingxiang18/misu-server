@@ -34,7 +34,7 @@
 
 后端真实证据（2026-09-11）：`ConsoleWebSocketTomcatIntegrationTest` 通过 3 项真实嵌入式 Tomcat TCP WebSocket 测试，握手只携带运维 Cookie 和 `X-Ops-*` 内部头（不携带主站 JWT），确认 `/ops/ws/console/nacos` 返回 `101` 和 `console.v1` 协商结果，并在账号 verifier 拒绝 ADMIN、会话超时两条路径分别观察下游客户端与本地上游同时关闭、桥接计数归零；Headlamp 路径确认仅向上游注入服务端 ConsoleSession 用户名；完整 `misu-ops-biz` 测试共 29 项通过，Maven package 通过。读循环将超时和其他异常标记为测试失败，不再误报关闭成功。Spring 6.1.6 本地源码确认握手协议判断会 unwrap `WebSocketHandlerDecorator`，实现已改为直接握手处理器协商，避免协议响应丢失。
 2026-09-11 补充：Headlamp WebSocket 上游缺少由服务端会话生成的 `X-Forwarded-User` 曾是即时 401 的根因，已由 e68bb74 修复；`proxy_read_timeout` 解决的是 `follow=true` 日志流经过边缘代理后的长期稳定性问题。当前 `ConsoleWebSocketBridgeService` 已在真实 Tomcat 集成测试中确认 Headlamp 只收到会话用户 `admin`，伪造的 `X-Forwarded-User`、Groups、Group、Email 和 Id-Token 均不透传；Nginx 双跳 harness 同时覆盖 `/wsMultiplexer` 握手。
-当前生产 `activeSessionCount=0` 的现象尚不能由本地代码单独归因；本次修复增加了只含 target/count 的创建日志，需部署新镜像后与 proxy-auth 失败日志的计数对照。
+当前生产即时 401 的最终根因是 sidecar `/_ops/ws` 仍把边缘 `Forwarded`、`X-Forwarded-For`、`X-Real-IP` 和 `X-Forwarded-Port` 传给 Java，Spring forwarded-header 处理将请求 remote address 改为主站 Pod IP，触发 loopback 信任检查；`auth_request` 本身成功且会话仍在内存中。该位置现在显式清空四类头，仅保留已校验的 `X-Ops-*` 上下文；真实 Nginx 双跳 harness 已用伪造边缘头验证 WS 101 和 Headlamp `admin` 身份。
 
 ## 部署子任务
 

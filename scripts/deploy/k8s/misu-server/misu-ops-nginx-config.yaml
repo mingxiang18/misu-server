@@ -268,8 +268,14 @@ data:
           proxy_set_header Host $host;
           proxy_set_header X-Forwarded-Host $host;
           proxy_set_header X-Forwarded-Proto https;
-          proxy_set_header X-Real-IP $remote_addr;
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          # Spring's forwarded-header handling must see the sidecar's
+          # loopback peer for its trusted-proxy check. Preserve the explicit
+          # X-Ops-* context below, but never let edge forwarding headers
+          # rewrite the Java request's remote address.
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
           proxy_set_header Origin $http_origin;
           proxy_set_header Upgrade $http_upgrade;
           proxy_set_header Connection $connection_upgrade;

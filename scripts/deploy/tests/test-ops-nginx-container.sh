@@ -97,6 +97,10 @@ request = (
     "Host: api.misu.chat\r\n"
     f"Cookie: MISU_OPS_SESSION={cookie}\r\n"
     "Origin: https://server.misu.chat\r\n"
+    "Forwarded: for=203.0.113.9\r\n"
+    "X-Forwarded-For: 203.0.113.9\r\n"
+    "X-Real-IP: 203.0.113.9\r\n"
+    "X-Forwarded-Port: 443\r\n"
     "Upgrade: WebSocket\r\n"
     "Connection: Upgrade\r\n"
     "Sec-WebSocket-Version: 13\r\n"
@@ -122,6 +126,7 @@ check_ws headlamp headlamp-session /ops/headlamp/wsMultiplexer
 check_ws nacos nacos-session /nacos/wsMultiplexer
 rg -q 'WS_BACKEND path=/ops/ws/console/headlamp original=/ops/headlamp/wsMultiplexer target=headlamp cookie=MISU_OPS_SESSION=headlamp-session upstream-cookie=UPSTREAM_TOKEN=clean upstream-auth=Bearer upstream user=admin groups= group= email= id_token=' "${MOCK_LOG}"
 rg -q 'WS_BACKEND path=/ops/ws/console/nacos original=/nacos/wsMultiplexer target=nacos cookie=MISU_OPS_SESSION=nacos-session upstream-cookie=UPSTREAM_TOKEN=clean upstream-auth=Bearer upstream user= groups= group= email= id_token=' "${MOCK_LOG}"
+[[ "$(rg -c 'WS_BACKEND_FORWARDING forwarded= xff= real= port=' "${MOCK_LOG}")" == 2 ]]
 code=$(curl -sS -D "${TMP_DIR}/exchange-headers" -o "${TMP_DIR}/exchange" -w '%{http_code}' -X POST -H 'Host: api.misu.chat' \
   -H 'Origin: https://server.misu.chat' -H 'Forwarded: for=203.0.113.9' \
   -H 'X-Forwarded-For: 203.0.113.9' -H 'X-Real-IP: 203.0.113.9' \

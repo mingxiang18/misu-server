@@ -74,6 +74,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.path.startswith("/ops/ws/console/") and self.headers.get("Upgrade", "").lower() == "websocket":
                 self.append(
+                    "WS_BACKEND_FORWARDING forwarded=%s xff=%s real=%s port=%s"
+                    % (
+                        self.headers.get("Forwarded", ""),
+                        self.headers.get("X-Forwarded-For", ""),
+                        self.headers.get("X-Real-IP", ""),
+                        self.headers.get("X-Forwarded-Port", ""),
+                    )
+                )
+                self.append(
                     "WS_BACKEND path=%s original=%s target=%s cookie=%s upstream-cookie=%s upstream-auth=%s user=%s groups=%s group=%s email=%s id_token=%s"
                     % (
                         self.path,
