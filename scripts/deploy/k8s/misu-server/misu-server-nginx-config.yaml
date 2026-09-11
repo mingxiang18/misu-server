@@ -67,6 +67,10 @@ data:
           proxy_set_header Host server.misu.chat;
           proxy_set_header Upgrade $http_upgrade;
           proxy_set_header Connection $connection_upgrade;
+          # Pod logs use a long-lived HTTP response when follow=true. Keep
+          # the edge hop open for the same duration as the sidecar hop.
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
           proxy_buffering off;
         }
 

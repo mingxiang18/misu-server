@@ -7,8 +7,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TMP_DIR="$(mktemp -d /tmp/misu-ops-nginx-container.XXXXXX)"
 MOCK_LOG="${TMP_DIR}/mock.log"
 CONTAINER="misu-ops-nginx-test-$$"
+MAIN_CONTAINER="misu-server-nginx-test-$$"
 NGINX_PORT="${OPS_NGINX_TEST_PORT:-18081}"
-trap 'docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true; kill "${MOCK_PID:-0}" >/dev/null 2>&1 || true; rm -rf "${TMP_DIR}"' EXIT
+MAIN_NGINX_PORT="${OPS_MAIN_NGINX_TEST_PORT:-18082}"
+trap 'docker rm -f "${MAIN_CONTAINER}" "${CONTAINER}" >/dev/null 2>&1 || true; kill "${MOCK_PID:-0}" >/dev/null 2>&1 || true; rm -rf "${TMP_DIR}"' EXIT
 
 docker info >/dev/null
 OPS_MOCK_LOG="${MOCK_LOG}" python3 "${ROOT_DIR}/scripts/deploy/tests/mock-ops-upstreams.py" &
@@ -27,8 +29,19 @@ template = template.gsub('${OPS_PROXY_SHARED_SECRET}', 'test-secret')
 File.write(destination, template)
 RB
 
+ruby - "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml" "${TMP_DIR}/main-nginx.conf" "${NGINX_PORT}" <<'RB'
+require 'yaml'
+source, destination, sidecar_port = ARGV
+config = YAML.load_stream(File.read(source)).first.dig('data', 'nginx.conf')
+raise 'missing main nginx config' unless config
+config = config.sub('server misu-ops:30264;', "server host.docker.internal:#{sidecar_port};")
+File.write(destination, config)
+RB
+
 docker run --rm -d --name "${CONTAINER}" --add-host host.docker.internal:host-gateway -p "${NGINX_PORT}:8080" \
   -v "${TMP_DIR}/nginx.conf:/etc/nginx/nginx.conf:ro" nginx:1.27-alpine nginx -g 'daemon off;' >/dev/null
+docker run --rm -d --name "${MAIN_CONTAINER}" --add-host host.docker.internal:host-gateway -p "${MAIN_NGINX_PORT}:30110" \
+  -v "${TMP_DIR}/main-nginx.conf:/etc/nginx/nginx.conf:ro" nginx:1.27-alpine nginx -g 'daemon off;' >/dev/null
 for _ in {1..30}; do
   if curl -sS -o /dev/null -H 'Host: api.misu.chat' "http://127.0.0.1:${NGINX_PORT}/_ops/healthz"; then
     break
@@ -58,6 +71,13 @@ rg -q 'HEADLAMP_UPSTREAM.*user=admin groups= group= email= id_token=' "${TMP_DIR
 code=$(curl -sS -o "${TMP_DIR}/headlamp-token" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=headlamp-session' "http://127.0.0.1:${NGINX_PORT}/ops/headlamp/c/main/token")
 [[ "${code}" == 200 ]]
 rg -q 'HEADLAMP_UPSTREAM path=/ops/headlamp/c/main/token.*user=admin' "${TMP_DIR}/headlamp-token"
+code=$(curl --no-buffer -sS -o "${TMP_DIR}/headlamp-log" -w '%{http_code}' -H 'Host: api.misu.chat' \
+  -H 'Cookie: MISU_OPS_SESSION=headlamp-session' \
+  "http://127.0.0.1:${MAIN_NGINX_PORT}/ops/headlamp/clusters/main/api/v1/namespaces/default/pods/demo/log?container=app&follow=true")
+[[ "${code}" == 200 ]]
+rg -q '^log-line-1$' "${TMP_DIR}/headlamp-log"
+rg -q '^log-line-2$' "${TMP_DIR}/headlamp-log"
+rg -q 'HEADLAMP_LOG_STREAM path=/ops/headlamp/clusters/main/api/v1/namespaces/default/pods/demo/log\?container=app&follow=true' "${MOCK_LOG}"
 code=$(curl -sS -D "${TMP_DIR}/exchange-headers" -o "${TMP_DIR}/exchange" -w '%{http_code}' -X POST -H 'Host: api.misu.chat' \
   -H 'Origin: https://server.misu.chat' -H 'Forwarded: for=203.0.113.9' \
   -H 'X-Forwarded-For: 203.0.113.9' -H 'X-Real-IP: 203.0.113.9' \

@@ -102,7 +102,7 @@ scripts/deploy/release.sh --rollback <UTC备份时间戳>
 
 sidecar 在转发上游控制台时会清除主站 JWT Cookie 和 Authorization，只保留经过 Java 鉴权后返回的上游 Cookie/Authorization。两个控制台使用同名但不同 Path 的 `MISU_OPS_SESSION`，可在同一 Host 并存。
 
-sidecar 的 HTTP `auth_request` 由 Java 服务返回 `X-Ops-Upstream-Cookie` 和 `X-Ops-Upstream-Authorization`，Nginx 只把这两个已清洗的值发给 Nacos/Headlamp；控制台 WebSocket 进入 Java `/ops/ws/console/{target}` bridge，并把原始上游 URI 作为内部请求头传递。Nginx 不再用正则猜测或删除 Cookie，因此 Headlamp 自己的 Bearer 会被保留。控制台响应会追加 `Content-Security-Policy: frame-ancestors https://server.misu.chat`，并隐藏上游的 `X-Frame-Options` 和冲突 CSP，确保主站 iframe 可加载。
+sidecar 的 HTTP `auth_request` 由 Java 服务返回 `X-Ops-Upstream-Cookie` 和 `X-Ops-Upstream-Authorization`，Nginx 只把这两个已清洗的值发给 Nacos/Headlamp；控制台 WebSocket 进入 Java `/ops/ws/console/{target}` bridge，并把原始上游 URI 作为内部请求头传递。Nginx 不再用正则猜测或删除 Cookie，因此 Headlamp 自己的 Bearer 会被保留。控制台响应会追加 `Content-Security-Policy: frame-ancestors https://server.misu.chat`，并隐藏上游的 `X-Frame-Options` 和冲突 CSP，确保主站 iframe 可加载。Headlamp 的 Pod 日志是带 `follow=true` 的长生命周期 HTTP 响应；主站 Nginx 与 sidecar 均关闭响应缓冲并将读写超时设为 3600 秒，避免边缘默认 60 秒超时截断空闲日志流。
 
 ## 生产验收
 

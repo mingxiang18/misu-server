@@ -3,6 +3,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 import threading
+import time
 
 LOG = os.environ.get("OPS_MOCK_LOG", "/tmp/misu-ops-mock.log")
 
@@ -27,6 +28,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         role = self.server.role
+        if role == "headlamp" and "/pods/demo/log" in self.path:
+            self.append("HEADLAMP_LOG_STREAM path=%s" % self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(b"log-line-1\n")
+            self.wfile.flush()
+            time.sleep(1)
+            self.wfile.write(b"log-line-2\n")
+            self.wfile.flush()
+            return
         if role == "backend":
             if self.path == "/ops/internal/health":
                 self.write(200, "health-ok")
