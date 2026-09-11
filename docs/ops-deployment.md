@@ -7,11 +7,13 @@
 
 两个控制台共用主站 Host，但会话 Cookie 名称相同、SameSite=None、Secure、HttpOnly，Path 分别为 `/nacos/` 和 `/ops/headlamp/`；主站统一 revoke 流程会撤销运维会话并按两个目标 Path 删除 Cookie。仓库没有外部边缘入口配置，因此 DNS、证书和到 Gateway 的边缘路由仍由生产入口维护。
 
+Headlamp 的 `kuboard/headlamp` Service 通过 `headlamp-service-clusterip-patch.json` 收回为 `ClusterIP`，并原子移除旧的 `nodePort: 30087`；patch 不改 Service 名称、selector、port 或 targetPort。`apply-headlamp-base-url.sh` 先应用 Service patch，再应用 Headlamp Deployment patch。旧的 `10.8.0.26:30087` 入口在应用该 patch 后关闭，浏览器唯一入口是经过 ADMIN `auth_request` 的 `https://server.misu.chat/ops/headlamp/`。
+
 exchange 响应同时过期旧版 `Path=/` 的 `MISU_OPS_SESSION`，避免升级前遗留的根路径 Cookie 与目标路径 Cookie 同时发送并触发重复凭据拒绝。它不影响主站登录 Cookie。
 
 交换入口是 `/nacos/_ops/exchange` 与 `/ops/headlamp/_ops/exchange`。sidecar 将固定的 `X-Ops-Target` 和 `X-Ops-Proxy-Key` 仅从 loopback 转给 Java；Java 先校验 sidecar、Host 与目标 URL，再消费 30 秒一次性目标票据。交换不依赖浏览器 `Origin`，而发票接口仍要求主站 Origin 与 ADMIN JWT。
 
-边缘入口必须能访问集群网络中的 Service（例如集群内 Ingress、LoadBalancer/VIP 或现有 NodePort）。公网边缘 Nginx 不能直接把 `*.svc.cluster.local` 当作公网 DNS 解析；应先转发到一个集群可达的入口，再由入口转到 `misu-ops` 的 ClusterIP。转发时保留 Host，否则 sidecar 的默认虚拟主机会返回 421：
+边缘入口必须能访问集群网络中的 Service（例如集群内 Ingress 或 LoadBalancer/VIP）。公网边缘 Nginx 不能直接把 `*.svc.cluster.local` 当作公网 DNS 解析；应先转发到一个集群可达的入口，再由入口转到 `misu-ops` 的 ClusterIP。转发时保留 Host，否则 sidecar 的默认虚拟主机会返回 421：
 
 ```nginx
 upstream misu_ops_service {
@@ -88,7 +90,7 @@ kubectl -n misu-server create secret generic misu-ops-nacos-auth \
 
 Nacos 2.5.0 在当前生产配置中已关闭认证，sidecar 保持上游原生 `/nacos/` 响应，不做 HTML/JSON/JS 内容替换；未来配置服务端认证时，Java 仍可按 ops session 使用只读 Secret 获取短时 token，并只通过内部 `Authorization` 注入。浏览器不会得到 Nacos 用户名、密码或 token。Headlamp 使用 `-in-cluster` 加官方 `-proxy-auth=true`，由 sidecar 将 Java 已校验的 ADMIN 用户名写入 `X-Forwarded-User`，Headlamp 使用自身 ServiceAccount 的 RBAC 访问 Kubernetes API，因此管理员无需再次输入 Kubernetes token。官方 v0.43.0 release 首次加入 proxy-auth；仓库中的 `headlamp-base-url-patch.yaml` 已将镜像固定为官方 `ghcr.io/headlamp-k8s/headlamp:v0.45.0@sha256:db3f0e0fc58d358d41daa3fe7fc852437552c7ee873c3645470f7b86a8e0db49`，并固定 base URL 为 `/ops/headlamp`、更新探针路径。应用 patch 后须确认该 Deployment 的 ServiceAccount/RBAC 与现网一致。
 
-启用 Headlamp 的 proxy-auth 后，现有 NodePort 清单仍保留，但必须在生产网络边界限制该 NodePort，禁止未鉴权客户端直接访问 Headlamp Pod；sidecar 通过 kuboard Service 的集群内地址访问，不依赖 NodePort。v0.45.0 包含 proxy-auth 之后的常规功能和安全修复，升级会重启 Headlamp Pod，需按现有 RBAC、探针和页面/WS 验收流程灰度确认。应用 patch 前先完成该防火墙/NetworkPolicy 限制，再从受控网络验证 NodePort 不可绕过代理、`server.misu.chat/ops/headlamp/` 可正常进入，并记录 Deployment 镜像摘要与 ServiceAccount/RBAC。
+启用 Headlamp 的 proxy-auth 后，先应用 Service patch 收回旧的 NodePort；sidecar 通过 kuboard Service 的集群内地址访问。v0.45.0 包含 proxy-auth 之后的常规功能和安全修复，升级会重启 Headlamp Pod，需按现有 RBAC、探针和页面/WS 验收流程灰度确认。应用 patch 后确认旧 `10.8.0.26:30087` 无法访问、`server.misu.chat/ops/headlamp/` 仍经 ADMIN `auth_request` 正常进入，并记录 Deployment 镜像摘要与 ServiceAccount/RBAC。
 
 常用发布命令：
 

@@ -2,6 +2,8 @@
 
 本记录只保留命令摘要、资源名、状态、时间和短标识，不记录密钥、令牌、Cookie、票据或密码。
 
+本记录中的 NodePort `30087` 是收回前的历史验收事实；当前仓库通过 `headlamp-service-clusterip-patch.json` 将 `kuboard/headlamp` 收回为 ClusterIP，浏览器入口统一为 `https://server.misu.chat/ops/headlamp/` 并经过 ADMIN `auth_request`。
+
 ## 变更时间
 
 - 记录时间：2026-09-10T19:18:00+08:00（本机）

@@ -129,6 +129,21 @@ if rg -q 'c9754bae|headlamp-k8s/headlamp:latest' "${ROOT_DIR}/scripts/deploy/k8s
   echo 'Headlamp patch must not use the old v0.42 digest or a floating tag' >&2
   exit 1
 fi
+HEADLAMP_SERVICE_PATCH="${ROOT_DIR}/scripts/deploy/k8s/misu-server/headlamp-service-clusterip-patch.json"
+ruby -rjson -e '
+  patch = JSON.parse(File.read(ARGV.fetch(0)))
+  expected = [
+    ["test", "/metadata/name", "headlamp"],
+    ["test", "/spec/type", "NodePort"],
+    ["test", "/spec/ports/0/nodePort", 30087],
+    ["replace", "/spec/type", "ClusterIP"],
+    ["remove", "/spec/ports/0/nodePort", nil]
+  ]
+  actual = patch.map { |op| [op.fetch("op"), op.fetch("path"), op["value"]] }
+  abort "unexpected Headlamp Service patch" unless actual == expected
+  puts "Headlamp Service patch removes NodePort 30087 and keeps selectors/ports: PASS"
+' "${HEADLAMP_SERVICE_PATCH}"
+rg -q 'headlamp-service-clusterip-patch\.json' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/apply-headlamp-base-url.sh"
 rg -q 'proxy_set_header X-Forwarded-User \$ops_headlamp_identity' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header X-Forwarded-Groups ""' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header X-Forwarded-Group ""' "${TMP_DIR}/normal-nginx.yaml"

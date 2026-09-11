@@ -1,0 +1,7 @@
+[
+  {"op": "test", "path": "/metadata/name", "value": "headlamp"},
+  {"op": "test", "path": "/spec/type", "value": "NodePort"},
+  {"op": "test", "path": "/spec/ports/0/nodePort", "value": 30087},
+  {"op": "replace", "path": "/spec/type", "value": "ClusterIP"},
+  {"op": "remove", "path": "/spec/ports/0/nodePort"}
+]
