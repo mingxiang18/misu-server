@@ -96,6 +96,13 @@ class Handler(BaseHTTPRequestHandler):
             if any(self.headers.get(header, "") for header in
                    ("Forwarded", "X-Forwarded-For", "X-Real-IP", "X-Forwarded-Port")):
                 self.write(403, "proxy-remote-address-rewritten")
+            elif "ticket=valid" in body:
+                self.write(303, headers={
+                    "Location": "/nacos/",
+                    "Set-Cookie": "MISU_OPS_SESSION=nacos-session; Path=/nacos/; HttpOnly; Secure; SameSite=Lax",
+                    "X-Frame-Options": "DENY",
+                    "Content-Security-Policy": "frame-ancestors https://evil.example",
+                })
             else:
                 self.write(401, "invalid-ticket")
             return

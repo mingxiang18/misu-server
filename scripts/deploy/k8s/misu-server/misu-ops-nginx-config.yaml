@@ -127,6 +127,8 @@ data:
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
           proxy_set_header Cookie "";
           proxy_set_header Authorization "";
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
         }
         location = /ops/headlamp/_ops/exchange {
           proxy_pass http://misu_ops_backend/ops/api/console-sessions/exchange;
@@ -142,6 +144,8 @@ data:
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
           proxy_set_header Cookie "";
           proxy_set_header Authorization "";
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
         }
 
         location = /nacos { return 308 /nacos/; }
@@ -172,6 +176,8 @@ data:
           proxy_set_header Cookie $ops_upstream_cookie;
           proxy_hide_header Set-Cookie;
           proxy_hide_header Authorization;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
           proxy_read_timeout 3600s;
           proxy_send_timeout 3600s;
           proxy_buffering off;
@@ -203,6 +209,8 @@ data:
           proxy_set_header X-Ops-Upstream-Authorization "";
           proxy_hide_header Set-Cookie;
           proxy_hide_header Authorization;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
           proxy_read_timeout 3600s;
           proxy_send_timeout 3600s;
           proxy_buffering off;
@@ -236,6 +244,8 @@ data:
           proxy_set_header X-Ops-Upstream-Authorization $ops_upstream_authorization;
           proxy_hide_header Set-Cookie;
           proxy_hide_header Authorization;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
           proxy_read_timeout 3600s;
           proxy_send_timeout 3600s;
           proxy_buffering off;
