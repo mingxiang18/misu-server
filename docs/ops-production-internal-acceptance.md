@@ -12,6 +12,7 @@
 - Spring Security 默认密码日志修复发布：`fb625512d99c12ed7f4e4b06f620ca332fe7511c`
 - 交换入口修复发布：`50e1b2a0bfb7f5d0992854727d17415c774db166`（sidecar 信任头、Host 和单次目标票据负责交换授权）
 - Gateway 转发头修复发布：`d0c09109e2948a8d376420823e2d6ae0944ce0e1`（包含 `50e1b2a`、`1730861`）
+- 控制台 iframe 响应头修复：`28797c846fead2b3fde10a6e09eac12616becfca`（config-only 发布，保留 d0c0910 Java 镜像）
 - 生产回滚点：Kubernetes 备份 `/root/backups/20260910T100559Z/k8s`；`misu-ops` 修复备份 `/root/backups/20260910T111606Z/k8s`；前端备份 `/root/backups/20260910T111035Z/html`；Nacos 备份 `/root/backups/20260910T100842Z/nacos/misu-gateway-prod.yml`
 - 本次 `misu-ops` 发布回滚点：`/root/backups/20260910T121744Z/k8s`（另有发布前资源快照 `/root/backups/20260910T121719Z/k8s-ops-sso`）
 - 本次日志修复发布回滚点：`/root/backups/20260910T165319Z/k8s`（发布前资源快照 `/root/backups/20260910T165308Z/k8s-ops-logfix`）
@@ -31,6 +32,7 @@
 | 3c Headlamp base URL | PASS | `headlamp` rollout 1/1；保留 `-in-cluster`，设置 `/headlamp/plugins` 和 `/ops/headlamp`；探针 4466、Service NodePort 30087、`headlamp-admin:cluster-admin` 保持。 |
 | 3d Gateway 路由 | PASS | Nacos prod 路由 console HTTP/WS 各 1 条、`misu-ops-api` 1 条；仓库实际挂载 ConfigMap 同步 console HTTP/WS 路由；Gateway rollout 1/1。 |
 | 3e d0c0910 交换修复 | PASS | 仅重发 misu-ops；Gateway/Headlamp 保持现状。公网两端 exchange 对无效票据均 HTTP 401，Pod 内 `nginx -t` 成功；Deployment 1/1、双容器 Ready、重启 0。 |
+| 3f 28797c8 iframe 响应头 | PASS | config-only 备份 `/root/backups/20260911T051051Z/k8s`；生效 ConfigMap `misu-ops-nginx-config-cfg-28797c8-20260911t051051z`；Java 镜像保持 d0c0910；Deployment 1/1、双容器 Ready、重启 0。 |
 
 ## 已执行的内部检查
 
@@ -64,6 +66,7 @@
 - `50e1b2a` 公网交换验收失败：Nacos 与 Headlamp 交换 POST 均 HTTP 403；同一新 Pod 本地 Nginx 对无效占位票据返回 HTTP 401，故按门槛仅回滚 misu-ops。回滚至镜像 `5430c92`、ConfigMap `misu-ops-nginx-config-5430c92`，Deployment 1/1、双容器 Ready、重启 0；Gateway、Headlamp 和其他资源未回滚。
 - `d0c0910` 最终重发：镜像 manifest digest 前缀 `24b487676f5d`；备份 `/root/backups/20260911T050033Z/k8s`；ConfigMap `misu-ops-nginx-config-d0c0910`；Deployment 1/1、双容器 Ready、重启 0；Pod 内 `nginx -t` 成功。公网 Nacos/Headlamp exchange 对无效票据均 HTTP 401（无 Origin 与允许 Origin 均相同），内部健康 HTTP 200、未知 Host HTTP 421、未知路径 HTTP 404。
 - `d0c0910` 发布后匿名回归：`/nacos/`、`/ops/headlamp/`、`/ops/api/endpoints` 和 SSH API 均 HTTP 401；公网未知路径 HTTP 404；近 10 分钟 Nginx/ops 日志未命中 authorization、cookie、ticket、password、secret 或 generated security password 模式。
+- `28797c8` 发布后：两端无效 exchange 均 HTTP 401，响应无 `X-Frame-Options`，CSP 含 `frame-ancestors https://server.misu.chat`；匿名 Nacos/Headlamp/API/SSH 均 HTTP 401，公网未知路径 HTTP 404，sidecar 内未知 Host HTTP 421；内部健康 HTTP 200；近 10 分钟 Nginx/ops 日志敏感模式计数均为 0。
 - 主节点无残留 `kubectl port-forward`、release、Docker build/push 进程。
 - 前端备份目录 `/root/backups/20260910T110417Z/html` 存在（73 个文件）；live `index.html` 已更新，ops 页面标记可见。
 - 回滚后集群内 `server.misu.chat` 首页 HTTP 200，静态 JS 资源 HTTP 200；回滚未触碰 `misu-ops` 或 gateway。
