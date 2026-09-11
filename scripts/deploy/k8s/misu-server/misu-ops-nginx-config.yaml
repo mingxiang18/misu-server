@@ -55,7 +55,7 @@ data:
 
       map $http_upgrade $ops_is_websocket {
         default 0;
-        websocket 1;
+        ~*^websocket$ 1;
       }
 
       map $ops_original_uri $ops_console_upstream {

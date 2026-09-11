@@ -78,6 +78,41 @@ code=$(curl --no-buffer -sS -o "${TMP_DIR}/headlamp-log" -w '%{http_code}' -H 'H
 rg -q '^log-line-1$' "${TMP_DIR}/headlamp-log"
 rg -q '^log-line-2$' "${TMP_DIR}/headlamp-log"
 rg -q 'HEADLAMP_LOG_STREAM path=/ops/headlamp/clusters/main/api/v1/namespaces/default/pods/demo/log\?container=app&follow=true' "${MOCK_LOG}"
+
+# Headlamp's /wsMultiplexer carries live resource/log streams over a real
+# WebSocket. Exercise both Nginx hops and use mixed-case Upgrade to prove the
+# sidecar dispatch is case-insensitive before the Java bridge receives it.
+python3 - "${MAIN_NGINX_PORT}" <<'PY'
+import socket
+import sys
+
+port = int(sys.argv[1])
+request = (
+    "GET /ops/headlamp/wsMultiplexer HTTP/1.1\r\n"
+    "Host: api.misu.chat\r\n"
+    "Cookie: MISU_OPS_SESSION=headlamp-session\r\n"
+    "Origin: https://server.misu.chat\r\n"
+    "Upgrade: WebSocket\r\n"
+    "Connection: Upgrade\r\n"
+    "Sec-WebSocket-Version: 13\r\n"
+    "Sec-WebSocket-Key: dGVzdC1vcHMtd3MtaGFuZHNoYWtl\r\n"
+    "\r\n"
+).encode("ascii")
+with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+    client.sendall(request)
+    response = b""
+    while b"\r\n\r\n" not in response:
+        chunk = client.recv(4096)
+        if not chunk:
+            break
+        response += chunk
+    headers = response.decode("latin1")
+    assert headers.startswith("HTTP/1.1 101 "), headers
+    normalized = headers.lower()
+    assert "\r\nupgrade: websocket\r\n" in normalized, headers
+    assert "\r\nconnection: upgrade\r\n" in normalized, headers
+PY
+rg -q 'WS_BACKEND path=/ops/ws/console/headlamp original=/ops/headlamp/wsMultiplexer target=headlamp cookie=MISU_OPS_SESSION=headlamp-session upstream-cookie=UPSTREAM_TOKEN=clean upstream-auth=Bearer upstream' "${MOCK_LOG}"
 code=$(curl -sS -D "${TMP_DIR}/exchange-headers" -o "${TMP_DIR}/exchange" -w '%{http_code}' -X POST -H 'Host: api.misu.chat' \
   -H 'Origin: https://server.misu.chat' -H 'Forwarded: for=203.0.113.9' \
   -H 'X-Forwarded-For: 203.0.113.9' -H 'X-Real-IP: 203.0.113.9' \
