@@ -47,7 +47,7 @@ rg -q 'HEADLAMP_UPSTREAM path=/ops/headlamp/c/main/pods' "${TMP_DIR}/headlamp"
 code=$(curl -sS -o "${TMP_DIR}/exchange" -w '%{http_code}' -X POST -H 'Host: api.misu.chat' \
   -H 'Origin: https://server.misu.chat' -H 'Forwarded: for=203.0.113.9' \
   -H 'X-Forwarded-For: 203.0.113.9' -H 'X-Real-IP: 203.0.113.9' \
-  -d 'ticket=invalid' http://127.0.0.1:18080/nacos/_ops/exchange)
+  -d 'ticket=invalid' "http://127.0.0.1:${NGINX_PORT}/nacos/_ops/exchange")
 [[ "${code}" == 401 ]]
 rg -q 'invalid-ticket' "${TMP_DIR}/exchange"
 if rg -q 'EXCHANGE headers=.*203\.0\.113\.9' "${MOCK_LOG}"; then

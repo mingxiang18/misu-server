@@ -93,7 +93,8 @@ class Handler(BaseHTTPRequestHandler):
             forwarded = ",".join(self.headers.get(header, "") for header in
                                   ("Forwarded", "X-Forwarded-For", "X-Real-IP", "X-Forwarded-Port"))
             self.append("EXCHANGE headers=%s" % forwarded)
-            if forwarded:
+            if any(self.headers.get(header, "") for header in
+                   ("Forwarded", "X-Forwarded-For", "X-Real-IP", "X-Forwarded-Port")):
                 self.write(403, "proxy-remote-address-rewritten")
             else:
                 self.write(401, "invalid-ticket")
