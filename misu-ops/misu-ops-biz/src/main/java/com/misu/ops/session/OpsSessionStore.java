@@ -9,6 +9,7 @@ import com.misu.security.dto.LoginUser;
 import org.springframework.stereotype.Component;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.beans.factory.annotation.Autowired;
+import lombok.extern.slf4j.Slf4j;
 
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -19,6 +20,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
+@Slf4j
 public class OpsSessionStore {
 
     private final OpsProperties properties;
@@ -102,14 +104,27 @@ public class OpsSessionStore {
     }
 
     public ConsoleSession requireConsoleSession(String sessionId, String expectedTarget) {
-        if (sessionId == null || sessionId.isBlank()) {
+        boolean cookiePresent = sessionId != null && !sessionId.isBlank();
+        if (!cookiePresent) {
+            log.warn("运维控制台会话校验失败: cookiePresent=false sessionFound=false targetMatch=false activeSessionCount={}",
+                    consoleSessions.size());
             throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维会话无效或已过期");
         }
         ConsoleSession session = consoleSessions.get(sessionId);
-        if (session == null || !session.target().id().equals(expectedTarget)) {
+        boolean sessionFound = session != null;
+        boolean targetMatch = sessionFound && session.target().id().equals(expectedTarget);
+        if (!sessionFound || !targetMatch) {
+            log.warn("运维控制台会话校验失败: cookiePresent=true sessionFound={} targetMatch={} activeSessionCount={}",
+                    sessionFound, targetMatch, consoleSessions.size());
             throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维会话无效或已过期");
         }
-        validateAndTouch(session, consoleSessions);
+        try {
+            validateAndTouch(session, consoleSessions);
+        } catch (RuntimeException ex) {
+            log.warn("运维控制台会话校验失败: cookiePresent=true sessionFound=true targetMatch=true activeSessionCount={}",
+                    consoleSessions.size());
+            throw ex;
+        }
         return session;
     }
 

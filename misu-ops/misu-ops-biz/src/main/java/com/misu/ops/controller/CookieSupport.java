@@ -18,6 +18,13 @@ public final class CookieSupport {
     }
 
     public static String read(HttpServletRequest request, String name) {
+        // A proxy forwards the raw Cookie header. Prefer it over the servlet
+        // convenience parser so duplicate host/domain cookies keep the same
+        // fail-closed semantics in every container.
+        String header = header(request);
+        if (header != null) {
+            return read(header, name);
+        }
         Cookie[] cookies = request.getCookies();
         if (cookies == null) {
             return null;

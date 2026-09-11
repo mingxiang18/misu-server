@@ -1,6 +1,7 @@
 package com.misu.ops.controller;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.List;
 
@@ -24,6 +25,14 @@ class CookieSupportTest {
                 "MISU_OPS_SESSION"));
         assertEquals("same", CookieSupport.read("MISU_OPS_SESSION=same; MISU_OPS_SESSION=same",
                 "MISU_OPS_SESSION"));
+    }
+
+    @Test
+    void readsRawProxyCookieHeaderWhenServletCookiesAreUnavailable() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Cookie", "MISU_OPS_SESSION=session-from-proxy");
+
+        assertEquals("session-from-proxy", CookieSupport.read(request, "MISU_OPS_SESSION"));
     }
 
     @Test
