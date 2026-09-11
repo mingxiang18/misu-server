@@ -1,11 +1,11 @@
 # 运维中心部署说明
 
-`misu-ops` 是单副本 Deployment，Java 后端只监听 Pod 内的 `127.0.0.1:30264`，Nginx sidecar 监听 `8080`，Service `misu-ops` 只提供 ClusterIP `30264`。两个控制台通过固定 Host 路由：
+`misu-ops` 是单副本 Deployment，Java 后端只监听 Pod 内的 `127.0.0.1:30264`，Nginx sidecar 监听 `8080`，Service `misu-ops` 只提供 ClusterIP `30264`。现有 Gateway 保留 `Host=api.misu.chat`，把 `/nacos/**`、`/ops/headlamp/**`、`/ops/api/**` 和 `/ops/ws/**` 转给这个 Service；sidecar 按路径固定选择 Nacos 或 Headlamp 上游：
 
-- `ops-nacos.misu.chat` → `nacos.misu-server.svc.cluster.local:8848`
-- `ops-k8s.misu.chat` → `headlamp.kuboard.svc.cluster.local:80`
+- `https://api.misu.chat/nacos/` → `nacos.misu-server.svc.cluster.local:8848`
+- `https://api.misu.chat/ops/headlamp/` → `headlamp.kuboard.svc.cluster.local:80`
 
-现有边缘 Nginx/Ingress 需要将上述两个 HTTPS Host 转发到 `misu-ops.misu-server.svc.cluster.local:30264`，并把现有 API 网关的 `/ops/**` 路由到同一 Service。仓库没有边缘入口配置，因此 DNS、证书和边缘路由仍由生产入口维护。
+两个控制台共用主站 Host，但会话 Cookie 名称相同、Path 分别为 `/nacos/` 和 `/ops/headlamp/`。仓库没有外部边缘入口配置，因此 DNS、证书和到 Gateway 的边缘路由仍由生产入口维护。
 
 边缘入口必须能访问集群网络中的 Service（例如集群内 Ingress、LoadBalancer/VIP 或现有 NodePort）。公网边缘 Nginx 不能直接把 `*.svc.cluster.local` 当作公网 DNS 解析；应先转发到一个集群可达的入口，再由入口转到 `misu-ops` 的 ClusterIP。转发时保留 Host，否则 sidecar 的默认虚拟主机会返回 421：
 
@@ -22,14 +22,14 @@ map $http_upgrade $connection_upgrade {
 
 server {
     listen 443 ssl;
-    server_name ops-nacos.misu.chat ops-k8s.misu.chat;
+    server_name api.misu.chat;
     access_log off;                         # no ticket/query in edge logs
     error_log /var/log/nginx/misu-ops.error.log crit;
 
     location / {
         proxy_pass http://misu_ops_service;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;                 # sidecar allowlist
+        proxy_set_header Host api.misu.chat;          # sidecar fixed host
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header Upgrade $http_upgrade;
@@ -39,13 +39,13 @@ server {
 }
 ```
 
-如果 HTTPS 边缘由 Kubernetes Ingress/Gateway 承载，给两个 Host 建立到 Service `misu-ops:30264` 的 HTTP 路由，并配置 equivalent 的 `PreserveHostHeader`。现有 API 网关也要把 `/ops/api/**` 和 `/ops/ws/ssh/**` 原样转到同一 Service；Spring Cloud Gateway 的路由形状如下，`PreserveHostHeader` 使 sidecar 命中 `api.misu.chat`：
+如果 HTTPS 边缘由 Kubernetes Ingress/Gateway 承载，给 `api.misu.chat` 建立到现有 Gateway 的 HTTPS 路由。Gateway 内的路由形状如下，`PreserveHostHeader` 使 sidecar 按路径选择上游：
 
 ```yaml
-- id: misu-ops-api
-  uri: http://misu-ops.misu-server.svc.cluster.local:30264
+- id: misu-ops-console
+  uri: http://misu-ops:30264
   predicates:
-    - Path=/ops/api/**,/ops/ws/ssh/**
+    - Path=/nacos/**,/ops/headlamp/**,/ops/api/**
   filters:
     - PreserveHostHeader
 ```
@@ -82,7 +82,7 @@ kubectl -n misu-server create secret generic misu-ops-nacos-auth \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Nacos 2.5.0 legacy console 会根据 `/nacos/v1/console/server/state` 的 `login_page_enabled` 决定是否显示登录页；sidecar 只对已通过 ADMIN 运维 session 鉴权的该响应改为 `false`。所有 Nacos API/WS 请求仍由 Java session 校验和服务端短时 `Authorization` 注入保护。浏览器不会得到 Nacos 用户名、密码或 token；Headlamp 继续依赖其 `-in-cluster` 直接进入行为。
+Nacos 2.5.0 在当前生产配置中已关闭认证，sidecar 保持上游原生 `/nacos/` 响应，不做 HTML/JSON/JS 内容替换；未来配置服务端认证时，Java 仍可按 ops session 使用只读 Secret 获取短时 token，并只通过内部 `Authorization` 注入。浏览器不会得到 Nacos 用户名、密码或 token。Headlamp 继续使用 `-in-cluster`，并通过仓库中的 `headlamp-base-url-patch.yaml` 将 base URL 固定为 `/ops/headlamp`；该 patch 同时更新探针路径。
 
 常用发布命令：
 
@@ -92,7 +92,7 @@ scripts/deploy/release.sh --config misu-ops
 scripts/deploy/release.sh --rollback <UTC备份时间戳>
 ```
 
-`ops-nacos` 和 `ops-k8s` 与主站继续处于 `.misu.chat` Cookie 信任边界内。sidecar 在转发上游控制台时会清除主站 JWT Cookie 和 Authorization，只保留上游自己的登录 Cookie；不要把这两个 Host 视作主站凭据的完全隔离边界。
+sidecar 在转发上游控制台时会清除主站 JWT Cookie 和 Authorization，只保留经过 Java 鉴权后返回的上游 Cookie/Authorization。两个控制台使用同名但不同 Path 的 `MISU_OPS_SESSION`，可在同一 Host 并存。
 
 sidecar 的 HTTP `auth_request` 由 Java 服务返回 `X-Ops-Upstream-Cookie` 和 `X-Ops-Upstream-Authorization`，Nginx 只把这两个已清洗的值发给 Nacos/Headlamp；控制台 WebSocket 进入 Java `/ops/ws/console/{target}` bridge，并把原始上游 URI 作为内部请求头传递。Nginx 不再用正则猜测或删除 Cookie，因此 Headlamp 自己的 Bearer 会被保留。控制台响应会追加 `Content-Security-Policy: frame-ancestors https://server.misu.chat`，同时保留上游已有的 CSP 指令。
 
@@ -105,9 +105,9 @@ kubectl -n misu-server get secret misu-ops-ssh misu-ops-config misu-account-sign
 kubectl -n misu-server get service misu-ops
 kubectl -n misu-server rollout status deployment/misu-ops --timeout=5m
 kubectl -n misu-server run ops-probe --rm -i --restart=Never --image=curlimages/curl:8.10.1 -- \
-  curl -fsS -H 'Host: ops-nacos.misu.chat' http://misu-ops:30264/_ops/healthz
+  curl -fsS -H 'Host: api.misu.chat' http://misu-ops:30264/_ops/healthz
 ```
 
-从真实 HTTPS 入口分别验证 `ops-nacos.misu.chat` 和 `ops-k8s.misu.chat`：未登录控制台页面应被 `auth_request` 拒绝，管理员登录后 Nacos/Headlamp 页面及其 API 请求应能通过；浏览器开发者工具应显示 WebSocket Upgrade 成功。再用未知 Host 请求 Service，应返回 `421`；请求 `/ops/internal/*` 不应从公网入口暴露。最后验证主站退出、管理员会话撤销和票据过期会关闭对应控制台连接，并记录真实状态码与日志时间。
+从真实 HTTPS 入口验证 `https://api.misu.chat/nacos/` 和 `https://api.misu.chat/ops/headlamp/`：未登录控制台页面应被 `auth_request` 拒绝，管理员登录后页面、资源/API 请求和 WebSocket Upgrade 应能通过。再用未知 Host 请求 Service，应返回 `421`；请求 `/ops/internal/*` 和目标路径下未知 `/_ops/*` 不应从公网入口暴露。最后验证主站退出、管理员会话撤销和票据过期会关闭对应控制台连接，并记录真实状态码与日志时间。
 
 配置代理变更使用 `scripts/deploy/release.sh --config misu-ops`，它生成带小写 `cfg-<git-sha>-<utc时间>` 的 ConfigMap，并从 live Deployment 导出实际镜像、环境变量和探针；主节点需要 `jq` 来清理 server fields，缺少时脚本会拒绝发布。回滚该时间戳时必须同时恢复 ConfigMap 和 Deployment 引用。正常 Java 发布使用提交短 SHA 作为 `OPS_CONFIG_TAG`，会先 apply 版本化 ConfigMap，再 apply Deployment。

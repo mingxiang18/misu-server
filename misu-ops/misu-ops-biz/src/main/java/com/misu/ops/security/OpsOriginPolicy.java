@@ -8,6 +8,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 @Component
 public class OpsOriginPolicy {
@@ -62,6 +64,36 @@ public class OpsOriginPolicy {
             }
         }
         throw new ServiceException(HttpStatus.FORBIDDEN, "控制台 Host 不受信任");
+    }
+
+    /**
+     * Resolve a console exchange target from the trusted sidecar header. A
+     * browser supplied target header is never accepted because only loopback
+     * requests carrying the shared secret may select a target this way.
+     */
+    public ConsoleTarget resolveConsoleTarget(HttpServletRequest request) {
+        String targetHeader = request.getHeader("X-Ops-Target");
+        if (targetHeader != null) {
+            if (!isLoopback(request.getRemoteAddr()) || !validProxySecret(request.getHeader("X-Ops-Proxy-Key"))) {
+                throw new ServiceException(HttpStatus.FORBIDDEN, "代理目标不受信任");
+            }
+            ConsoleTarget target = ConsoleTarget.parse(targetHeader);
+            requireConsoleHost(request.getHeader("Host"), target);
+            return target;
+        }
+        return resolveConsoleHost(request.getHeader("Host"));
+    }
+
+    private boolean validProxySecret(String supplied) {
+        String expected = properties.getProxySharedSecret();
+        return expected != null && !expected.isBlank() && supplied != null
+                && MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
+                supplied.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private boolean isLoopback(String address) {
+        return "127.0.0.1".equals(address) || "::1".equals(address)
+                || "0:0:0:0:0:0:0:1".equals(address);
     }
 
     private boolean sameOrigin(String left, String right) {

@@ -49,6 +49,9 @@ public class ProxyAuthController {
             throw new ServiceException(HttpStatus.UNAUTHORIZED, "代理授权失败");
         }
         String target = request.getHeader("X-Ops-Target");
+        if (!StringUtils.hasText(target)) {
+            target = targetFromOriginalUri(request.getHeader("X-Original-URI"));
+        }
         ConsoleTarget consoleTarget = ConsoleTarget.parse(target);
         String sessionId = CookieSupport.read(request, properties.getCookieName());
         OpsSessionStore.ConsoleSession session = sessions.requireConsoleSession(sessionId, consoleTarget.id());
@@ -88,6 +91,16 @@ public class ProxyAuthController {
     private boolean isSafeMethod(String method) {
         return "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)
                 || "OPTIONS".equalsIgnoreCase(method);
+    }
+
+    private String targetFromOriginalUri(String originalUri) {
+        if (originalUri != null && originalUri.startsWith("/nacos/")) {
+            return ConsoleTarget.NACOS.id();
+        }
+        if (originalUri != null && originalUri.startsWith("/ops/headlamp/")) {
+            return ConsoleTarget.HEADLAMP.id();
+        }
+        throw new ServiceException(HttpStatus.BAD_REQUEST, "控制台目标缺失");
     }
 
     private java.util.Set<String> blockedCookieNames() {

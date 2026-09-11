@@ -32,12 +32,12 @@ data:
         '' close;
       }
 
-      # Only these two console hosts are allowed to select an upstream. The
-      # default server below rejects every other Host with 421.
-      map $host $ops_console_target {
+      # Select the upstream from the original request path. The public Host is
+      # fixed to api.misu.chat and is preserved by Gateway.
+      map $ops_original_uri $ops_console_target {
         default "";
-        ops-nacos.misu.chat nacos;
-        ops-k8s.misu.chat headlamp;
+        ~^/nacos/ nacos;
+        ~^/ops/headlamp/ headlamp;
       }
 
       map $http_upgrade $ops_is_websocket {
@@ -45,10 +45,10 @@ data:
         websocket 1;
       }
 
-      map $ops_console_target $ops_console_upstream {
+      map $ops_original_uri $ops_console_upstream {
         default "";
-        nacos http://misu_ops_nacos;
-        headlamp http://misu_ops_headlamp;
+        ~^/nacos/ http://misu_ops_nacos;
+        ~^/ops/headlamp/ http://misu_ops_headlamp;
       }
 
       map $ops_is_websocket $ops_console_dispatch {
@@ -75,11 +75,11 @@ data:
 
       server {
         listen 8080;
-        server_name ops-nacos.misu.chat ops-k8s.misu.chat;
+        server_name api.misu.chat;
         add_header Content-Security-Policy "frame-ancestors https://server.misu.chat" always;
+        set $ops_original_uri $request_uri;
         # Keep the browser URI across the internal HTTP/WS dispatch so query
         # parameters reach the upstream but never appear in access logs.
-        set $ops_original_uri $request_uri;
 
         # 仅暴露精确健康路径；不通过此路径绕过控制台鉴权。
         location = /_ops/healthz {
@@ -109,52 +109,66 @@ data:
           proxy_set_header Authorization $http_authorization;
         }
 
-        location = /ops/api/console-sessions/exchange {
-          proxy_pass http://misu_ops_backend;
+        # Each exchange path is target-specific. The Java endpoint only
+        # accepts these target headers from the loopback sidecar.
+        location = /nacos/_ops/exchange {
+          proxy_pass http://misu_ops_backend/ops/api/console-sessions/exchange;
           proxy_http_version 1.1;
           proxy_set_header Host $host;
           proxy_set_header X-Forwarded-Host $host;
           proxy_set_header X-Forwarded-Proto https;
           proxy_set_header X-Real-IP $remote_addr;
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Ops-Target nacos;
+          proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
           proxy_set_header Cookie "";
+          proxy_set_header Authorization "";
         }
-
-        # 控制台 Host 不承载 Java REST API；SSH/API 只能从 api.misu.chat 进入。
-        location ^~ /ops/internal/ { return 404; }
-        location ^~ /ops/api/ { return 404; }
-        location ^~ /ops/ws/ { return 404; }
-        location ^~ /ops/ { return 404; }
-        location ^~ /ops { return 404; }
-
-        # Nacos 2.5.0's legacy console stores its login token in
-        # localStorage and routes to #/login when login_page_enabled is true.
-        # The server-side Authorization header above already authenticates
-        # every request, so bootstrap only this state response to disable the
-        # browser login route. No Nacos token or password is sent to the page.
-        location = /nacos/v1/console/server/state {
-          auth_request /_ops/auth;
-          auth_request_set $ops_upstream_cookie $upstream_http_x_ops_upstream_cookie;
-          auth_request_set $ops_upstream_authorization $upstream_http_x_ops_upstream_authorization;
-          proxy_pass http://misu_ops_nacos$ops_original_uri;
+        location = /ops/headlamp/_ops/exchange {
+          proxy_pass http://misu_ops_backend/ops/api/console-sessions/exchange;
           proxy_http_version 1.1;
           proxy_set_header Host $host;
           proxy_set_header X-Forwarded-Host $host;
           proxy_set_header X-Forwarded-Proto https;
-          proxy_set_header Authorization $ops_upstream_authorization;
-          proxy_set_header Cookie $ops_upstream_cookie;
-          proxy_set_header Accept-Encoding "";
-          proxy_buffering on;
-          sub_filter_types application/json;
-          sub_filter '"login_page_enabled":true' '"login_page_enabled":false';
-          sub_filter '"login_page_enabled": true' '"login_page_enabled": false';
-          sub_filter '"login_page_enabled":"true"' '"login_page_enabled":"false"';
-          sub_filter '"login_page_enabled": "true"' '"login_page_enabled": "false"';
-          sub_filter_once on;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Ops-Target headlamp;
+          proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header Cookie "";
+          proxy_set_header Authorization "";
         }
 
+        location = /nacos { return 308 /nacos/; }
+        location = /ops/headlamp { return 308 /ops/headlamp/; }
+
+        # Exchange is the only public _ops location.
+        location ^~ /nacos/_ops/ { return 404; }
+        location ^~ /ops/headlamp/_ops/ { return 404; }
+        location ^~ /ops/internal/ { return 404; }
+
         location / {
-          rewrite ^ $ops_console_dispatch last;
+          if ($ops_console_target = "") { return 404; }
+          if ($ops_is_websocket = 1) { rewrite ^ /_ops/ws last; }
+          auth_request /_ops/auth;
+          auth_request_set $ops_user $upstream_http_x_ops_user;
+          auth_request_set $ops_upstream_cookie $upstream_http_x_ops_upstream_cookie;
+          auth_request_set $ops_upstream_authorization $upstream_http_x_ops_upstream_authorization;
+          proxy_pass $ops_console_upstream$ops_original_uri;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header Upgrade "";
+          proxy_set_header Connection "";
+          proxy_set_header Authorization $ops_upstream_authorization;
+          proxy_set_header Cookie $ops_upstream_cookie;
+          proxy_hide_header Set-Cookie;
+          proxy_hide_header Authorization;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
         }
 
         location = /_ops/http {
@@ -181,6 +195,8 @@ data:
           proxy_set_header X-Ops-Proxy-Key "";
           proxy_set_header X-Ops-Upstream-Cookie "";
           proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_hide_header Set-Cookie;
+          proxy_hide_header Authorization;
           proxy_read_timeout 3600s;
           proxy_send_timeout 3600s;
           proxy_buffering off;
@@ -212,20 +228,15 @@ data:
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
           proxy_set_header X-Ops-Upstream-Cookie $ops_upstream_cookie;
           proxy_set_header X-Ops-Upstream-Authorization $ops_upstream_authorization;
+          proxy_hide_header Set-Cookie;
+          proxy_hide_header Authorization;
           proxy_read_timeout 3600s;
           proxy_send_timeout 3600s;
           proxy_buffering off;
         }
-      }
-
       # 主站 API 网关将 /ops/api/** 和 /ops/ws/** 路由到本 Service。
       # Java 自己校验 JWT/单次会话；这里仅禁止内部代理接口被外部访问。
-      server {
-        listen 8080;
-        server_name api.misu.chat;
-
-        location ^~ /ops/internal/ { return 404; }
-
+      # Java REST/SSH endpoints share the same api.misu.chat server above.
         location ^~ /ops/ws/ssh/ {
           access_log off;
           proxy_pass http://misu_ops_backend;
@@ -255,6 +266,5 @@ data:
           proxy_set_header Cookie "";
         }
 
-        location / { return 404; }
       }
     }

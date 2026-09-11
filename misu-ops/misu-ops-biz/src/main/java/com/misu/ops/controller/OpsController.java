@@ -94,13 +94,13 @@ public class OpsController {
         originPolicy.requireAllowedMainOrigin(request);
         // Resolve and validate the destination Host before consuming the
         // one-time ticket, then atomically consume/create under the store lock.
-        ConsoleTarget hostTarget = originPolicy.resolveConsoleHost(request.getHeader("Host"));
+        ConsoleTarget hostTarget = originPolicy.resolveConsoleTarget(request);
         OpsSessionStore.ConsoleSession session = sessions.exchangeConsoleSession(ticketToken, hostTarget);
         ResponseCookie cookie = ResponseCookie.from(properties.getCookieName(), session.id())
                 .httpOnly(true)
                 .secure(properties.isCookieSecure())
                 .sameSite("Lax")
-                .path("/")
+                .path(session.target().cookiePath())
                 .maxAge(properties.getSessionMaxSeconds())
                 .build();
         response.setHeader(HttpHeaders.SET_COOKIE, cookie.toString());
@@ -119,7 +119,7 @@ public class OpsController {
                 .httpOnly(true)
                 .secure(properties.isCookieSecure())
                 .sameSite("Lax")
-                .path("/")
+                .path(ConsoleTarget.NACOS.cookiePath())
                 .maxAge(0)
                 .build();
         response.setHeader(HttpHeaders.SET_COOKIE, cookie.toString());
@@ -165,13 +165,22 @@ public class OpsController {
         }
     }
 
-    private String exchangeUrl(ConsoleTarget target) {
+    String exchangeUrl(ConsoleTarget target) {
         String configured = target.url(properties);
         try {
             java.net.URI uri = java.net.URI.create(configured);
-            int port = uri.getPort();
-            String authority = uri.getHost() + (port > 0 ? ":" + port : "");
-            return uri.getScheme() + "://" + authority + "/ops/api/console-sessions/exchange";
+            if (uri.getScheme() == null || uri.getRawAuthority() == null || uri.getQuery() != null
+                    || uri.getFragment() != null) {
+                throw new IllegalArgumentException("console URL must be an absolute URL without query");
+            }
+            String path = uri.getRawPath();
+            if (path == null || path.isBlank()) {
+                path = "/";
+            }
+            if (!path.endsWith("/")) {
+                path += "/";
+            }
+            return uri.getScheme() + "://" + uri.getRawAuthority() + path + "_ops/exchange";
         } catch (IllegalArgumentException ex) {
             throw new com.misu.common.exception.ServiceException(
                     com.misu.common.constant.HttpStatus.ERROR, "控制台地址配置无效");

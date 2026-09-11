@@ -30,6 +30,23 @@ spring:
         locator:
           enabled: true
       routes:
+        # Keep the public api.misu.chat Host so the ops sidecar can select its
+        # fixed Nacos/Headlamp upstream from the request path.
+        - id: misu-ops-console-ws
+          uri: ws://misu-ops:30264
+          predicates:
+            - Path=/nacos/**,/ops/headlamp/**,/ops/ws/**
+            - Header=Upgrade, (?i)websocket
+          filters:
+            - PreserveHostHeader
+
+        - id: misu-ops-console
+          uri: http://misu-ops:30264
+          predicates:
+            - Path=/nacos/**,/ops/headlamp/**,/ops/api/**
+          filters:
+            - PreserveHostHeader
+
         - id: misu-account
           uri: lb://misu-account
           predicates:

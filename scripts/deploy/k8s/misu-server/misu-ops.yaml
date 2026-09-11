@@ -40,8 +40,8 @@ spec:
             - { name: OPS_BIND_ADDRESS, value: "127.0.0.1" }
             - { name: OPS_SERVER_PORT, value: "30264" }
             - { name: OPS_ACCOUNT_BASE_URL, value: "http://misu-account:30261/account" }
-            - { name: OPS_NACOS_URL, value: "https://ops-nacos.misu.chat/nacos/" }
-            - { name: OPS_HEADLAMP_URL, value: "https://ops-k8s.misu.chat/" }
+            - { name: OPS_NACOS_URL, value: "https://api.misu.chat/nacos/" }
+            - { name: OPS_HEADLAMP_URL, value: "https://api.misu.chat/ops/headlamp/" }
             - { name: OPS_NACOS_UPSTREAM_URL, value: "http://nacos.misu-server.svc.cluster.local:8848/nacos/" }
             # Read by Java only; never expose these values through HTTP or the
             # browser. Create misu-ops-nacos-auth outside the repository.
@@ -79,7 +79,7 @@ spec:
               path: /_ops/healthz
               port: 8080
               httpHeaders:
-                - { name: Host, value: ops-nacos.misu.chat }
+                - { name: Host, value: api.misu.chat }
             initialDelaySeconds: 20
             periodSeconds: 5
             failureThreshold: 30
@@ -88,7 +88,7 @@ spec:
               path: /_ops/healthz
               port: 8080
               httpHeaders:
-                - { name: Host, value: ops-nacos.misu.chat }
+                - { name: Host, value: api.misu.chat }
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
@@ -96,7 +96,7 @@ spec:
               path: /_ops/healthz
               port: 8080
               httpHeaders:
-                - { name: Host, value: ops-nacos.misu.chat }
+                - { name: Host, value: api.misu.chat }
             periodSeconds: 30
             failureThreshold: 5
           volumeMounts:
@@ -117,7 +117,7 @@ spec:
               path: /_ops/healthz
               port: 8080
               httpHeaders:
-                - { name: Host, value: ops-nacos.misu.chat }
+                - { name: Host, value: api.misu.chat }
             initialDelaySeconds: 20
             periodSeconds: 5
             failureThreshold: 30
@@ -126,7 +126,7 @@ spec:
               path: /_ops/healthz
               port: 8080
               httpHeaders:
-                - { name: Host, value: ops-nacos.misu.chat }
+                - { name: Host, value: api.misu.chat }
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
@@ -134,7 +134,7 @@ spec:
               path: /_ops/healthz
               port: 8080
               httpHeaders:
-                - { name: Host, value: ops-nacos.misu.chat }
+                - { name: Host, value: api.misu.chat }
             periodSeconds: 30
             failureThreshold: 5
           volumeMounts:

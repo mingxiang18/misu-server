@@ -26,7 +26,8 @@
 - [x] SSH 在 channel.connect 前取得流；页面在建连时关闭要释放资源；校验 UTF-8/emoji 跨读取边界输出。
 - [x] 完成有意义的测试和 Maven 打包，报告实际测试数及限制；不要只提供 mock 验证结论。
 - [x] 向部署子任务提供最终桥接路径、内部鉴权请求头及过滤后的响应头契约。
-- [x] Nacos 2.5.0 使用服务端只读 Secret 凭据按 ops session 获取/缓存短时 token；Nacos legacy console 的 `login_page_enabled` bootstrap 使 ADMIN 直接进入，浏览器不接收 Nacos 凭据或 token。
+- [x] Nacos 2.5.0 使用服务端只读 Secret 凭据按 ops session 获取/缓存短时 token；当前生产认证关闭时保持原生 state/API，不做浏览器 token 或响应体替换，未来启用认证仍保留服务端注入路径。
+- [x] 将两个控制台接入同一 `api.misu.chat` Host：Nacos 原生 `/nacos/`、Headlamp `/ops/headlamp/`；交换入口按目标路径绑定，`MISU_OPS_SESSION` Cookie 按目标 Path 并存，Gateway/sidecar 保留 HTTP 长轮询、重定向和 WS Upgrade，并清除主站凭据。
 
 后端实现契约：Java context 为 `/ops`；控制台 WS 为 `/ops/ws/console/{nacos|headlamp}`，由运维 Nginx 内部 `/_ops/ws` 转发。HTTP/WS auth_request 使用 loopback + `X-Ops-Proxy-Key`，目标使用 `X-Ops-Target`/`X-Ops-Console-Target`；校验后的上游凭据只通过 `X-Ops-Upstream-Cookie` 与 `X-Ops-Upstream-Authorization` 响应/请求头传递，主站 JWT、运维 Cookie 和重复 Cookie 均会过滤。
 
@@ -44,7 +45,7 @@
 - [x] 验证 nginx 配置语法及路由行为、YAML 渲染、shell 语法；尽可能用本地模拟请求证明鉴权、HTTP/WS 分流和未知 Host 拒绝。
 - [x] 文档明确 DNS/TLS、现有边缘入口接入、生产密钥准备及真实服务验收步骤；不将共享父域 Cookie 描述为完整安全隔离。
 
-部署验证范围：`scripts/deploy/tests/test-ops-release.sh` 使用 fake SSH/scp 覆盖正常发布、config-only 的小写 ConfigMap 名称、live Deployment 导出失败注入，以及 ops ConfigMap/Deployment apply、patch、rollout 失败时的回滚命令调用；该 harness 不证明真实集群已恢复。官方 Nginx 1.27.5 在 `/tmp` 编译后对渲染配置执行 `nginx -t`，并使用 `scripts/deploy/tests/mock-ops-upstreams.py` 验证固定 Host、未知 Host 421、loopback `auth_request`、POST body/query 与原始方法、未授权 401 不达控制台、HTTP/WS 分流、上游失败 502 及敏感日志不落 query。未覆盖真实 DNS/TLS 边缘入口、生产 Kubernetes、Nacos、Headlamp、SSH 或真实密钥验收。
+部署验证范围：`scripts/deploy/tests/test-ops-release.sh` 使用 fake SSH/scp 覆盖正常发布、config-only 的小写 ConfigMap 名称、live Deployment 导出失败注入，以及 ops ConfigMap/Deployment apply、patch、rollout 失败时的回滚命令调用；该 harness 不证明真实集群已恢复。`scripts/deploy/tests/test-ops-nginx-container.sh` 使用 Nginx 1.27 Alpine 容器和本地 mock upstream 验证同域 Nacos/Headlamp 路径、目标交换、未授权 401、重定向、未知路径/Host 及固定上游 URI；未覆盖真实 DNS/TLS 边缘入口、生产 Kubernetes、Nacos、Headlamp、SSH 或真实密钥验收。当前 sidecar 不做响应体替换。
 
 ## 主代理最终验收
 

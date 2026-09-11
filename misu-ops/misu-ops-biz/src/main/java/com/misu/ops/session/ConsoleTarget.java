@@ -18,6 +18,11 @@ public enum ConsoleTarget {
         return id;
     }
 
+    /** Cookie scope is deliberately target-specific so both consoles coexist on api.misu.chat. */
+    public String cookiePath() {
+        return this == NACOS ? "/nacos/" : "/ops/headlamp/";
+    }
+
     public String url(OpsProperties properties) {
         String url = this == NACOS ? properties.getNacosUrl() : properties.getHeadlampUrl();
         if (url == null || url.isBlank()) {

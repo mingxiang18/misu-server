@@ -92,28 +92,24 @@ raise 'expected both optional Nacos auth Secret refs' unless auth_refs.size == 2
 raise 'Nacos auth Secret is not optional' unless auth_refs.all? { |entry| entry.dig('valueFrom', 'secretKeyRef', 'optional') == true }
 puts 'Nacos auth Secret absent: optional refs allow Pod startup: PASS'
 RB
-rg -Fq "sub_filter '\"login_page_enabled\":true'" "${TMP_DIR}/normal-nginx.yaml"
-rg -Fq "sub_filter '\"login_page_enabled\": true'" "${TMP_DIR}/normal-nginx.yaml"
-rg -Fq "sub_filter '\"login_page_enabled\":\"true\"'" "${TMP_DIR}/normal-nginx.yaml"
-rg -Fq "sub_filter '\"login_page_enabled\": \"true\"'" "${TMP_DIR}/normal-nginx.yaml"
+if rg -q 'sub_filter|ops-nacos\.misu\.chat|ops-k8s\.misu\.chat' "${TMP_DIR}/normal-nginx.yaml"; then
+  echo 'legacy console subdomain/body-rewrite route remains in sidecar' >&2
+  exit 1
+fi
+rg -q 'server_name api\.misu\.chat' "${TMP_DIR}/normal-nginx.yaml"
+rg -q 'location = /nacos/_ops/exchange' "${TMP_DIR}/normal-nginx.yaml"
+rg -q 'location = /ops/headlamp/_ops/exchange' "${TMP_DIR}/normal-nginx.yaml"
+rg -q 'proxy_set_header X-Ops-Target nacos' "${TMP_DIR}/normal-nginx.yaml"
+rg -q 'proxy_set_header X-Ops-Target headlamp' "${TMP_DIR}/normal-nginx.yaml"
+rg -q 'proxy_hide_header Set-Cookie' "${TMP_DIR}/normal-nginx.yaml"
+rg -q 'map \$ops_original_uri \$ops_console_target' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header Authorization \$ops_upstream_authorization' "${TMP_DIR}/normal-nginx.yaml"
-echo 'Nacos server-side auth Secret and login bootstrap: PASS'
-
-ruby - "${TMP_DIR}/normal-nginx.yaml" <<'RB'
-config = File.read(ARGV.fetch(0))
-patterns = [
-  ['"login_page_enabled":true', '"login_page_enabled":false'],
-  ['"login_page_enabled": true', '"login_page_enabled": false'],
-  ['"login_page_enabled":"true"', '"login_page_enabled":"false"'],
-  ['"login_page_enabled": "true"', '"login_page_enabled": "false"']
-]
-patterns.each do |from, to|
-  abort "missing sub_filter #{from}" unless config.include?("sub_filter '#{from}' '#{to}'")
-  transformed = %({#{from}:ignored}).sub(from, to)
-  abort "bootstrap did not disable #{from}" unless transformed.include?(to)
-end
-puts 'Nacos Boolean/string state bootstrap fixtures: PASS'
-RB
+rg -q 'https://api\.misu\.chat/nacos/' "${TMP_DIR}/normal-misu-ops.yaml"
+rg -q 'https://api\.misu\.chat/ops/headlamp/' "${TMP_DIR}/normal-misu-ops.yaml"
+rg -q 'Path=/nacos/\*\*,/ops/headlamp/\*\*,/ops/api/\*\*' "${ROOT_DIR}/misu-gateway/src/main/resources/application-prod.yml"
+rg -q 'PreserveHostHeader' "${ROOT_DIR}/misu-gateway/src/main/resources/application-prod.yml"
+rg -q -- '-base-url' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/headlamp-base-url-patch.yaml"
+echo 'Nacos server-side auth Secret and same-host path proxy contract: PASS'
 
 ruby - "${TMP_DIR}/normal-misu-ops.yaml" "${TMP_DIR}/normal-nginx.yaml" "${sha}" <<'RB'
 require 'yaml'
