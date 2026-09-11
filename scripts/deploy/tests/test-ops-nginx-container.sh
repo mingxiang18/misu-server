@@ -44,6 +44,17 @@ rg -q 'NACOS_UPSTREAM path=/nacos/v1/console/server/state\?format=json' "${TMP_D
 code=$(curl -sS -o "${TMP_DIR}/headlamp" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=headlamp-session' "http://127.0.0.1:${NGINX_PORT}/ops/headlamp/c/main/pods")
 [[ "${code}" == 200 ]]
 rg -q 'HEADLAMP_UPSTREAM path=/ops/headlamp/c/main/pods' "${TMP_DIR}/headlamp"
+code=$(curl -sS -o "${TMP_DIR}/exchange" -w '%{http_code}' -X POST -H 'Host: api.misu.chat' \
+  -H 'Origin: https://server.misu.chat' -H 'Forwarded: for=203.0.113.9' \
+  -H 'X-Forwarded-For: 203.0.113.9' -H 'X-Real-IP: 203.0.113.9' \
+  -d 'ticket=invalid' http://127.0.0.1:18080/nacos/_ops/exchange)
+[[ "${code}" == 401 ]]
+rg -q 'invalid-ticket' "${TMP_DIR}/exchange"
+if rg -q 'EXCHANGE headers=.*203\.0\.113\.9' "${MOCK_LOG}"; then
+  echo 'exchange forwarded headers were not cleared' >&2
+  exit 1
+fi
+rg -q 'EXCHANGE headers=,,,' "${MOCK_LOG}"
 code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: api.misu.chat' "http://127.0.0.1:${NGINX_PORT}/nacos")
 [[ "${code}" == 308 ]]
 code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: api.misu.chat' "http://127.0.0.1:${NGINX_PORT}/unknown")
@@ -51,4 +62,4 @@ code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: api.misu.chat' "http://
 code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: attacker.example' "http://127.0.0.1:${NGINX_PORT}/nacos/")
 [[ "${code}" == 421 ]]
 
-echo 'real nginx container same-host Nacos/Headlamp paths, auth, redirect, unknown path/Host: PASS'
+echo 'real nginx container same-host Nacos/Headlamp paths, auth, exchange header clearing, redirect, unknown path/Host: PASS'

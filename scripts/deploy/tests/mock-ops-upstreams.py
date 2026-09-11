@@ -89,6 +89,15 @@ class Handler(BaseHTTPRequestHandler):
         role = self.server.role
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length).decode("utf-8", errors="replace")
+        if role == "backend" and self.path == "/ops/api/console-sessions/exchange":
+            forwarded = ",".join(self.headers.get(header, "") for header in
+                                  ("Forwarded", "X-Forwarded-For", "X-Real-IP", "X-Forwarded-Port"))
+            self.append("EXCHANGE headers=%s" % forwarded)
+            if forwarded:
+                self.write(403, "proxy-remote-address-rewritten")
+            else:
+                self.write(401, "invalid-ticket")
+            return
         self.append("%s_UPSTREAM_POST method=POST path=%s body=%s cookie=%s auth=%s" % (
             role.upper(),
             self.path,

@@ -117,8 +117,12 @@ data:
           proxy_set_header Host $host;
           proxy_set_header X-Forwarded-Host $host;
           proxy_set_header X-Forwarded-Proto https;
-          proxy_set_header X-Real-IP $remote_addr;
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          # Do not let edge forwarding headers rewrite Java's remote address;
+          # the exchange trust check must see the sidecar's 127.0.0.1 peer.
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
           proxy_set_header X-Ops-Target nacos;
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
           proxy_set_header Cookie "";
@@ -130,8 +134,10 @@ data:
           proxy_set_header Host $host;
           proxy_set_header X-Forwarded-Host $host;
           proxy_set_header X-Forwarded-Proto https;
-          proxy_set_header X-Real-IP $remote_addr;
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
           proxy_set_header X-Ops-Target headlamp;
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
           proxy_set_header Cookie "";
