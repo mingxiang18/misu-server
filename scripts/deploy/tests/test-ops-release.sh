@@ -124,6 +124,10 @@ rg -q 'PreserveHostHeader' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-gate
 rg -q -- '-base-url' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/headlamp-base-url-patch.yaml"
 rg -q -- '-proxy-auth=true' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/headlamp-base-url-patch.yaml"
 rg -q 'proxy_set_header X-Forwarded-User \$ops_headlamp_identity' "${TMP_DIR}/normal-nginx.yaml"
+rg -q 'proxy_set_header X-Forwarded-Groups ""' "${TMP_DIR}/normal-nginx.yaml"
+rg -q 'proxy_set_header X-Forwarded-Group ""' "${TMP_DIR}/normal-nginx.yaml"
+rg -q 'proxy_set_header X-Forwarded-Email ""' "${TMP_DIR}/normal-nginx.yaml"
+rg -q 'proxy_set_header X-Forwarded-Id-Token ""' "${TMP_DIR}/normal-nginx.yaml"
 echo 'Nacos server-side auth Secret and same-origin path proxy contract: PASS'
 
 ruby - "${TMP_DIR}/normal-misu-ops.yaml" "${TMP_DIR}/normal-nginx.yaml" "${sha}" <<'RB'

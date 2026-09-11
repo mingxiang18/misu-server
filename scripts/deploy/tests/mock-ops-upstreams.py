@@ -85,20 +85,28 @@ class Handler(BaseHTTPRequestHandler):
                     self.headers.get("Cookie", ""),
                 ))
                 return
-        self.append("%s_UPSTREAM path=%s host=%s cookie=%s auth=%s user=%s" % (
+        self.append("%s_UPSTREAM path=%s host=%s cookie=%s auth=%s user=%s groups=%s group=%s email=%s id_token=%s" % (
             role.upper(),
             self.path,
             self.headers.get("Host", ""),
             self.headers.get("Cookie", ""),
             self.headers.get("Authorization", ""),
             self.headers.get("X-Forwarded-User", ""),
+            self.headers.get("X-Forwarded-Groups", ""),
+            self.headers.get("X-Forwarded-Group", ""),
+            self.headers.get("X-Forwarded-Email", ""),
+            self.headers.get("X-Forwarded-Id-Token", ""),
         ))
-        self.write(200, "%s_UPSTREAM path=%s cookie=%s auth=%s user=%s" % (
+        self.write(200, "%s_UPSTREAM path=%s cookie=%s auth=%s user=%s groups=%s group=%s email=%s id_token=%s" % (
             role.upper(),
             self.path,
             self.headers.get("Cookie", ""),
             self.headers.get("Authorization", ""),
             self.headers.get("X-Forwarded-User", ""),
+            self.headers.get("X-Forwarded-Groups", ""),
+            self.headers.get("X-Forwarded-Group", ""),
+            self.headers.get("X-Forwarded-Email", ""),
+            self.headers.get("X-Forwarded-Id-Token", ""),
         ))
 
     def do_POST(self):

@@ -206,6 +206,10 @@ data:
           proxy_set_header Authorization $ops_upstream_authorization;
           proxy_set_header Cookie $ops_upstream_cookie;
           proxy_set_header X-Forwarded-User $ops_headlamp_identity;
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
           proxy_hide_header Set-Cookie;
           proxy_hide_header Authorization;
           proxy_hide_header X-Frame-Options;
@@ -233,6 +237,10 @@ data:
           proxy_set_header Authorization $ops_upstream_authorization;
           proxy_set_header Cookie $ops_upstream_cookie;
           proxy_set_header X-Forwarded-User $ops_headlamp_identity;
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
           proxy_set_header X-Ops-User "";
           proxy_set_header X-Ops-Console-Target "";
           proxy_set_header X-Ops-Original-URI "";
@@ -276,6 +284,10 @@ data:
           proxy_set_header X-Ops-Upstream-Cookie $ops_upstream_cookie;
           proxy_set_header X-Ops-Upstream-Authorization $ops_upstream_authorization;
           proxy_set_header X-Forwarded-User $ops_headlamp_identity;
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
           proxy_hide_header Set-Cookie;
           proxy_hide_header Authorization;
           proxy_hide_header X-Frame-Options;

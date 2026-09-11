@@ -38,14 +38,23 @@ done
 
 code=$(curl -sS -o "${TMP_DIR}/unauthorized" -w '%{http_code}' -H 'Host: api.misu.chat' "http://127.0.0.1:${NGINX_PORT}/nacos/")
 [[ "${code}" == 401 ]]
-code=$(curl -sS -o "${TMP_DIR}/nacos" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=nacos-session' "http://127.0.0.1:${NGINX_PORT}/nacos/v1/console/server/state?format=json")
+code=$(curl -sS -o "${TMP_DIR}/nacos" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=nacos-session' \
+  -H 'X-Forwarded-User: attacker' -H 'X-Forwarded-Groups: attacker-group' \
+  -H 'X-Forwarded-Group: attacker-group-compat' -H 'X-Forwarded-Email: attacker@example.com' \
+  -H 'X-Forwarded-Id-Token: attacker-token' \
+  "http://127.0.0.1:${NGINX_PORT}/nacos/v1/console/server/state?format=json")
 [[ "${code}" == 200 ]]
 rg -q 'NACOS_UPSTREAM path=/nacos/v1/console/server/state\?format=json' "${TMP_DIR}/nacos"
+rg -q 'NACOS_UPSTREAM.*user= groups= group= email= id_token=' "${TMP_DIR}/nacos"
 rg -q 'AUTH_REQUEST original_uri_present=True target_present=True original_uri_valid=True target_valid=True forwarding_headers_cleared=True' "${MOCK_LOG}"
-code=$(curl -sS -o "${TMP_DIR}/headlamp" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=headlamp-session' -H 'X-Forwarded-User: attacker' "http://127.0.0.1:${NGINX_PORT}/ops/headlamp/c/main/pods")
+code=$(curl -sS -o "${TMP_DIR}/headlamp" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=headlamp-session' \
+  -H 'X-Forwarded-User: attacker' -H 'X-Forwarded-Groups: attacker-group' \
+  -H 'X-Forwarded-Group: attacker-group-compat' -H 'X-Forwarded-Email: attacker@example.com' \
+  -H 'X-Forwarded-Id-Token: attacker-token' \
+  "http://127.0.0.1:${NGINX_PORT}/ops/headlamp/c/main/pods")
 [[ "${code}" == 200 ]]
 rg -q 'HEADLAMP_UPSTREAM path=/ops/headlamp/c/main/pods' "${TMP_DIR}/headlamp"
-rg -q 'HEADLAMP_UPSTREAM.*user=admin' "${TMP_DIR}/headlamp"
+rg -q 'HEADLAMP_UPSTREAM.*user=admin groups= group= email= id_token=' "${TMP_DIR}/headlamp"
 code=$(curl -sS -o "${TMP_DIR}/headlamp-token" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=headlamp-session' "http://127.0.0.1:${NGINX_PORT}/ops/headlamp/c/main/token")
 [[ "${code}" == 200 ]]
 rg -q 'HEADLAMP_UPSTREAM path=/ops/headlamp/c/main/token.*user=admin' "${TMP_DIR}/headlamp-token"
