@@ -15,9 +15,10 @@ data:
     http {
       include /etc/nginx/mime.types;
       default_type application/octet-stream;
-      map $cookie_MISU_OPS_SESSION $ops_cookie_present {
-        default 1;
-        '' 0;
+      map $http_cookie $ops_cookie_count {
+        default 0;
+        ~*MISU_OPS_SESSION=.*MISU_OPS_SESSION= 2;
+        ~*MISU_OPS_SESSION= 1;
       }
       map $upstream_http_set_cookie $ops_set_cookie_present {
         default 1;
@@ -25,7 +26,7 @@ data:
       }
       log_format main '$remote_addr - [$time_local] "$request" '
                       '$status $body_bytes_sent "$http_referer" "$http_user_agent" '
-                      'ops_cookie=$ops_cookie_present ops_set_cookie=$ops_set_cookie_present';
+                      'ops_cookie_count=$ops_cookie_count ops_set_cookie=$ops_set_cookie_present';
       access_log /var/log/nginx/access.log main;
       sendfile on;
       keepalive_timeout 65;

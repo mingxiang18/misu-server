@@ -18,9 +18,14 @@ data:
     http {
       include /etc/nginx/mime.types;
       default_type application/octet-stream;
+      map $http_cookie $ops_cookie_count {
+        default 0;
+        ~*MISU_OPS_SESSION=.*MISU_OPS_SESSION= 2;
+        ~*MISU_OPS_SESSION= 1;
+      }
       # Never log $request/$request_uri: console query strings and one-time
       # tickets must not end up in the sidecar log stream.
-      log_format ops_sanitized '$remote_addr $host "$request_method $uri" $status $body_bytes_sent $request_time';
+      log_format ops_sanitized '$remote_addr $host "$request_method $uri" $status $body_bytes_sent $request_time cookie_count=$ops_cookie_count';
       access_log /dev/stdout ops_sanitized;
       # Upstream connection errors include the request line (and therefore
       # query strings) at warn/error. Keep the sidecar at crit so ticket or
