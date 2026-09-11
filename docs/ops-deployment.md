@@ -5,7 +5,7 @@
 - `https://api.misu.chat/nacos/` → `nacos.misu-server.svc.cluster.local:8848`
 - `https://api.misu.chat/ops/headlamp/` → `headlamp.kuboard.svc.cluster.local:80`
 
-两个控制台共用主站 Host，但会话 Cookie 名称相同、Path 分别为 `/nacos/` 和 `/ops/headlamp/`。仓库没有外部边缘入口配置，因此 DNS、证书和到 Gateway 的边缘路由仍由生产入口维护。
+两个控制台共用主站 Host，但会话 Cookie 名称相同、SameSite=None、Secure、HttpOnly，Path 分别为 `/nacos/` 和 `/ops/headlamp/`；退出登录通过 `target=nacos|headlamp` 按目标 Path 删除对应 Cookie。仓库没有外部边缘入口配置，因此 DNS、证书和到 Gateway 的边缘路由仍由生产入口维护。
 
 交换入口是 `/nacos/_ops/exchange` 与 `/ops/headlamp/_ops/exchange`。sidecar 将固定的 `X-Ops-Target` 和 `X-Ops-Proxy-Key` 仅从 loopback 转给 Java；Java 先校验 sidecar、Host 与目标 URL，再消费 30 秒一次性目标票据。交换不依赖浏览器 `Origin`，而发票接口仍要求主站 Origin 与 ADMIN JWT。
 
@@ -96,7 +96,7 @@ scripts/deploy/release.sh --rollback <UTC备份时间戳>
 
 sidecar 在转发上游控制台时会清除主站 JWT Cookie 和 Authorization，只保留经过 Java 鉴权后返回的上游 Cookie/Authorization。两个控制台使用同名但不同 Path 的 `MISU_OPS_SESSION`，可在同一 Host 并存。
 
-sidecar 的 HTTP `auth_request` 由 Java 服务返回 `X-Ops-Upstream-Cookie` 和 `X-Ops-Upstream-Authorization`，Nginx 只把这两个已清洗的值发给 Nacos/Headlamp；控制台 WebSocket 进入 Java `/ops/ws/console/{target}` bridge，并把原始上游 URI 作为内部请求头传递。Nginx 不再用正则猜测或删除 Cookie，因此 Headlamp 自己的 Bearer 会被保留。控制台响应会追加 `Content-Security-Policy: frame-ancestors https://server.misu.chat`，同时保留上游已有的 CSP 指令。
+sidecar 的 HTTP `auth_request` 由 Java 服务返回 `X-Ops-Upstream-Cookie` 和 `X-Ops-Upstream-Authorization`，Nginx 只把这两个已清洗的值发给 Nacos/Headlamp；控制台 WebSocket 进入 Java `/ops/ws/console/{target}` bridge，并把原始上游 URI 作为内部请求头传递。Nginx 不再用正则猜测或删除 Cookie，因此 Headlamp 自己的 Bearer 会被保留。控制台响应会追加 `Content-Security-Policy: frame-ancestors https://server.misu.chat`，并隐藏上游的 `X-Frame-Options` 和冲突 CSP，确保主站 iframe 可加载。
 
 ## 生产验收
 

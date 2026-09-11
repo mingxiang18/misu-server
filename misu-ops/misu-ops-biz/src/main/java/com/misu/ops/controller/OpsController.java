@@ -100,7 +100,7 @@ public class OpsController {
         ResponseCookie cookie = ResponseCookie.from(properties.getCookieName(), session.id())
                 .httpOnly(true)
                 .secure(properties.isCookieSecure())
-                .sameSite("Lax")
+                .sameSite("None")
                 .path(session.target().cookiePath())
                 .maxAge(properties.getSessionMaxSeconds())
                 .build();
@@ -111,16 +111,18 @@ public class OpsController {
 
     @Anonymous
     @PostMapping("/console-sessions/logout")
-    public AjaxResult logout(HttpServletRequest request, HttpServletResponse response) {
+    public AjaxResult logout(HttpServletRequest request, HttpServletResponse response,
+                             @RequestParam(value = "target", defaultValue = "nacos") String targetValue) {
         originPolicy.requireAllowedMainOrigin(request);
+        ConsoleTarget target = ConsoleTarget.parse(targetValue);
         String sessionId = CookieSupport.read(request, properties.getCookieName());
         sessions.revokeConsoleSession(sessionId);
         consoleWebSockets.closeForSession(sessionId);
         ResponseCookie cookie = ResponseCookie.from(properties.getCookieName(), "")
                 .httpOnly(true)
                 .secure(properties.isCookieSecure())
-                .sameSite("Lax")
-                .path(ConsoleTarget.NACOS.cookiePath())
+                .sameSite("None")
+                .path(target.cookiePath())
                 .maxAge(0)
                 .build();
         response.setHeader(HttpHeaders.SET_COOKIE, cookie.toString());

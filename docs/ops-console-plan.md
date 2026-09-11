@@ -64,7 +64,7 @@ flowchart LR
 ### 浏览器会话接入
 
 1. 主站通过现有 axios 实例携带 JWT 请求 `POST /ops/api/launch-tickets`，后端实时核验账号状态及 ADMIN，生成一次性、短时、绑定用户和目标的票据（建议 30 秒）。
-2. 通过定向表单 POST 将票据送到目标子域的固定会话入口；兑换后设置 host-only、HttpOnly、Secure、SameSite 的独立运维 Cookie，再跳转到固定上游页面。Cookie 不含上游凭据或站点 JWT；票据不放查询字符串或日志。
+2. 通过定向表单 POST 将票据送到目标路径内的固定会话入口；兑换后设置 host-only、HttpOnly、Secure、SameSite=None 的独立运维 Cookie，并将 Path 限定为 `/nacos/` 或 `/ops/headlamp/`，再跳转到固定上游页面。Cookie 不含上游凭据或站点 JWT；票据不放查询字符串或日志。
 3. 代理每个请求检查运维会话，向上游仅转发必要头和上游自己的登录状态；清除主站凭据和浏览器伪造的代理身份头。
 4. Cookie 鉴权带来的写请求需校验 Origin/Referer 与 CSRF 防护；WebSocket 严格校验 Origin、会话归属和有效期，不能直接沿用公共安全模块全局关闭 CSRF 的默认行为。
 5. SSH 使用短时单次握手凭证，禁止 URL 中携带长期 JWT/SSH 密钥；日志脱敏。连接期间定期重新核验角色和账号状态（建议最多 30 秒），失效即关闭现有连接。新连接必须查当前权限，不能只相信旧 JWT 的角色快照。

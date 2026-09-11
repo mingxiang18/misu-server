@@ -99,7 +99,7 @@ class Handler(BaseHTTPRequestHandler):
             elif "ticket=valid" in body:
                 self.write(303, headers={
                     "Location": "/nacos/",
-                    "Set-Cookie": "MISU_OPS_SESSION=nacos-session; Path=/nacos/; HttpOnly; Secure; SameSite=Lax",
+                    "Set-Cookie": "MISU_OPS_SESSION=nacos-session; Path=/nacos/; HttpOnly; Secure; SameSite=None",
                     "X-Frame-Options": "DENY",
                     "Content-Security-Policy": "frame-ancestors https://evil.example",
                 })
