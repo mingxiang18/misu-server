@@ -41,6 +41,7 @@ code=$(curl -sS -o "${TMP_DIR}/unauthorized" -w '%{http_code}' -H 'Host: api.mis
 code=$(curl -sS -o "${TMP_DIR}/nacos" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=nacos-session' "http://127.0.0.1:${NGINX_PORT}/nacos/v1/console/server/state?format=json")
 [[ "${code}" == 200 ]]
 rg -q 'NACOS_UPSTREAM path=/nacos/v1/console/server/state\?format=json' "${TMP_DIR}/nacos"
+rg -q 'AUTH_REQUEST original_uri_present=True target_present=True original_uri_valid=True target_valid=True forwarding_headers_cleared=True' "${MOCK_LOG}"
 code=$(curl -sS -o "${TMP_DIR}/headlamp" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=headlamp-session' "http://127.0.0.1:${NGINX_PORT}/ops/headlamp/c/main/pods")
 [[ "${code}" == 200 ]]
 rg -q 'HEADLAMP_UPSTREAM path=/ops/headlamp/c/main/pods' "${TMP_DIR}/headlamp"

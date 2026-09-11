@@ -37,6 +37,14 @@ data:
         '' close;
       }
 
+      # $request_uri is the original client URI and remains stable in
+      # auth_request subrequests and the internal WebSocket rewrite. Resolve
+      # this variable from it instead of using a server-level `set`, which is
+      # reevaluated in the /_ops/auth subrequest context.
+      map $request_uri $ops_original_uri {
+        default $request_uri;
+      }
+
       # Select the upstream from the original request path. The public Host is
       # fixed to api.misu.chat and is preserved by Gateway.
       map $ops_original_uri $ops_console_target {
@@ -82,7 +90,6 @@ data:
         listen 8080;
         server_name api.misu.chat server.misu.chat;
         add_header Content-Security-Policy "frame-ancestors https://server.misu.chat" always;
-        set $ops_original_uri $request_uri;
         # Keep the browser URI across the internal HTTP/WS dispatch so query
         # parameters reach the upstream but never appear in access logs.
 
@@ -110,6 +117,12 @@ data:
           proxy_set_header X-Original-Upgrade $http_upgrade;
           proxy_set_header X-Ops-Target $ops_console_target;
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          # The Java loopback trust check must see the sidecar peer, never an
+          # edge-provided client address forwarded into this subrequest.
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
           proxy_set_header Cookie $http_cookie;
           proxy_set_header Authorization $http_authorization;
         }
@@ -135,6 +148,7 @@ data:
           # Retire the legacy root-path cookie before the target-scoped cookie
           # from Java is stored. Otherwise both values are sent and fail closed.
           add_header Set-Cookie "MISU_OPS_SESSION=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None" always;
+          add_header Content-Security-Policy "frame-ancestors https://server.misu.chat" always;
           proxy_hide_header X-Frame-Options;
           proxy_hide_header Content-Security-Policy;
         }
@@ -153,6 +167,7 @@ data:
           proxy_set_header Cookie "";
           proxy_set_header Authorization "";
           add_header Set-Cookie "MISU_OPS_SESSION=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None" always;
+          add_header Content-Security-Policy "frame-ancestors https://server.misu.chat" always;
           proxy_hide_header X-Frame-Options;
           proxy_hide_header Content-Security-Policy;
         }

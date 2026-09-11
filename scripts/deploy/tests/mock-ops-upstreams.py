@@ -32,11 +32,24 @@ class Handler(BaseHTTPRequestHandler):
                 self.write(200, "health-ok")
                 return
             if self.path == "/ops/internal/proxy-auth":
+                original_uri = self.headers.get("X-Original-URI", "")
+                target = self.headers.get("X-Ops-Target", "")
+                original_uri_valid = original_uri.startswith(("/nacos/", "/ops/headlamp/"))
+                target_valid = target in ("nacos", "headlamp")
+                forwarding_headers_cleared = not any(
+                    self.headers.get(header, "") for header in
+                    ("Forwarded", "X-Forwarded-For", "X-Real-IP", "X-Forwarded-Port")
+                )
                 self.append("AUTH_REQUEST method=GET original=%s body=%s" % (
                     self.headers.get("X-Original-Method", ""),
                     self.headers.get("Content-Length", ""),
                 ))
-                if self.headers.get("X-Ops-Proxy-Key") != "test-secret" or "MISU_OPS_SESSION=" not in self.headers.get("Cookie", ""):
+                self.append("AUTH_REQUEST original_uri_present=%s target_present=%s original_uri_valid=%s target_valid=%s forwarding_headers_cleared=%s" % (
+                    bool(original_uri), bool(target), original_uri_valid, target_valid, forwarding_headers_cleared
+                ))
+                if (self.headers.get("X-Ops-Proxy-Key") != "test-secret"
+                        or "MISU_OPS_SESSION=" not in self.headers.get("Cookie", "")
+                        or not original_uri_valid or not target_valid or not forwarding_headers_cleared):
                     self.append("AUTH_REJECT console_not_reached")
                     self.write(401, "bad-secret")
                 else:
