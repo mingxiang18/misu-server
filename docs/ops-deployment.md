@@ -7,6 +7,8 @@
 
 两个控制台共用主站 Host，但会话 Cookie 名称相同、SameSite=None、Secure、HttpOnly，Path 分别为 `/nacos/` 和 `/ops/headlamp/`；主站统一 revoke 流程会撤销运维会话并按两个目标 Path 删除 Cookie。仓库没有外部边缘入口配置，因此 DNS、证书和到 Gateway 的边缘路由仍由生产入口维护。
 
+exchange 响应同时过期旧版 `Path=/` 的 `MISU_OPS_SESSION`，避免升级前遗留的根路径 Cookie 与目标路径 Cookie 同时发送并触发重复凭据拒绝。它不影响主站登录 Cookie。
+
 交换入口是 `/nacos/_ops/exchange` 与 `/ops/headlamp/_ops/exchange`。sidecar 将固定的 `X-Ops-Target` 和 `X-Ops-Proxy-Key` 仅从 loopback 转给 Java；Java 先校验 sidecar、Host 与目标 URL，再消费 30 秒一次性目标票据。交换不依赖浏览器 `Origin`，而发票接口仍要求主站 Origin 与 ADMIN JWT。
 
 边缘入口必须能访问集群网络中的 Service（例如集群内 Ingress、LoadBalancer/VIP 或现有 NodePort）。公网边缘 Nginx 不能直接把 `*.svc.cluster.local` 当作公网 DNS 解析；应先转发到一个集群可达的入口，再由入口转到 `misu-ops` 的 ClusterIP。转发时保留 Host，否则 sidecar 的默认虚拟主机会返回 421：

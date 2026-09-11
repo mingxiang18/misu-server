@@ -50,6 +50,7 @@ code=$(curl -sS -D "${TMP_DIR}/exchange-headers" -o "${TMP_DIR}/exchange" -w '%{
   -d 'ticket=valid' "http://127.0.0.1:${NGINX_PORT}/nacos/_ops/exchange")
 [[ "${code}" == 303 ]]
 rg -qi '^Set-Cookie: MISU_OPS_SESSION=nacos-session; Path=/nacos/;' "${TMP_DIR}/exchange-headers"
+rg -qi '^Set-Cookie: MISU_OPS_SESSION=; Path=/; Max-Age=0;' "${TMP_DIR}/exchange-headers"
 rg -qi 'SameSite=None' "${TMP_DIR}/exchange-headers"
 rg -qi 'Secure' "${TMP_DIR}/exchange-headers"
 rg -qi 'HttpOnly' "${TMP_DIR}/exchange-headers"

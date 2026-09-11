@@ -127,6 +127,9 @@ data:
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
           proxy_set_header Cookie "";
           proxy_set_header Authorization "";
+          # Retire the legacy root-path cookie before the target-scoped cookie
+          # from Java is stored. Otherwise both values are sent and fail closed.
+          add_header Set-Cookie "MISU_OPS_SESSION=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None" always;
           proxy_hide_header X-Frame-Options;
           proxy_hide_header Content-Security-Policy;
         }
@@ -144,6 +147,7 @@ data:
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
           proxy_set_header Cookie "";
           proxy_set_header Authorization "";
+          add_header Set-Cookie "MISU_OPS_SESSION=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None" always;
           proxy_hide_header X-Frame-Options;
           proxy_hide_header Content-Security-Policy;
         }
