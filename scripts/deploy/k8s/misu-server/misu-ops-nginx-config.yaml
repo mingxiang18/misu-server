@@ -64,6 +64,13 @@ data:
         ~^/ops/headlamp/ http://misu_ops_headlamp;
       }
 
+      # Only Headlamp receives the identity returned by Java auth_request.
+      # The proxy_set_header below also overwrites any client-supplied value.
+      map $ops_console_target $ops_headlamp_identity {
+        default "";
+        headlamp $ops_user;
+      }
+
       map $ops_is_websocket $ops_console_dispatch {
         default /_ops/http;
         1 /_ops/ws;
@@ -198,6 +205,7 @@ data:
           proxy_set_header Connection "";
           proxy_set_header Authorization $ops_upstream_authorization;
           proxy_set_header Cookie $ops_upstream_cookie;
+          proxy_set_header X-Forwarded-User $ops_headlamp_identity;
           proxy_hide_header Set-Cookie;
           proxy_hide_header Authorization;
           proxy_hide_header X-Frame-Options;
@@ -224,6 +232,7 @@ data:
           proxy_set_header Connection "";
           proxy_set_header Authorization $ops_upstream_authorization;
           proxy_set_header Cookie $ops_upstream_cookie;
+          proxy_set_header X-Forwarded-User $ops_headlamp_identity;
           proxy_set_header X-Ops-User "";
           proxy_set_header X-Ops-Console-Target "";
           proxy_set_header X-Ops-Original-URI "";
@@ -266,6 +275,7 @@ data:
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
           proxy_set_header X-Ops-Upstream-Cookie $ops_upstream_cookie;
           proxy_set_header X-Ops-Upstream-Authorization $ops_upstream_authorization;
+          proxy_set_header X-Forwarded-User $ops_headlamp_identity;
           proxy_hide_header Set-Cookie;
           proxy_hide_header Authorization;
           proxy_hide_header X-Frame-Options;

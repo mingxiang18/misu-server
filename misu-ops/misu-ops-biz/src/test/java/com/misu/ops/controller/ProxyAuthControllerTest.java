@@ -23,6 +23,7 @@ class ProxyAuthControllerTest {
         OpsProperties properties = new OpsProperties();
         properties.setProxySharedSecret("test-secret");
         properties.setNacosUrl("https://ops-nacos.server.misu.chat/nacos/");
+        properties.setHeadlampUrl("https://ops-k8s.server.misu.chat/");
         CurrentAccountVerifier verifier = new CurrentAccountVerifier() {
             @Override
             public LoginUser requireAdmin(LoginUser tokenUser) {
@@ -50,8 +51,20 @@ class ProxyAuthControllerTest {
         request.addHeader("Cookie", "User-Token=main; NACOS_AUTH_TOKEN=upstream; User-Info=bad; custom=ok; MISU_OPS_SESSION=" + session.id());
         var response = controller.authorizeProxy(request);
         assertEquals(204, response.getStatusCode().value());
+        assertNull(response.getHeaders().getFirst("X-Ops-User"));
         assertNull(response.getHeaders().getFirst("X-Ops-Upstream-Cookie"));
         assertNull(response.getHeaders().getFirst("X-Ops-Upstream-Authorization"));
+
+        OpsSessionStore.Ticket headlampTicket = store.issueTicket(
+                new LoginUser(1L, "admin", java.util.List.of("ADMIN")), ConsoleTarget.HEADLAMP);
+        OpsSessionStore.ConsoleSession headlampSession = store.createConsoleSession(headlampTicket);
+        MockHttpServletRequest headlampRequest = new MockHttpServletRequest();
+        headlampRequest.setRemoteAddr("127.0.0.1");
+        headlampRequest.addHeader("X-Ops-Proxy-Key", "test-secret");
+        headlampRequest.addHeader("X-Ops-Target", "headlamp");
+        headlampRequest.addHeader("Cookie", properties.getCookieName() + "=" + headlampSession.id());
+        assertEquals("admin", controller.authorizeProxy(headlampRequest)
+                .getHeaders().getFirst("X-Ops-User"));
 
         MockHttpServletRequest wrongSecret = new MockHttpServletRequest();
         wrongSecret.setRemoteAddr("127.0.0.1");

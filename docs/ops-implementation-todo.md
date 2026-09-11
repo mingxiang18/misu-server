@@ -41,7 +41,7 @@
 - [x] 对齐 X-Ops-Upstream-Cookie / X-Ops-Upstream-Authorization 契约，清除重复和多余代理头。
 - [x] 检查正常发布及 config-only 发布的 OPS_CONFIG_TAG 替换、版本化 ConfigMap、旧 Deployment 与配置共同回滚。
 - [x] 检查 JWT 签名 Secret、代理 Secret、SSH Secret、loopback 服务健康探针及资源配置。
-- [x] 增加 `misu-ops-nacos-auth` Secret 模板引用及 Nacos 2.5.0 免二次登录说明；Headlamp 保留 `-in-cluster` 行为。
+- [x] 增加 `misu-ops-nacos-auth` Secret 模板引用及 Nacos 2.5.0 免二次登录说明；Headlamp 使用 `-in-cluster` + 官方 `-proxy-auth=true`，由受信 sidecar 注入已校验用户身份并保留其自身 ServiceAccount/RBAC。
 - [x] 验证 nginx 配置语法及路由行为、YAML 渲染、shell 语法；尽可能用本地模拟请求证明鉴权、HTTP/WS 分流和未知 Host 拒绝。
 - [x] 文档明确 DNS/TLS、现有边缘入口接入、生产密钥准备及真实服务验收步骤；不将共享父域 Cookie 描述为完整安全隔离。
 

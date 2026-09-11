@@ -61,6 +61,16 @@ public class ProxyAuthController {
             originPolicy.requireSameConsoleOrigin(request, consoleTarget.url(properties));
         }
         HttpHeaders responseHeaders = new HttpHeaders();
+        if (consoleTarget == ConsoleTarget.HEADLAMP) {
+            String userName = session.userName();
+            if (!StringUtils.hasText(userName) || containsHeaderControl(userName)) {
+                throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维用户身份无效");
+            }
+            // Headlamp's identity-aware proxy mode consumes this internal
+            // result and skips its browser token screen. Nginx overwrites the
+            // public X-Forwarded-User header with this value after auth_request.
+            responseHeaders.set("X-Ops-User", userName);
+        }
         String cookieHeader = CookieSupport.header(request);
         String cookie = consoleTarget == ConsoleTarget.NACOS ? null
                 : CookieSupport.filterUpstreamCookies(cookieHeader, blockedCookieNames());
@@ -91,6 +101,10 @@ public class ProxyAuthController {
     private boolean isSafeMethod(String method) {
         return "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)
                 || "OPTIONS".equalsIgnoreCase(method);
+    }
+
+    private boolean containsHeaderControl(String value) {
+        return value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0;
     }
 
     private String targetFromOriginalUri(String originalUri) {

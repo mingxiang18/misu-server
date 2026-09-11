@@ -12,6 +12,7 @@ spec:
           # Keep -in-cluster so the existing service-account login remains in use.
           args:
             - -in-cluster
+            - -proxy-auth=true
             - -plugins-dir=/headlamp/plugins
             - -base-url
             - /ops/headlamp

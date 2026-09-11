@@ -54,6 +54,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.write(401, "bad-secret")
                 else:
                     self.write(204, headers={
+                        "X-Ops-User": "admin",
                         "X-Ops-Upstream-Cookie": "UPSTREAM_TOKEN=clean",
                         "X-Ops-Upstream-Authorization": "Bearer upstream",
                     })
@@ -84,18 +85,20 @@ class Handler(BaseHTTPRequestHandler):
                     self.headers.get("Cookie", ""),
                 ))
                 return
-        self.append("%s_UPSTREAM path=%s host=%s cookie=%s auth=%s" % (
+        self.append("%s_UPSTREAM path=%s host=%s cookie=%s auth=%s user=%s" % (
             role.upper(),
             self.path,
             self.headers.get("Host", ""),
             self.headers.get("Cookie", ""),
             self.headers.get("Authorization", ""),
+            self.headers.get("X-Forwarded-User", ""),
         ))
-        self.write(200, "%s_UPSTREAM path=%s cookie=%s auth=%s" % (
+        self.write(200, "%s_UPSTREAM path=%s cookie=%s auth=%s user=%s" % (
             role.upper(),
             self.path,
             self.headers.get("Cookie", ""),
             self.headers.get("Authorization", ""),
+            self.headers.get("X-Forwarded-User", ""),
         ))
 
     def do_POST(self):

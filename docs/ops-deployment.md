@@ -86,7 +86,9 @@ kubectl -n misu-server create secret generic misu-ops-nacos-auth \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Nacos 2.5.0 在当前生产配置中已关闭认证，sidecar 保持上游原生 `/nacos/` 响应，不做 HTML/JSON/JS 内容替换；未来配置服务端认证时，Java 仍可按 ops session 使用只读 Secret 获取短时 token，并只通过内部 `Authorization` 注入。浏览器不会得到 Nacos 用户名、密码或 token。Headlamp 继续使用 `-in-cluster`，并通过仓库中的 `headlamp-base-url-patch.yaml` 将 base URL 固定为 `/ops/headlamp`；该 patch 同时更新探针路径。
+Nacos 2.5.0 在当前生产配置中已关闭认证，sidecar 保持上游原生 `/nacos/` 响应，不做 HTML/JSON/JS 内容替换；未来配置服务端认证时，Java 仍可按 ops session 使用只读 Secret 获取短时 token，并只通过内部 `Authorization` 注入。浏览器不会得到 Nacos 用户名、密码或 token。Headlamp 使用 `-in-cluster` 加官方 `-proxy-auth=true`，由 sidecar 将 Java 已校验的 ADMIN 用户名写入 `X-Forwarded-User`，Headlamp 使用自身 ServiceAccount 的 RBAC 访问 Kubernetes API，因此管理员无需再次输入 Kubernetes token。仓库中的 `headlamp-base-url-patch.yaml` 将 base URL 固定为 `/ops/headlamp` 并更新探针路径；应用该 patch 前须核对实际 Headlamp 镜像支持 `-proxy-auth=true` 且其 ServiceAccount/RBAC 仍可用。
+
+启用 Headlamp 的 proxy-auth 后，现有 NodePort 清单仍保留，但必须在生产网络边界限制该 NodePort，禁止未鉴权客户端直接访问 Headlamp Pod；sidecar 通过 kuboard Service 的集群内地址访问，不依赖 NodePort。应用 patch 前先完成该防火墙/NetworkPolicy 限制，再从受控网络验证 NodePort 不可绕过代理、`server.misu.chat/ops/headlamp/` 可正常进入，并记录 Headlamp 镜像版本确实支持该参数。
 
 常用发布命令：
 

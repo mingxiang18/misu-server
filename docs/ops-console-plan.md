@@ -29,7 +29,7 @@
 - Kubernetes：内嵌 Headlamp，默认进入 `/c/main/pods`，保留资源浏览、日志与容器终端能力。
 - SSH：预置“主节点 10.8.0.1”和“工作节点 10.8.0.26”；支持双节点标签切换、连接/断开、终端缩放、复制粘贴、Ctrl/C、Tab、方向键、vim/top 等 PTY 交互。
 - 页面显示连接中、已连接、权限失效、目标不可达；提供重试与全屏。移动端提供 Esc、Ctrl、Tab 等辅助键，控制台允许横向滚动/全屏，不能保证上游页面本身适配手机。
-- 第一版保留 Nacos 和 Headlamp 原有登录，在内嵌页面内完成，不承诺网站登录自动等同于上游登录。
+- Nacos 使用服务端上游认证策略；Headlamp 使用受信身份感知代理自动建立 UI 会话，管理员无需再次输入 Kubernetes token。
 - 第一版不做文件传输、批量命令、定时脚本、自动重放命令、会话录像；刷新 SSH 页会断开，重连创建新会话。
 
 ## 推荐架构
@@ -74,8 +74,8 @@ flowchart LR
 
 - Nacos 2.5.0 仍使用自己的权限体系，但运维入口由 Java 服务端使用只读 Kubernetes Secret 中的专用 Nacos 账号登录 `v1/auth/users/login`，按每个 ops session 缓存短时 `accessToken`，并通过内部代理注入 `Authorization: Bearer ...`。账号、密码和 token 均不进入浏览器、Cookie、URL 或日志；logout、撤销、角色失效和过期会清理 session 缓存，Nacos token 随其服务端 TTL 失效。
 - Nacos 2.5.0 认证关闭时保留上游原生 `/nacos/` 响应，不做 HTML、JSON 或 JavaScript 响应体替换；未来启用认证时，Java 仍按 ops session 使用只读 Secret 获取短时 token，并只通过内部 `Authorization` 注入，浏览器不会得到 Nacos 凭据。
-- Headlamp 第一版保留现有 Kubernetes 登录。后续若要免登录，先固定实际版本，验证该版本是否支持身份感知代理，再设计 Kubernetes 身份/RBAC 映射；主站 JWT 不能直接当 Kubernetes Token。
-- 所有原有内网管理入口保持原有认证边界；本模块的 ADMIN 限制针对新增网站入口。若后续启用上游“信任代理免登录”，必须同时禁止未鉴权路径直接访问那个受信任实例，必要时单独部署 Headlamp 实例。
+- Headlamp 使用官方 `-proxy-auth=true` 身份感知代理模式：sidecar 只把 Java 已校验的 ADMIN 用户名写入内部结果，再由代理覆盖 `X-Forwarded-User`；浏览器不接收 Kubernetes token。Headlamp 继续使用自身 `-in-cluster` ServiceAccount 访问 Kubernetes API，资源权限仍由该 ServiceAccount 的 RBAC 决定，主站 JWT 不直接充当 Kubernetes Token。部署前须核对实际 Headlamp 镜像版本支持该参数并保留其 ServiceAccount/RBAC。
+- 所有原有内网管理入口保持原有认证边界；本模块的 ADMIN 限制针对新增网站入口。Headlamp 的 identity-aware proxy 只在 sidecar 受保护路径启用；保留现有 NodePort 资源时，生产网络仍必须限制该 NodePort 只供受控网络访问，不能让未鉴权客户端直接到达开启 `-proxy-auth=true` 的 Headlamp 实例。
 
 ## 代理兼容性
 
@@ -113,7 +113,7 @@ flowchart LR
 3. 实施双节点 SSH：PTY、交互键、尺寸、断连、到期关闭、审计。
 4. 验收发布：普通用户/ADMIN/FILE_ADMIN 均不能绕过访问；两控制台关键操作和 SSH 交互可用；1280×800 与 414×800 两种视口验证；部署、重启和回滚验证。
 
-第一轮方案采用的默认决策：沿用 ADMIN；后端独立部署、前端集成现有网站；控制台优先独立子域内嵌；上游保留原登录；SSH 先覆盖现有两个节点。本人账号 ID、域名与长期密钥在实施配置时补齐。
+当前决策：沿用 ADMIN；后端独立部署、前端集成现有网站；控制台使用 `server.misu.chat` 同源路径内嵌；Nacos 由服务端按配置状态处理，Headlamp 使用受信身份感知代理；SSH 覆盖现有两个节点。本人账号 ID、域名与长期密钥在实施配置时补齐。
 
 本方案未创建业务代码、修改服务器或触发部署，未运行构建与功能测试。
 

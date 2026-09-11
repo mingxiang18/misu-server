@@ -24,4 +24,4 @@
 - 真实 Nacos、Headlamp 及节点 SSH 的完整联调；验证控制台自己的登录、集群日志/exec、节点终端交互以及退出和账号权限撤销。
 - 实际 Kubernetes 发布与失败恢复验收。
 
-两个控制台仍在 `.misu.chat` 的 Cookie 信任边界内，独立子域名不等于主站凭据的完整隔离。保留上游自身登录，不承诺单点登录。
+两个控制台现在通过 `server.misu.chat` 同源路径和目标 Path Cookie 隔离；Headlamp 的身份感知代理由 sidecar 受保护地注入已校验 ADMIN 用户名，Nacos 使用服务端认证策略。NodePort 仍需按部署文档限制为受控网络，避免绕过 sidecar 信任边界。
