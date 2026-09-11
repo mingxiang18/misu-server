@@ -27,7 +27,7 @@
 - [x] 完成有意义的测试和 Maven 打包，报告实际测试数及限制；不要只提供 mock 验证结论。
 - [x] 向部署子任务提供最终桥接路径、内部鉴权请求头及过滤后的响应头契约。
 - [x] Nacos 2.5.0 使用服务端只读 Secret 凭据按 ops session 获取/缓存短时 token；当前生产认证关闭时保持原生 state/API，不做浏览器 token 或响应体替换，未来启用认证仍保留服务端注入路径。
-- [x] 将两个控制台接入同一 `api.misu.chat` Host：Nacos 原生 `/nacos/`、Headlamp `/ops/headlamp/`；交换入口按目标路径绑定，`MISU_OPS_SESSION` Cookie 按目标 Path 并存，Gateway/sidecar 保留 HTTP 长轮询、重定向和 WS Upgrade，并清除主站凭据。
+- [x] 将两个控制台接入主站 `server.misu.chat` 同源路径：Nacos 原生 `/nacos/`、Headlamp `/ops/headlamp/`；交换入口按目标路径绑定，`MISU_OPS_SESSION` Cookie 按目标 Path 并存，主站 Nginx/sidecar 保留 HTTP 长轮询、重定向和 WS Upgrade，并清除主站凭据。
 
 后端实现契约：Java context 为 `/ops`；控制台 WS 为 `/ops/ws/console/{nacos|headlamp}`，由运维 Nginx 内部 `/_ops/ws` 转发。HTTP/WS auth_request 使用 loopback + `X-Ops-Proxy-Key`，目标使用 `X-Ops-Target`/`X-Ops-Console-Target`；校验后的上游凭据只通过 `X-Ops-Upstream-Cookie` 与 `X-Ops-Upstream-Authorization` 响应/请求头传递，主站 JWT、运维 Cookie 和重复 Cookie 均会过滤。
 

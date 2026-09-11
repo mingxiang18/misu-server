@@ -49,7 +49,7 @@ flowchart LR
 
 逻辑组成：`misu-ops` Java 服务负责授权、会话、节点配置、审计及 SSH 桥接；专用 Nginx 负责原控制台 HTTP/WebSocket 代理。可以部署为同一 Deployment 的两个容器，作为一个运维单元发布；Java 服务和代理容器均通过集群内部访问上游，不给它们新增公开 NodePort。主网站新增轻量页面和 API 封装。
 
-生产入口使用已有的 `api.misu.chat` Host 和路径代理：Nacos 为 `/nacos/`，Headlamp 为 `/ops/headlamp/`。浏览器只访问网站 HTTPS 入口，不直接访问 10.8.0.x；Headlamp 通过受控 base URL 配置适配该路径。
+控制台入口使用主站 `server.misu.chat` 的同源路径代理：Nacos 为 `/nacos/`，Headlamp 为 `/ops/headlamp/`。主站 Nginx 把这两个路径转发给 `misu-ops`；浏览器不直接访问 10.8.0.x。Headlamp 通过受控 base URL 配置适配该路径。
 
 ## 身份、会话与权限
 
@@ -68,7 +68,7 @@ flowchart LR
 5. SSH 使用短时单次握手凭证，禁止 URL 中携带长期 JWT/SSH 密钥；日志脱敏。连接期间定期重新核验角色和账号状态（建议最多 30 秒），失效即关闭现有连接。新连接必须查当前权限，不能只相信旧 JWT 的角色快照。
 6. 退出登录增加服务端运维会话撤销；目前前端 logOut 仅清 Cookie。建议空闲 15 分钟、最长 2 小时后重新验证；鉴权服务不可达时拒绝新会话，现有会话到核验期限关闭。
 
-运维控制台与主站共用 `api.misu.chat` Host，但会话 Cookie 为 host-only、HttpOnly、Secure、SameSite=None，并按 `/nacos/` 与 `/ops/headlamp/` Path 隔离。运维代理必须清除浏览器发来的 `User-Token`、`User-Refresh-Token` 等主站凭据；主站退出通过统一 revoke 流程撤销运维会话并删除两个目标 Path 的 Cookie。
+运维控制台与主站共用 `server.misu.chat` Origin，会话 Cookie 为 host-only、HttpOnly、Secure、SameSite=None，并按 `/nacos/` 与 `/ops/headlamp/` Path 隔离。主站 Nginx 转发时固定内部 Host 为 `api.misu.chat`，运维代理必须清除浏览器发来的 `User-Token`、`User-Refresh-Token` 等主站凭据；主站退出通过统一 revoke 流程撤销运维会话并删除两个目标 Path 的 Cookie。
 
 ### 上游认证
 

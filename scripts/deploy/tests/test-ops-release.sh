@@ -104,8 +104,12 @@ rg -q 'proxy_set_header X-Ops-Target headlamp' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_hide_header Set-Cookie' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'map \$ops_original_uri \$ops_console_target' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header Authorization \$ops_upstream_authorization' "${TMP_DIR}/normal-nginx.yaml"
-rg -q 'https://api\.misu\.chat/nacos/' "${TMP_DIR}/normal-misu-ops.yaml"
-rg -q 'https://api\.misu\.chat/ops/headlamp/' "${TMP_DIR}/normal-misu-ops.yaml"
+rg -q 'https://server\.misu\.chat/nacos/' "${TMP_DIR}/normal-misu-ops.yaml"
+rg -q 'https://server\.misu\.chat/ops/headlamp/' "${TMP_DIR}/normal-misu-ops.yaml"
+rg -q 'location \^~ /nacos/' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
+rg -q 'location \^~ /ops/headlamp/' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
+rg -q 'location \^~ /ops/ws/ssh/' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
+rg -q 'proxy_set_header Host api\.misu\.chat' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
 rg -q 'Path=/nacos/\*\*,/ops/headlamp/\*\*,/ops/api/\*\*' "${ROOT_DIR}/misu-gateway/src/main/resources/application-prod.yml"
 rg -q 'PreserveHostHeader' "${ROOT_DIR}/misu-gateway/src/main/resources/application-prod.yml"
 # Production mounts this ConfigMap over the packaged profile file. Keep the
@@ -117,7 +121,7 @@ rg -q 'Path=/nacos/\*\*,/ops/headlamp/\*\*,/ops/ws/\*\*' "${ROOT_DIR}/scripts/de
 rg -q 'Path=/nacos/\*\*,/ops/headlamp/\*\*,/ops/api/\*\*' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-gateway-config.yaml"
 rg -q 'PreserveHostHeader' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-gateway-config.yaml"
 rg -q -- '-base-url' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/headlamp-base-url-patch.yaml"
-echo 'Nacos server-side auth Secret and same-host path proxy contract: PASS'
+echo 'Nacos server-side auth Secret and same-origin path proxy contract: PASS'
 
 ruby - "${TMP_DIR}/normal-misu-ops.yaml" "${TMP_DIR}/normal-nginx.yaml" "${sha}" <<'RB'
 require 'yaml'

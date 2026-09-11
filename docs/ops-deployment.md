@@ -1,9 +1,9 @@
 # 运维中心部署说明
 
-`misu-ops` 是单副本 Deployment，Java 后端只监听 Pod 内的 `127.0.0.1:30264`，Nginx sidecar 监听 `8080`，Service `misu-ops` 只提供 ClusterIP `30264`。现有 Gateway 保留 `Host=api.misu.chat`，把 `/nacos/**`、`/ops/headlamp/**`、`/ops/api/**` 和 `/ops/ws/**` 转给这个 Service；sidecar 按路径固定选择 Nacos 或 Headlamp 上游：
+`misu-ops` 是单副本 Deployment，Java 后端只监听 Pod 内的 `127.0.0.1:30264`，Nginx sidecar 监听 `8080`，Service `misu-ops` 只提供 ClusterIP `30264`。主站 Nginx 把控制台路径和 SSH WebSocket 转给该 Service，并固定内部 `Host=api.misu.chat`；现有 Gateway 继续提供 `/ops/api/**` 和 `/ops/ws/**`。sidecar 按路径固定选择 Nacos 或 Headlamp 上游：
 
-- `https://api.misu.chat/nacos/` → `nacos.misu-server.svc.cluster.local:8848`
-- `https://api.misu.chat/ops/headlamp/` → `headlamp.kuboard.svc.cluster.local:80`
+- `https://server.misu.chat/nacos/` → `nacos.misu-server.svc.cluster.local:8848`
+- `https://server.misu.chat/ops/headlamp/` → `headlamp.kuboard.svc.cluster.local:80`
 
 两个控制台共用主站 Host，但会话 Cookie 名称相同、SameSite=None、Secure、HttpOnly，Path 分别为 `/nacos/` 和 `/ops/headlamp/`；主站统一 revoke 流程会撤销运维会话并按两个目标 Path 删除 Cookie。仓库没有外部边缘入口配置，因此 DNS、证书和到 Gateway 的边缘路由仍由生产入口维护。
 
@@ -110,6 +110,6 @@ kubectl -n misu-server run ops-probe --rm -i --restart=Never --image=curlimages/
   curl -fsS -H 'Host: api.misu.chat' http://misu-ops:30264/_ops/healthz
 ```
 
-从真实 HTTPS 入口验证 `https://api.misu.chat/nacos/` 和 `https://api.misu.chat/ops/headlamp/`：未登录控制台页面应被 `auth_request` 拒绝，管理员登录后页面、资源/API 请求和 WebSocket Upgrade 应能通过。再用未知 Host 请求 Service，应返回 `421`；请求 `/ops/internal/*` 和目标路径下未知 `/_ops/*` 不应从公网入口暴露。最后验证主站退出、管理员会话撤销和票据过期会关闭对应控制台连接，并记录真实状态码与日志时间。
+从真实 HTTPS 入口验证 `https://server.misu.chat/nacos/` 和 `https://server.misu.chat/ops/headlamp/`：未登录控制台页面应被 `auth_request` 拒绝，管理员登录后页面、资源/API 请求和 WebSocket Upgrade 应能通过。再用未知 Host 请求 Service，应返回 `421`；请求 `/ops/internal/*` 和目标路径下未知 `/_ops/*` 不应从公网入口暴露。最后验证主站退出、管理员会话撤销和票据过期会关闭对应控制台连接，并记录真实状态码与日志时间。
 
 配置代理变更使用 `scripts/deploy/release.sh --config misu-ops`，它生成带小写 `cfg-<git-sha>-<utc时间>` 的 ConfigMap，并从 live Deployment 导出实际镜像、环境变量和探针；主节点需要 `jq` 来清理 server fields，缺少时脚本会拒绝发布。回滚该时间戳时必须同时恢复 ConfigMap 和 Deployment 引用。正常 Java 发布使用提交短 SHA 作为 `OPS_CONFIG_TAG`，会先 apply 版本化 ConfigMap，再 apply Deployment。
