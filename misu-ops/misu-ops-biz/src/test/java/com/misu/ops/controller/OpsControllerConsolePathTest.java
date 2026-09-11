@@ -3,13 +3,18 @@ package com.misu.ops.controller;
 import com.misu.ops.OpsProperties;
 import com.misu.ops.console.ConsoleWebSocketBridgeService;
 import com.misu.ops.security.CurrentAccountVerifier;
+import com.misu.ops.security.OpsAuthorization;
 import com.misu.ops.security.OpsOriginPolicy;
+import com.misu.ops.ssh.SshConnectionService;
 import com.misu.ops.session.ConsoleTarget;
 import com.misu.ops.session.OpsSessionStore;
 import com.misu.security.dto.LoginUser;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -61,30 +66,42 @@ class OpsControllerConsolePathTest {
     }
 
     @Test
-    void logoutDeletesTheRequestedTargetCookiePath() {
+    void revokeDeletesBothTargetCookiePaths() {
         OpsProperties properties = new OpsProperties();
         properties.setAllowedOrigins(java.util.List.of("https://server.misu.chat"));
         OpsSessionStore store = new OpsSessionStore(properties, adminVerifier());
-        OpsController controller = new OpsController(properties, null,
-                new OpsOriginPolicy(properties), store, null,
+        OpsController controller = new OpsController(properties, new OpsAuthorization(adminVerifier()),
+                new OpsOriginPolicy(properties), store,
+                new SshConnectionService(properties, store),
                 new ConsoleWebSocketBridgeService(properties, store));
 
-        for (ConsoleTarget target : ConsoleTarget.values()) {
-            MockHttpServletRequest request = new MockHttpServletRequest();
-            request.addHeader("Origin", "https://server.misu.chat");
-            request.addHeader("Cookie", properties.getCookieName() + "=session-" + target.id());
-            MockHttpServletResponse response = new MockHttpServletResponse();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Origin", "https://server.misu.chat");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        var context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(new UsernamePasswordAuthenticationToken(
+                new LoginUser(7L, "admin", java.util.List.of("ADMIN")), "test"));
+        SecurityContextHolder.setContext(context);
+        try {
+            controller.revokeSessions(request, response);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
 
-            controller.logout(request, response, target.id());
-
-            String cookie = response.getHeader("Set-Cookie");
+        Set<String> deletedPaths = new HashSet<>();
+        for (String cookie : response.getHeaders(HttpHeaders.SET_COOKIE)) {
             assertTrue(cookie.startsWith(properties.getCookieName() + "=;"), cookie);
-            assertTrue(cookie.contains("Path=" + target.cookiePath()), cookie);
             assertTrue(cookie.contains("HttpOnly"), cookie);
             assertTrue(cookie.contains("Secure"), cookie);
             assertTrue(cookie.contains("SameSite=None"), cookie);
             assertTrue(cookie.contains("Max-Age=0"), cookie);
+            for (ConsoleTarget target : ConsoleTarget.values()) {
+                if (cookie.contains("Path=" + target.cookiePath())) {
+                    deletedPaths.add(target.cookiePath());
+                }
+            }
         }
+        assertEquals(Set.of("/nacos/", "/ops/headlamp/"), deletedPaths);
     }
 
     @Test
@@ -107,6 +124,12 @@ class OpsControllerConsolePathTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
         assertThrows(com.misu.common.exception.ServiceException.class,
                 () -> controller.exchangeConsoleSession(request, response, validTicket.token()));
+        // A valid ticket must survive a trusted sidecar selecting the wrong target.
+        assertThrows(com.misu.common.exception.ServiceException.class,
+                () -> controller.exchangeConsoleSession(trustedRequest("headlamp", "api.misu.chat"),
+                        new MockHttpServletResponse(), validTicket.token()));
+        controller.exchangeConsoleSession(trustedRequest("nacos", "api.misu.chat"),
+                new MockHttpServletResponse(), validTicket.token());
 
         OpsSessionStore.Ticket wrongHostTicket = store.issueTicket(
                 new LoginUser(7L, "admin", java.util.List.of("ADMIN")), ConsoleTarget.NACOS);

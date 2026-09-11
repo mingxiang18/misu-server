@@ -27,13 +27,15 @@ class OpsSessionStoreTest {
     }
 
     @Test
-    void consoleExchangeValidatesTargetBeforeCreatingSessionAndConsumesTicketOnce() {
+    void consoleExchangeRejectsWrongTargetBeforeConsumingAndRemainsSingleUse() {
         OpsSessionStore store = new OpsSessionStore(properties, verifier);
         OpsSessionStore.Ticket ticket = store.issueTicket(admin, ConsoleTarget.NACOS);
 
         ServiceException wrongTarget = assertThrows(ServiceException.class,
                 () -> store.exchangeConsoleSession(ticket.token(), ConsoleTarget.HEADLAMP));
         assertEquals(HttpStatus.FORBIDDEN, wrongTarget.getCode());
+        assertEquals(ConsoleTarget.NACOS,
+                store.exchangeConsoleSession(ticket.token(), ConsoleTarget.NACOS).target());
         ServiceException replay = assertThrows(ServiceException.class,
                 () -> store.exchangeConsoleSession(ticket.token(), ConsoleTarget.NACOS));
         assertEquals(HttpStatus.UNAUTHORIZED, replay.getCode());

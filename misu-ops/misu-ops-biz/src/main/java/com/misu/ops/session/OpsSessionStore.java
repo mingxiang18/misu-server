@@ -57,11 +57,24 @@ public class OpsSessionStore {
     }
 
     private Ticket consumeTicketLocked(String token) {
+        return consumeTicketLocked(token, null);
+    }
+
+    private Ticket consumeTicketLocked(String token, ConsoleTarget expectedTarget) {
         if (token == null || token.isBlank()) {
             throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维票据无效或已过期");
         }
-        Ticket ticket = tickets.remove(token);
+        Ticket ticket = tickets.get(token);
         if (ticket == null || ticket.expiresAt().isBefore(Instant.now())) {
+            if (ticket != null) {
+                tickets.remove(token, ticket);
+            }
+            throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维票据无效或已过期");
+        }
+        if (expectedTarget != null && ticket.target() != expectedTarget) {
+            throw new ServiceException(HttpStatus.FORBIDDEN, "运维票据目标与当前控制台不一致");
+        }
+        if (!tickets.remove(token, ticket)) {
             throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维票据无效或已过期");
         }
         accountVerifier.requireAdmin(ticket.userId(), ticket.userName());
@@ -77,10 +90,7 @@ public class OpsSessionStore {
     /** Atomically consumes a ticket and creates its session after host validation. */
     public ConsoleSession exchangeConsoleSession(String token, ConsoleTarget expectedTarget) {
         synchronized (lifecycleLock) {
-            Ticket ticket = consumeTicketLocked(token);
-            if (ticket.target() != expectedTarget) {
-                throw new ServiceException(HttpStatus.FORBIDDEN, "运维票据目标与当前控制台不一致");
-            }
+            Ticket ticket = consumeTicketLocked(token, expectedTarget);
             return createConsoleSessionLocked(ticket);
         }
     }

@@ -49,9 +49,7 @@ flowchart LR
 
 逻辑组成：`misu-ops` Java 服务负责授权、会话、节点配置、审计及 SSH 桥接；专用 Nginx 负责原控制台 HTTP/WebSocket 代理。可以部署为同一 Deployment 的两个容器，作为一个运维单元发布；Java 服务和代理容器均通过集群内部访问上游，不给它们新增公开 NodePort。主网站新增轻量页面和 API 封装。
 
-推荐使用已配置的独立 HTTPS 子域名 `ops-nacos.misu.chat` 和 `ops-k8s.misu.chat`，网站内用 iframe 展示。独立域名可保持 Headlamp 根路径和 Nacos `/nacos/`，减少静态资源、API、重定向及存储冲突。浏览器只访问网站 HTTPS 入口，不直接访问 10.8.0.x。
-
-若不增加域名，也可以用 `/ops/proxy/nacos/`、`/ops/proxy/headlamp/`，但必须先验证上游 base URL 与所有资源路径，并接受与主站共享 origin 的信任边界。Headlamp 官方支持 base URL，但需要匹配配置与探针，不能仅重写 HTML。第一版优先独立子域方案。
+生产入口使用已有的 `api.misu.chat` Host 和路径代理：Nacos 为 `/nacos/`，Headlamp 为 `/ops/headlamp/`。浏览器只访问网站 HTTPS 入口，不直接访问 10.8.0.x；Headlamp 通过受控 base URL 配置适配该路径。
 
 ## 身份、会话与权限
 
@@ -63,19 +61,19 @@ flowchart LR
 
 ### 浏览器会话接入
 
-1. 主站通过现有 axios 实例携带 JWT 请求 `POST /ops/api/launch-tickets`，后端实时核验账号状态及 ADMIN，生成一次性、短时、绑定用户和目标的票据（建议 30 秒）。
+1. 主站通过现有 axios 实例携带 JWT 请求 `POST /ops/api/console/tickets`，后端实时核验账号状态及 ADMIN，生成一次性、短时、绑定用户和目标的票据（建议 30 秒）。
 2. 通过定向表单 POST 将票据送到目标路径内的固定会话入口；兑换后设置 host-only、HttpOnly、Secure、SameSite=None 的独立运维 Cookie，并将 Path 限定为 `/nacos/` 或 `/ops/headlamp/`，再跳转到固定上游页面。Cookie 不含上游凭据或站点 JWT；票据不放查询字符串或日志。
 3. 代理每个请求检查运维会话，向上游仅转发必要头和上游自己的登录状态；清除主站凭据和浏览器伪造的代理身份头。
 4. Cookie 鉴权带来的写请求需校验 Origin/Referer 与 CSRF 防护；WebSocket 严格校验 Origin、会话归属和有效期，不能直接沿用公共安全模块全局关闭 CSRF 的默认行为。
 5. SSH 使用短时单次握手凭证，禁止 URL 中携带长期 JWT/SSH 密钥；日志脱敏。连接期间定期重新核验角色和账号状态（建议最多 30 秒），失效即关闭现有连接。新连接必须查当前权限，不能只相信旧 JWT 的角色快照。
 6. 退出登录增加服务端运维会话撤销；目前前端 logOut 仅清 Cookie。建议空闲 15 分钟、最长 2 小时后重新验证；鉴权服务不可达时拒绝新会话，现有会话到核验期限关闭。
 
-当前前端 Cookie 默认使用 `.misu.chat`，且 JavaScript 可读。**仅拆子域不能实现主站凭据隔离**：本次不做全局 host-only Cookie 迁移，避免影响现有 API 和媒体鉴权；`ops-nacos.misu.chat`、`ops-k8s.misu.chat` 与主站继续共享已有 `.misu.chat` 信任边界。运维代理必须清除浏览器发来的 `User-Token`、`User-Refresh-Token` 等主站凭据，并只接受配置的控制台 Host；运维会话使用独立 host-only、HttpOnly、Secure Cookie。后续若要彻底隔离主站凭据，另行设计受控登录交换并回归账号登录、刷新、退出。
+运维控制台与主站共用 `api.misu.chat` Host，但会话 Cookie 为 host-only、HttpOnly、Secure、SameSite=None，并按 `/nacos/` 与 `/ops/headlamp/` Path 隔离。运维代理必须清除浏览器发来的 `User-Token`、`User-Refresh-Token` 等主站凭据；主站退出通过统一 revoke 流程撤销运维会话并删除两个目标 Path 的 Cookie。
 
 ### 上游认证
 
 - Nacos 2.5.0 仍使用自己的权限体系，但运维入口由 Java 服务端使用只读 Kubernetes Secret 中的专用 Nacos 账号登录 `v1/auth/users/login`，按每个 ops session 缓存短时 `accessToken`，并通过内部代理注入 `Authorization: Bearer ...`。账号、密码和 token 均不进入浏览器、Cookie、URL 或日志；logout、撤销、角色失效和过期会清理 session 缓存，Nacos token 随其服务端 TTL 失效。
-- Nacos 2.5.0 legacy console 前端在 `console-ui/src/pages/Login/Login.jsx` 看到 `localStorage.token` 会跳转首页，而 `console-ui/src/globalLib.js` 在 `login_page_enabled=false` 时不要求浏览器 token。sidecar 仅对经过 auth_request 的 `/nacos/v1/console/server/state` 将该字段从 `true` 改为 `false`，同时继续给每个上游请求注入服务端 Authorization；这是直接进入控制台所需的最小 bootstrap，不把短时上游 token 降级暴露给浏览器。
+- Nacos 2.5.0 认证关闭时保留上游原生 `/nacos/` 响应，不做 HTML、JSON 或 JavaScript 响应体替换；未来启用认证时，Java 仍按 ops session 使用只读 Secret 获取短时 token，并只通过内部 `Authorization` 注入，浏览器不会得到 Nacos 凭据。
 - Headlamp 第一版保留现有 Kubernetes 登录。后续若要免登录，先固定实际版本，验证该版本是否支持身份感知代理，再设计 Kubernetes 身份/RBAC 映射；主站 JWT 不能直接当 Kubernetes Token。
 - 所有原有内网管理入口保持原有认证边界；本模块的 ADMIN 限制针对新增网站入口。若后续启用上游“信任代理免登录”，必须同时禁止未鉴权路径直接访问那个受信任实例，必要时单独部署 Headlamp 实例。
 
@@ -83,7 +81,7 @@ flowchart LR
 
 本次首页响应未见 X-Frame-Options 或 CSP frame-ancestors；Nacos 有 `script-src 'self'`。这只说明首页响应未直接禁止 iframe，不代表所有登录/API 路径或浏览器行为已验证。
 
-- 父页面 CSP frame-src 只允许指定运维域；控制台响应 frame-ancestors 只允许实际主站来源，保留上游其余 CSP。
+- 父页面 CSP frame-src 只允许指定运维路径；控制台响应由 sidecar 设置 `frame-ancestors https://server.misu.chat`，并隐藏上游冲突的 CSP/X-Frame-Options。
 - 检查 Location、Cookie Path/Domain、资源绝对路径、深链刷新，避免内网地址泄漏或登录循环。
 - HTTP 代理透传必要方法、查询参数、请求体；WebSocket 配置 Upgrade、Connection、超时与心跳，流式日志避免响应缓冲。
 - Nacos 需验证配置查看、编辑、发布、历史、导入导出；Headlamp 需验证资源列表、YAML、实时日志及 Pod exec。实际写操作验证使用测试命名空间/测试配置，发布后验收范围另定。

@@ -109,34 +109,27 @@ public class OpsController {
         return ResponseEntity.status(HttpStatus.SEE_OTHER).build();
     }
 
-    @Anonymous
-    @PostMapping("/console-sessions/logout")
-    public AjaxResult logout(HttpServletRequest request, HttpServletResponse response,
-                             @RequestParam(value = "target", defaultValue = "nacos") String targetValue) {
+    @PostMapping("/sessions/revoke")
+    public AjaxResult revokeSessions(HttpServletRequest request, HttpServletResponse response) {
         originPolicy.requireAllowedMainOrigin(request);
-        ConsoleTarget target = ConsoleTarget.parse(targetValue);
-        String sessionId = CookieSupport.read(request, properties.getCookieName());
-        sessions.revokeConsoleSession(sessionId);
-        consoleWebSockets.closeForSession(sessionId);
-        ResponseCookie cookie = ResponseCookie.from(properties.getCookieName(), "")
+        LoginUser current = authorization.requireCurrentAdmin();
+        sessions.revokeAllForUser(current.getUserId());
+        ssh.closeForUser(current.getUserId());
+        consoleWebSockets.closeForUser(current.getUserId());
+        for (ConsoleTarget target : ConsoleTarget.values()) {
+            response.addHeader(HttpHeaders.SET_COOKIE, expiredConsoleCookie(target).toString());
+        }
+        return AjaxResult.success();
+    }
+
+    private ResponseCookie expiredConsoleCookie(ConsoleTarget target) {
+        return ResponseCookie.from(properties.getCookieName(), "")
                 .httpOnly(true)
                 .secure(properties.isCookieSecure())
                 .sameSite("None")
                 .path(target.cookiePath())
                 .maxAge(0)
                 .build();
-        response.setHeader(HttpHeaders.SET_COOKIE, cookie.toString());
-        return AjaxResult.success();
-    }
-
-    @PostMapping("/sessions/revoke")
-    public AjaxResult revokeSessions(HttpServletRequest request) {
-        originPolicy.requireAllowedMainOrigin(request);
-        LoginUser current = authorization.requireCurrentAdmin();
-        sessions.revokeAllForUser(current.getUserId());
-        ssh.closeForUser(current.getUserId());
-        consoleWebSockets.closeForUser(current.getUserId());
-        return AjaxResult.success();
     }
 
     @PostMapping("/ssh/sessions")
