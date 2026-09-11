@@ -74,7 +74,7 @@ flowchart LR
 
 - Nacos 2.5.0 仍使用自己的权限体系，但运维入口由 Java 服务端使用只读 Kubernetes Secret 中的专用 Nacos 账号登录 `v1/auth/users/login`，按每个 ops session 缓存短时 `accessToken`，并通过内部代理注入 `Authorization: Bearer ...`。账号、密码和 token 均不进入浏览器、Cookie、URL 或日志；logout、撤销、角色失效和过期会清理 session 缓存，Nacos token 随其服务端 TTL 失效。
 - Nacos 2.5.0 认证关闭时保留上游原生 `/nacos/` 响应，不做 HTML、JSON 或 JavaScript 响应体替换；未来启用认证时，Java 仍按 ops session 使用只读 Secret 获取短时 token，并只通过内部 `Authorization` 注入，浏览器不会得到 Nacos 凭据。
-- Headlamp 使用官方 `-proxy-auth=true` 身份感知代理模式：sidecar 只把 Java 已校验的 ADMIN 用户名写入内部结果，再由代理覆盖 `X-Forwarded-User`；浏览器不接收 Kubernetes token。Headlamp 继续使用自身 `-in-cluster` ServiceAccount 访问 Kubernetes API，资源权限仍由该 ServiceAccount 的 RBAC 决定，主站 JWT 不直接充当 Kubernetes Token。官方 v0.43.0 release 首次加入 proxy-auth；仓库 patch 固定当前稳定 v0.45.0 及官方 GHCR 多架构 manifest digest，避免继续运行不支持该参数的 v0.42.0 镜像。
+- Headlamp 使用官方 `-proxy-auth=true` 身份感知代理模式：sidecar 只把 Java 已校验的 ADMIN 用户名写入内部结果，再由代理覆盖 `X-Forwarded-User`；浏览器不接收 Kubernetes token。v0.45 的 proxy-auth 只建立 UI 身份，资源 API 在没有每用户 token 时仍会要求凭据，因此 patch 同时启用官方的 `-unsafe-use-service-account-token`，让受保护入口下的请求使用 Headlamp Pod 的 in-cluster ServiceAccount。该 flag 只适合可信 auth proxy 后使用；资源权限和审计身份由该 ServiceAccount 的 RBAC 决定，主站 JWT 不直接充当 Kubernetes Token。官方 v0.43.0 release 首次加入 proxy-auth；仓库 patch 固定当前稳定 v0.45.0 及官方 GHCR 多架构 manifest digest，避免继续运行不支持该参数的 v0.42.0 镜像。
 - 所有原有内网管理入口保持原有认证边界；本模块的 ADMIN 限制针对新增网站入口。Headlamp 的 identity-aware proxy 只在 sidecar 受保护路径启用；部署 patch 会收回旧 NodePort，Headlamp 仅通过集群内 Service 供 sidecar 访问，不能绕过 `auth_request` 直接到达实例。
 
 ## 代理兼容性

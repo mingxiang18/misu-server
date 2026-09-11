@@ -13,10 +13,16 @@ spec:
           image: ghcr.io/headlamp-k8s/headlamp:v0.45.0@sha256:db3f0e0fc58d358d41daa3fe7fc852437552c7ee873c3645470f7b86a8e0db49
           imagePullPolicy: IfNotPresent
           # Headlamp documents -base-url as the supported Kubernetes setting.
-          # Keep -in-cluster so the existing service-account login remains in use.
+          # Keep -in-cluster so the pod ServiceAccount can serve the protected
+          # console without placing a Kubernetes token in the browser.
           args:
             - -in-cluster
             - -proxy-auth=true
+            # proxy-auth supplies the UI identity; this flag supplies the
+            # in-cluster API credential when no browser token is permitted.
+            # The Service is ClusterIP-only and the sidecar auth_request is
+            # the required trusted boundary for this shared ServiceAccount.
+            - -unsafe-use-service-account-token
             - -plugins-dir=/headlamp/plugins
             - -base-url
             - /ops/headlamp
