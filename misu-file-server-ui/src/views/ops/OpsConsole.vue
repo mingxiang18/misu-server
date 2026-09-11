@@ -21,7 +21,7 @@ const nodes = [
 const activeTab = ref('nacos')
 const activeNode = ref('master')
 const consoleFrame = ref(null)
-const consoleFrameName = `ops-console-${Math.random().toString(36).slice(2)}`
+const consoleFrameName = ref(`ops-console-${Math.random().toString(36).slice(2)}`)
 const consoleUrl = ref('')
 const consoleLoading = ref(false)
 const consoleError = ref('')
@@ -40,6 +40,26 @@ let resizeObserver
 let connectionGeneration = 0
 let consoleGeneration = 0
 
+function stopConsoleFrame() {
+  const frame = consoleFrame.value
+  if (!frame) return
+  // Stop a previous form navigation before removing the document. This also
+  // prevents a stale console request from racing a newly issued ticket.
+  try {
+    frame.contentWindow?.stop?.()
+  } catch {
+    // A cross-origin frame may reject access to contentWindow.
+  }
+  frame.src = 'about:blank'
+}
+
+function cancelConsoleLoad() {
+  consoleGeneration += 1
+  stopConsoleFrame()
+  consoleUrl.value = ''
+  consoleLoading.value = false
+}
+
 const activeTabInfo = computed(() => tabs.find((tab) => tab.key === activeTab.value))
 const activeNodeInfo = computed(() => nodes.find((node) => node.id === activeNode.value))
 const isSshConnected = computed(() => sshStatus.value === 'connected')
@@ -56,7 +76,14 @@ async function loadConsole(target) {
   const generation = ++consoleGeneration
   consoleError.value = ''
   consoleLoading.value = true
+  stopConsoleFrame()
   consoleUrl.value = ''
+  // Wait for Vue to remove the old iframe before asking the server for a new
+  // ticket. A fresh name prevents a detached old frame from being a form
+  // target if the browser has not finished its previous navigation yet.
+  consoleFrameName.value = `ops-console-${Math.random().toString(36).slice(2)}`
+  await nextTick()
+  if (generation !== consoleGeneration || activeTab.value !== target) return
   try {
     const data = await issueConsoleTicket(target)
     if (generation !== consoleGeneration || activeTab.value !== target) return
@@ -76,7 +103,7 @@ async function loadConsole(target) {
       const form = document.createElement('form')
       form.method = 'post'
       form.action = exchangeUrl
-      form.target = consoleFrameName
+      form.target = consoleFrameName.value
       form.hidden = true
       const input = document.createElement('input')
       input.type = 'hidden'
@@ -281,6 +308,7 @@ function createTerminal() {
 
 watch(activeTab, (tab, previous) => {
   if (previous === 'ssh' && tab !== 'ssh') disconnectSsh()
+  if (tab === 'ssh') cancelConsoleLoad()
   openActiveTab()
 })
 
@@ -289,7 +317,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  consoleGeneration += 1
+  cancelConsoleLoad()
   resizeObserver?.disconnect()
   disconnectSsh()
   terminal.value?.dispose()

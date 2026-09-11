@@ -103,6 +103,11 @@ public class OpsSessionStore {
         return session;
     }
 
+    /** Safe operational diagnostic; session identifiers and user credentials stay private. */
+    public int activeConsoleSessionCount() {
+        return consoleSessions.size();
+    }
+
     public ConsoleSession requireConsoleSession(String sessionId, String expectedTarget) {
         boolean cookiePresent = sessionId != null && !sessionId.isBlank();
         if (!cookiePresent) {

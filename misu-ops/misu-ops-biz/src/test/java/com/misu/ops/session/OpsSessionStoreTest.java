@@ -8,6 +8,7 @@ import com.misu.security.dto.LoginUser;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 class OpsSessionStoreTest {
 
@@ -39,6 +40,18 @@ class OpsSessionStoreTest {
         ServiceException replay = assertThrows(ServiceException.class,
                 () -> store.exchangeConsoleSession(ticket.token(), ConsoleTarget.NACOS));
         assertEquals(HttpStatus.UNAUTHORIZED, replay.getCode());
+    }
+
+    @Test
+    void exchangedConsoleSessionIsImmediatelyVisibleToTheProxyAuthPath() {
+        OpsSessionStore store = new OpsSessionStore(properties, verifier);
+        OpsSessionStore.Ticket ticket = store.issueTicket(admin, ConsoleTarget.HEADLAMP);
+
+        OpsSessionStore.ConsoleSession session = store.exchangeConsoleSession(
+                ticket.token(), ConsoleTarget.HEADLAMP);
+
+        assertEquals(1, store.activeConsoleSessionCount());
+        assertSame(session, store.requireConsoleSession(session.id(), ConsoleTarget.HEADLAMP.id()));
     }
 
     @Test

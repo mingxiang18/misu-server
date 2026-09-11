@@ -30,12 +30,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
 
 @Validated
 @RestController
 @RequestMapping("/api")
+@Slf4j
 public class OpsController {
 
     private final OpsProperties properties;
@@ -97,6 +99,8 @@ public class OpsController {
         // one-time ticket, then atomically consume/create under the store lock.
         ConsoleTarget hostTarget = originPolicy.requireTrustedConsoleTarget(request);
         OpsSessionStore.ConsoleSession session = sessions.exchangeConsoleSession(ticketToken, hostTarget);
+        log.info("运维控制台会话已创建: target={} activeSessionCount={}",
+                hostTarget.id(), sessions.activeConsoleSessionCount());
         ResponseCookie cookie = ResponseCookie.from(properties.getCookieName(), session.id())
                 .httpOnly(true)
                 .secure(properties.isCookieSecure())
