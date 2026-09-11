@@ -13,6 +13,7 @@
 - 交换入口修复发布：`50e1b2a0bfb7f5d0992854727d17415c774db166`（sidecar 信任头、Host 和单次目标票据负责交换授权）
 - Gateway 转发头修复发布：`d0c09109e2948a8d376420823e2d6ae0944ce0e1`（包含 `50e1b2a`、`1730861`）
 - 控制台 iframe 响应头修复：`28797c846fead2b3fde10a6e09eac12616becfca`（config-only 发布，保留 d0c0910 Java 镜像）
+- SameSite 修复发布尝试：`5d927c1335b854d558f4eedb31bbbdbb1892f4ab`（rollout 超时后进入自动回滚）
 - 生产回滚点：Kubernetes 备份 `/root/backups/20260910T100559Z/k8s`；`misu-ops` 修复备份 `/root/backups/20260910T111606Z/k8s`；前端备份 `/root/backups/20260910T111035Z/html`；Nacos 备份 `/root/backups/20260910T100842Z/nacos/misu-gateway-prod.yml`
 - 本次 `misu-ops` 发布回滚点：`/root/backups/20260910T121744Z/k8s`（另有发布前资源快照 `/root/backups/20260910T121719Z/k8s-ops-sso`）
 - 本次日志修复发布回滚点：`/root/backups/20260910T165319Z/k8s`（发布前资源快照 `/root/backups/20260910T165308Z/k8s-ops-logfix`）
@@ -67,6 +68,7 @@
 - `d0c0910` 最终重发：镜像 manifest digest 前缀 `24b487676f5d`；备份 `/root/backups/20260911T050033Z/k8s`；ConfigMap `misu-ops-nginx-config-d0c0910`；Deployment 1/1、双容器 Ready、重启 0；Pod 内 `nginx -t` 成功。公网 Nacos/Headlamp exchange 对无效票据均 HTTP 401（无 Origin 与允许 Origin 均相同），内部健康 HTTP 200、未知 Host HTTP 421、未知路径 HTTP 404。
 - `d0c0910` 发布后匿名回归：`/nacos/`、`/ops/headlamp/`、`/ops/api/endpoints` 和 SSH API 均 HTTP 401；公网未知路径 HTTP 404；近 10 分钟 Nginx/ops 日志未命中 authorization、cookie、ticket、password、secret 或 generated security password 模式。
 - `28797c8` 发布后：两端无效 exchange 均 HTTP 401，响应无 `X-Frame-Options`，CSP 含 `frame-ancestors https://server.misu.chat`；匿名 Nacos/Headlamp/API/SSH 均 HTTP 401，公网未知路径 HTTP 404，sidecar 内未知 Host HTTP 421；内部健康 HTTP 200；近 10 分钟 Nginx/ops 日志敏感模式计数均为 0。
+- `5d927c1` 发布尝试：镜像 manifest digest 前缀 `510d03749a68`；备份 `/root/backups/20260911T052240Z/k8s`；rollout 等待 180 秒超时，release 脚本进入 misu-ops 自动回滚。回滚收尾时主节点 SSH banner timeout，最终资源状态待 SSH 恢复后确认；未进行真实 ADMIN ticket 验收。
 - 主节点无残留 `kubectl port-forward`、release、Docker build/push 进程。
 - 前端备份目录 `/root/backups/20260910T110417Z/html` 存在（73 个文件）；live `index.html` 已更新，ops 页面标记可见。
 - 回滚后集群内 `server.misu.chat` 首页 HTTP 200，静态 JS 资源 HTTP 200；回滚未触碰 `misu-ops` 或 gateway。
@@ -84,4 +86,5 @@
 - DNS/TLS 尚未配置，因此 Nacos/Headlamp 独立域名连接终止，不能宣称公共 HTTPS 主站 iframe 或控制台可用；未降低 Secure Cookie、添加浏览器证书例外或长期 NodePort。
 - 本次真实 ADMIN 浏览器 session 的 Nacos state/API 与页面静态资源验收需由持有浏览器会话的主线程补充；本代理未获取或记录任何浏览器凭据。
 - `d0c0910` 修复后的真实 ADMIN 303、目标 Path Cookie、HTML/CSS/JS/state/API、redirect、错目标/重放和 HTTP/WS 页面验收仍需由持有登录浏览器会话的主线程补充；当前本机无浏览器 tab，未伪造会话或令牌。
+- `5d927c1` 的 SameSite=None 真实 Cookie 验收未执行；需先确认自动回滚最终状态，再由主线程浏览器重试。
 - 前端未重新发布；现网前端继续使用已验收版本。DNS/TLS 仍未配置，不宣称新 console URL 可从公共 HTTPS 主站使用。
