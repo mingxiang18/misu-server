@@ -24,3 +24,25 @@ data:
             namespace: prod
             group: DEFAULT_GROUP
             file-extension: yml
+        gateway:
+          # This file is mounted over the packaged application-prod.yml in
+          # production, so the sidecar console routes must be present here.
+          # Keep the public Host for path-based Nacos/Headlamp dispatch.
+          discovery:
+            locator:
+              enabled: true
+          routes:
+            - id: misu-ops-console-ws
+              uri: ws://misu-ops:30264
+              predicates:
+                - Path=/nacos/**,/ops/headlamp/**,/ops/ws/**
+                - Header=Upgrade, (?i)websocket
+              filters:
+                - PreserveHostHeader
+
+            - id: misu-ops-console
+              uri: http://misu-ops:30264
+              predicates:
+                - Path=/nacos/**,/ops/headlamp/**,/ops/api/**
+              filters:
+                - PreserveHostHeader

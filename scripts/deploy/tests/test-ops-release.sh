@@ -108,6 +108,14 @@ rg -q 'https://api\.misu\.chat/nacos/' "${TMP_DIR}/normal-misu-ops.yaml"
 rg -q 'https://api\.misu\.chat/ops/headlamp/' "${TMP_DIR}/normal-misu-ops.yaml"
 rg -q 'Path=/nacos/\*\*,/ops/headlamp/\*\*,/ops/api/\*\*' "${ROOT_DIR}/misu-gateway/src/main/resources/application-prod.yml"
 rg -q 'PreserveHostHeader' "${ROOT_DIR}/misu-gateway/src/main/resources/application-prod.yml"
+# Production mounts this ConfigMap over the packaged profile file. Keep the
+# console routes in the effective production source as well as the source
+# profile so --config misu-gateway cannot silently omit them.
+rg -q 'id: misu-ops-console-ws' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-gateway-config.yaml"
+rg -q 'id: misu-ops-console' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-gateway-config.yaml"
+rg -q 'Path=/nacos/\*\*,/ops/headlamp/\*\*,/ops/ws/\*\*' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-gateway-config.yaml"
+rg -q 'Path=/nacos/\*\*,/ops/headlamp/\*\*,/ops/api/\*\*' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-gateway-config.yaml"
+rg -q 'PreserveHostHeader' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-gateway-config.yaml"
 rg -q -- '-base-url' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/headlamp-base-url-patch.yaml"
 echo 'Nacos server-side auth Secret and same-host path proxy contract: PASS'
 
