@@ -74,7 +74,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.path.startswith("/ops/ws/console/") and self.headers.get("Upgrade", "").lower() == "websocket":
                 self.append(
-                    "WS_BACKEND path=%s original=%s target=%s cookie=%s upstream-cookie=%s upstream-auth=%s"
+                    "WS_BACKEND path=%s original=%s target=%s cookie=%s upstream-cookie=%s upstream-auth=%s user=%s groups=%s group=%s email=%s id_token=%s"
                     % (
                         self.path,
                         self.headers.get("X-Ops-Original-URI", ""),
@@ -82,6 +82,11 @@ class Handler(BaseHTTPRequestHandler):
                         self.headers.get("Cookie", ""),
                         self.headers.get("X-Ops-Upstream-Cookie", ""),
                         self.headers.get("X-Ops-Upstream-Authorization", ""),
+                        self.headers.get("X-Forwarded-User", ""),
+                        self.headers.get("X-Forwarded-Groups", ""),
+                        self.headers.get("X-Forwarded-Group", ""),
+                        self.headers.get("X-Forwarded-Email", ""),
+                        self.headers.get("X-Forwarded-Id-Token", ""),
                     )
                 )
                 self.write(101, headers={

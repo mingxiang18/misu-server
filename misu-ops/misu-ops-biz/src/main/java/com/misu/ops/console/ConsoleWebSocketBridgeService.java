@@ -49,6 +49,7 @@ public class ConsoleWebSocketBridgeService {
     public static final String ORIGINAL_HOST_HEADER = "X-Ops-Original-Host";
     public static final String UPSTREAM_COOKIE_HEADER = "X-Ops-Upstream-Cookie";
     public static final String UPSTREAM_AUTH_HEADER = "X-Ops-Upstream-Authorization";
+    private static final String UPSTREAM_USER_HEADER = "X-Forwarded-User";
 
     private static final int MAX_ORIGINAL_URI_LENGTH = 8192;
     private static final int MAX_PENDING_MESSAGES = 64;
@@ -96,7 +97,7 @@ public class ConsoleWebSocketBridgeService {
             WebSocket.Builder builder = httpClient.newWebSocketBuilder()
                     .connectTimeout(Duration.ofMillis(properties.getConsoleWebSocketConnectTimeoutMillis()))
                     .header("Origin", originOf(target.url(properties)));
-            addUpstreamHeaders(builder, headers, target, consoleSession.id());
+            addUpstreamHeaders(builder, headers, target, consoleSession.id(), consoleSession.userName());
             if (!requestedProtocols.isEmpty()) {
                 builder.subprotocols(requestedProtocols.get(0),
                         requestedProtocols.subList(1, requestedProtocols.size()).toArray(String[]::new));
@@ -172,7 +173,7 @@ public class ConsoleWebSocketBridgeService {
     }
 
     private void addUpstreamHeaders(WebSocket.Builder builder, HttpHeaders headers,
-                                    ConsoleTarget target, String sessionId) {
+                                    ConsoleTarget target, String sessionId, String sessionUserName) {
         String browserCookies = joinHeaderValues(headers, HttpHeaders.COOKIE);
         String cookie = target == ConsoleTarget.NACOS ? null : headers.getFirst(UPSTREAM_COOKIE_HEADER);
         if (cookie == null && target != ConsoleTarget.NACOS) {
@@ -192,6 +193,9 @@ public class ConsoleWebSocketBridgeService {
                 blockedCookieNames());
         if (safeHeaderValue(authorization)) {
             builder.header(HttpHeaders.AUTHORIZATION, authorization);
+        }
+        if (target == ConsoleTarget.HEADLAMP && safeHeaderValue(sessionUserName)) {
+            builder.header(UPSTREAM_USER_HEADER, sessionUserName);
         }
     }
 

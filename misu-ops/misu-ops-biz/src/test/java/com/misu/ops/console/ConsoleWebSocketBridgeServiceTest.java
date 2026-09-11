@@ -67,6 +67,11 @@ class ConsoleWebSocketBridgeServiceTest {
             headers.set(ConsoleWebSocketBridgeService.ORIGINAL_URI_HEADER,
                     "/nacos/socket?x=a%2Fb");
             headers.set("Cookie", "User-Token=main; NACOS_AUTH_TOKEN=browser");
+            headers.set("X-Forwarded-User", "attacker");
+            headers.set("X-Forwarded-Groups", "attacker-group");
+            headers.set("X-Forwarded-Group", "attacker-compat-group");
+            headers.set("X-Forwarded-Email", "attacker@example.com");
+            headers.set("X-Forwarded-Id-Token", "attacker-token");
             headers.set(ConsoleWebSocketBridgeService.UPSTREAM_COOKIE_HEADER,
                     "NACOS_AUTH_TOKEN=upstream; User-Token=must-remove");
             headers.set("Sec-WebSocket-Protocol", "console.v1, console.v2");
@@ -78,6 +83,11 @@ class ConsoleWebSocketBridgeServiceTest {
             assertEquals("console.v1, console.v2", upstream.requestedProtocol());
             org.junit.jupiter.api.Assertions.assertFalse(upstream.handshake().contains("User-Token"));
             org.junit.jupiter.api.Assertions.assertFalse(upstream.handshake().contains("Authorization:"));
+            org.junit.jupiter.api.Assertions.assertFalse(upstream.handshake().contains("X-Forwarded-User:"));
+            org.junit.jupiter.api.Assertions.assertFalse(upstream.handshake().contains("X-Forwarded-Groups:"));
+            org.junit.jupiter.api.Assertions.assertFalse(upstream.handshake().contains("X-Forwarded-Group:"));
+            org.junit.jupiter.api.Assertions.assertFalse(upstream.handshake().contains("X-Forwarded-Email:"));
+            org.junit.jupiter.api.Assertions.assertFalse(upstream.handshake().contains("X-Forwarded-Id-Token:"));
 
             WebSocketSession downstream = mock(WebSocketSession.class);
             when(downstream.isOpen()).thenReturn(true);
@@ -94,6 +104,44 @@ class ConsoleWebSocketBridgeServiceTest {
             org.junit.jupiter.api.Assertions.assertTrue(messages.await(2, TimeUnit.SECONDS));
             assertEquals("ping", ((org.springframework.web.socket.TextMessage) received.get(0)).getPayload());
             assertEquals(3, ((org.springframework.web.socket.BinaryMessage) received.get(1)).getPayload().remaining());
+            prepared.bridge().close(org.springframework.web.socket.CloseStatus.NORMAL);
+            assertEquals(0, service.activeBridgeCount());
+        }
+    }
+
+    @Test
+    void headlampWebSocketUsesSessionIdentityAndDropsClientIdentityHeaders() throws Exception {
+        try (LocalWebSocketServer upstream = new LocalWebSocketServer()) {
+            OpsProperties properties = new OpsProperties();
+            properties.setHeadlampUrl("https://ops-headlamp.example/ops/headlamp/");
+            properties.setHeadlampUpstreamUrl("http://127.0.0.1:" + upstream.port() + "/");
+            properties.setConsoleWebSocketConnectTimeoutMillis(2000);
+            OpsSessionStore sessions = new OpsSessionStore(properties, new AdminVerifier());
+            OpsSessionStore.Ticket ticket = sessions.issueTicket(
+                    new LoginUser(1L, "admin", java.util.List.of("ADMIN")), ConsoleTarget.HEADLAMP);
+            OpsSessionStore.ConsoleSession session = sessions.createConsoleSession(ticket);
+            ConsoleWebSocketBridgeService service = new ConsoleWebSocketBridgeService(properties, sessions);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set(ConsoleWebSocketBridgeService.ORIGINAL_URI_HEADER,
+                    "/ops/headlamp/wsMultiplexer");
+            headers.set(HttpHeaders.COOKIE, properties.getCookieName() + "=" + session.id());
+            headers.set("Sec-WebSocket-Protocol", "console.v1");
+            headers.set("X-Forwarded-User", "attacker");
+            headers.set("X-Forwarded-Groups", "attacker-group");
+            headers.set("X-Forwarded-Group", "attacker-compat-group");
+            headers.set("X-Forwarded-Email", "attacker@example.com");
+            headers.set("X-Forwarded-Id-Token", "attacker-token");
+
+            ConsoleWebSocketBridgeService.PreparedBridge prepared =
+                    service.prepare(headers, ConsoleTarget.HEADLAMP, session);
+            String handshake = upstream.handshake();
+            org.junit.jupiter.api.Assertions.assertTrue(handshake.contains("X-Forwarded-User: admin"), handshake);
+            org.junit.jupiter.api.Assertions.assertFalse(handshake.contains("attacker"), handshake);
+            org.junit.jupiter.api.Assertions.assertFalse(handshake.contains("X-Forwarded-Groups:"), handshake);
+            org.junit.jupiter.api.Assertions.assertFalse(handshake.contains("X-Forwarded-Group:"), handshake);
+            org.junit.jupiter.api.Assertions.assertFalse(handshake.contains("X-Forwarded-Email:"), handshake);
+            org.junit.jupiter.api.Assertions.assertFalse(handshake.contains("X-Forwarded-Id-Token:"), handshake);
             prepared.bridge().close(org.springframework.web.socket.CloseStatus.NORMAL);
             assertEquals(0, service.activeBridgeCount());
         }

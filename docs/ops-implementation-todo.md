@@ -29,9 +29,10 @@
 - [x] Nacos 2.5.0 使用服务端只读 Secret 凭据按 ops session 获取/缓存短时 token；当前生产认证关闭时保持原生 state/API，不做浏览器 token 或响应体替换，未来启用认证仍保留服务端注入路径。
 - [x] 将两个控制台接入主站 `server.misu.chat` 同源路径：Nacos 原生 `/nacos/`、Headlamp `/ops/headlamp/`；交换入口按目标路径绑定，`MISU_OPS_SESSION` Cookie 按目标 Path 并存，主站 Nginx/sidecar 保留 HTTP 长轮询、重定向和 WS Upgrade，并清除主站凭据。
 
-后端实现契约：Java context 为 `/ops`；控制台 WS 为 `/ops/ws/console/{nacos|headlamp}`，由运维 Nginx 内部 `/_ops/ws` 转发。HTTP/WS auth_request 使用 loopback + `X-Ops-Proxy-Key`，目标使用 `X-Ops-Target`/`X-Ops-Console-Target`；校验后的上游凭据只通过 `X-Ops-Upstream-Cookie` 与 `X-Ops-Upstream-Authorization` 响应/请求头传递，主站 JWT、运维 Cookie 和重复 Cookie 均会过滤。
+后端实现契约：Java context 为 `/ops`；控制台 WS 为 `/ops/ws/console/{nacos|headlamp}`，由运维 Nginx 内部 `/_ops/ws` 转发。HTTP/WS auth_request 使用 loopback + `X-Ops-Proxy-Key`，目标使用 `X-Ops-Target`/`X-Ops-Console-Target`；校验后的上游凭据只通过 `X-Ops-Upstream-Cookie` 与 `X-Ops-Upstream-Authorization` 响应/请求头传递。Headlamp WS 的 `X-Forwarded-User` 由已校验的服务端 ConsoleSession 用户名生成，并过滤浏览器的所有身份头；Nacos 不接收这些身份头。主站 JWT、运维 Cookie 和重复 Cookie 均会过滤。
 
-后端真实证据（2026-09-10）：`ConsoleWebSocketTomcatIntegrationTest` 通过 2 项真实嵌入式 Tomcat TCP WebSocket 测试，握手只携带运维 Cookie 和 `X-Ops-*` 内部头（不携带主站 JWT），确认 `/ops/ws/console/nacos` 返回 `101` 和 `console.v1` 协商结果，并在账号 verifier 拒绝 ADMIN、会话超时两条路径分别观察下游客户端与本地上游同时关闭、桥接计数归零；完整 `misu-ops-biz` 测试共 17 项通过，Maven package 通过。读循环将超时和其他异常标记为测试失败，不再误报关闭成功。Spring 6.1.6 本地源码确认握手协议判断会 unwrap `WebSocketHandlerDecorator`，实现已改为直接握手处理器协商，避免协议响应丢失。
+后端真实证据（2026-09-11）：`ConsoleWebSocketTomcatIntegrationTest` 通过 3 项真实嵌入式 Tomcat TCP WebSocket 测试，握手只携带运维 Cookie 和 `X-Ops-*` 内部头（不携带主站 JWT），确认 `/ops/ws/console/nacos` 返回 `101` 和 `console.v1` 协商结果，并在账号 verifier 拒绝 ADMIN、会话超时两条路径分别观察下游客户端与本地上游同时关闭、桥接计数归零；Headlamp 路径确认仅向上游注入服务端 ConsoleSession 用户名；完整 `misu-ops-biz` 测试共 29 项通过，Maven package 通过。读循环将超时和其他异常标记为测试失败，不再误报关闭成功。Spring 6.1.6 本地源码确认握手协议判断会 unwrap `WebSocketHandlerDecorator`，实现已改为直接握手处理器协商，避免协议响应丢失。
+2026-09-11 补充：生产即时 401 的根因是 Headlamp WebSocket 上游缺少由服务端会话生成的 `X-Forwarded-User`，此前的 `proxy_read_timeout` 修复解决的是 `follow=true` 日志流经过边缘代理后的长期稳定性问题。当前 `ConsoleWebSocketBridgeService` 已在真实 Tomcat 集成测试中确认 Headlamp 只收到会话用户 `admin`，伪造的 `X-Forwarded-User`、Groups、Group、Email 和 Id-Token 均不透传；Nginx 双跳 harness 同时覆盖 `/wsMultiplexer` 握手。
 
 ## 部署子任务
 

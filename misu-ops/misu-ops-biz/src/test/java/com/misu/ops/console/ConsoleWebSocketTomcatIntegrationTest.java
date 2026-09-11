@@ -110,6 +110,33 @@ class ConsoleWebSocketTomcatIntegrationTest {
         }
     }
 
+    @Test
+    void tomcatForwardsOnlyVerifiedHeadlampIdentityToUpstream() throws Exception {
+        try (ControlledWebSocketServer upstream = new ControlledWebSocketServer()) {
+            properties.setSessionIdleSeconds(900);
+            properties.setRoleCheckSeconds(60);
+            properties.setHeadlampUrl("http://localhost:" + port + "/ops/headlamp/");
+            properties.setHeadlampUpstreamUrl("http://127.0.0.1:" + upstream.port() + "/");
+            OpsSessionStore.Ticket ticket = sessions.issueTicket(
+                    new LoginUser(7L, "admin", List.of("ADMIN")), ConsoleTarget.HEADLAMP);
+            OpsSessionStore.ConsoleSession session = sessions.createConsoleSession(ticket);
+            RawWebSocketClient client = RawWebSocketClient.connect(
+                    port, session.id(), properties.getCookieName(), "headlamp", "/ops/headlamp/wsMultiplexer");
+            assertEquals("console.v1", client.protocol);
+            assertTrue(upstream.handshake.get(2, TimeUnit.SECONDS));
+            assertEquals("admin", upstream.forwardedUser);
+            assertEquals("", upstream.forwardedGroups);
+            assertEquals("", upstream.forwardedGroup);
+            assertEquals("", upstream.forwardedEmail);
+            assertEquals("", upstream.forwardedIdToken);
+
+            bridges.closeForSession(session.id());
+            assertTrue(client.closed.get(3, TimeUnit.SECONDS));
+            assertTrue(upstream.closed.get(3, TimeUnit.SECONDS));
+            assertEquals(0, bridges.activeBridgeCount());
+        }
+    }
+
     private TestConnection connect(ControlledWebSocketServer upstream, NacosLoginServer auth) throws Exception {
         properties.setSessionIdleSeconds(900);
         properties.setRoleCheckSeconds(60);
@@ -148,18 +175,26 @@ class ConsoleWebSocketTomcatIntegrationTest {
         }
 
         static RawWebSocketClient connect(int port, String sessionId, String cookieName) throws Exception {
+            return connect(port, sessionId, cookieName, "nacos", "/nacos/socket?x=a%2Fb");
+        }
+
+        static RawWebSocketClient connect(int port, String sessionId, String cookieName,
+                                          String target, String originalUri) throws Exception {
             Socket socket = new Socket("localhost", port);
             socket.setSoTimeout(5000);
             String key = Base64.getEncoder().encodeToString("tomcat-test-key!".getBytes(StandardCharsets.US_ASCII));
-            String request = "GET /ops/ws/console/nacos HTTP/1.1\r\n"
+            String request = "GET /ops/ws/console/" + target + " HTTP/1.1\r\n"
                     + "Host: localhost:" + port + "\r\n"
                     + "Upgrade: websocket\r\nConnection: Upgrade\r\n"
                     + "Sec-WebSocket-Key: " + key + "\r\nSec-WebSocket-Version: 13\r\n"
                     + "Sec-WebSocket-Protocol: console.v1, console.v2\r\n"
                     + "Origin: http://localhost:" + port + "\r\n"
                     + "X-Ops-Proxy-Key: integration-secret\r\n"
-                    + "X-Ops-Target: nacos\r\nX-Ops-Console-Target: nacos\r\n"
-                    + "X-Ops-Original-URI: /nacos/socket?x=a%2Fb\r\n"
+                    + "X-Ops-Target: " + target + "\r\nX-Ops-Console-Target: " + target + "\r\n"
+                    + "X-Ops-Original-URI: " + originalUri + "\r\n"
+                    + "X-Forwarded-User: attacker\r\nX-Forwarded-Groups: attacker-group\r\n"
+                    + "X-Forwarded-Group: attacker-compat-group\r\nX-Forwarded-Email: attacker@example.com\r\n"
+                    + "X-Forwarded-Id-Token: attacker-token\r\n"
                     + "Cookie: " + cookieName + "=" + sessionId + "\r\n\r\n";
             socket.getOutputStream().write(request.getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
@@ -231,6 +266,11 @@ class ConsoleWebSocketTomcatIntegrationTest {
         private volatile String requestLine;
         private volatile String requestedProtocol;
         private volatile String authorization;
+        private volatile String forwardedUser;
+        private volatile String forwardedGroups;
+        private volatile String forwardedGroup;
+        private volatile String forwardedEmail;
+        private volatile String forwardedIdToken;
 
         private ControlledWebSocketServer() throws IOException {
             server = new ServerSocket(0);
@@ -249,6 +289,11 @@ class ConsoleWebSocketTomcatIntegrationTest {
                 String key = header(request, "Sec-WebSocket-Key");
                 requestedProtocol = header(request, "Sec-WebSocket-Protocol");
                 authorization = header(request, "Authorization");
+                forwardedUser = header(request, "X-Forwarded-User");
+                forwardedGroups = header(request, "X-Forwarded-Groups");
+                forwardedGroup = header(request, "X-Forwarded-Group");
+                forwardedEmail = header(request, "X-Forwarded-Email");
+                forwardedIdToken = header(request, "X-Forwarded-Id-Token");
                 String accept = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-1")
                         .digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
                                 .getBytes(StandardCharsets.US_ASCII)));

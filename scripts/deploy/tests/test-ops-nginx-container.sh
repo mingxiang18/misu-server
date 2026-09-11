@@ -82,15 +82,20 @@ rg -q 'HEADLAMP_LOG_STREAM path=/ops/headlamp/clusters/main/api/v1/namespaces/de
 # Headlamp's /wsMultiplexer carries live resource/log streams over a real
 # WebSocket. Exercise both Nginx hops and use mixed-case Upgrade to prove the
 # sidecar dispatch is case-insensitive before the Java bridge receives it.
-python3 - "${MAIN_NGINX_PORT}" <<'PY'
+check_ws() {
+  local target="$1" cookie="$2" original_uri="$3"
+  python3 - "${MAIN_NGINX_PORT}" "${target}" "${cookie}" "${original_uri}" <<'PY'
 import socket
 import sys
 
 port = int(sys.argv[1])
+target = sys.argv[2]
+cookie = sys.argv[3]
+original_uri = sys.argv[4]
 request = (
-    "GET /ops/headlamp/wsMultiplexer HTTP/1.1\r\n"
+    f"GET {original_uri} HTTP/1.1\r\n"
     "Host: api.misu.chat\r\n"
-    "Cookie: MISU_OPS_SESSION=headlamp-session\r\n"
+    f"Cookie: MISU_OPS_SESSION={cookie}\r\n"
     "Origin: https://server.misu.chat\r\n"
     "Upgrade: WebSocket\r\n"
     "Connection: Upgrade\r\n"
@@ -112,7 +117,11 @@ with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
     assert "\r\nupgrade: websocket\r\n" in normalized, headers
     assert "\r\nconnection: upgrade\r\n" in normalized, headers
 PY
-rg -q 'WS_BACKEND path=/ops/ws/console/headlamp original=/ops/headlamp/wsMultiplexer target=headlamp cookie=MISU_OPS_SESSION=headlamp-session upstream-cookie=UPSTREAM_TOKEN=clean upstream-auth=Bearer upstream' "${MOCK_LOG}"
+}
+check_ws headlamp headlamp-session /ops/headlamp/wsMultiplexer
+check_ws nacos nacos-session /nacos/wsMultiplexer
+rg -q 'WS_BACKEND path=/ops/ws/console/headlamp original=/ops/headlamp/wsMultiplexer target=headlamp cookie=MISU_OPS_SESSION=headlamp-session upstream-cookie=UPSTREAM_TOKEN=clean upstream-auth=Bearer upstream user=admin groups= group= email= id_token=' "${MOCK_LOG}"
+rg -q 'WS_BACKEND path=/ops/ws/console/nacos original=/nacos/wsMultiplexer target=nacos cookie=MISU_OPS_SESSION=nacos-session upstream-cookie=UPSTREAM_TOKEN=clean upstream-auth=Bearer upstream user= groups= group= email= id_token=' "${MOCK_LOG}"
 code=$(curl -sS -D "${TMP_DIR}/exchange-headers" -o "${TMP_DIR}/exchange" -w '%{http_code}' -X POST -H 'Host: api.misu.chat' \
   -H 'Origin: https://server.misu.chat' -H 'Forwarded: for=203.0.113.9' \
   -H 'X-Forwarded-For: 203.0.113.9' -H 'X-Real-IP: 203.0.113.9' \
