@@ -10,6 +10,7 @@
 - 前端权限修复：`18378d6`；验收记录提交会在本次收尾后更新
 - Nacos 认证关闭兼容发布：`3a1d74c6cc3e4f62de6a7596867ae6e25236d79a`
 - Spring Security 默认密码日志修复发布：`fb625512d99c12ed7f4e4b06f620ca332fe7511c`
+- 交换入口修复发布：`50e1b2a0bfb7f5d0992854727d17415c774db166`（sidecar 信任头、Host 和单次目标票据负责交换授权）
 - 生产回滚点：Kubernetes 备份 `/root/backups/20260910T100559Z/k8s`；`misu-ops` 修复备份 `/root/backups/20260910T111606Z/k8s`；前端备份 `/root/backups/20260910T111035Z/html`；Nacos 备份 `/root/backups/20260910T100842Z/nacos/misu-gateway-prod.yml`
 - 本次 `misu-ops` 发布回滚点：`/root/backups/20260910T121744Z/k8s`（另有发布前资源快照 `/root/backups/20260910T121719Z/k8s-ops-sso`）
 - 本次日志修复发布回滚点：`/root/backups/20260910T165319Z/k8s`（发布前资源快照 `/root/backups/20260910T165308Z/k8s-ops-logfix`）
@@ -55,6 +56,10 @@
 - 5430c92 内部 Gateway NodePort 回归：`/nacos/`、`/ops/headlamp/` 未认证均 HTTP 401；未知路径 HTTP 404；未知 Host HTTP 421；`/ops/api/endpoints` 和 SSH API 未认证均 HTTP 401。
 - 5430c92 最近 30 分钟 misu-ops/nginx 日志敏感模式计数均为 0，`Using generated security password` 均为 0；SSH Secret 投影目标文件 mode 0400，未读取文件内容。
 - 5430c92 发布后无残留 port-forward、release 或 Docker build/push 进程；临时 Headlamp patch 文件已清理。
+- `50e1b2a` misu-ops 重发：镜像 manifest digest 前缀 `ad97a25d9127`；备份 `/root/backups/20260911T044712Z/k8s`；ConfigMap `misu-ops-nginx-config-50e1b2a`；Deployment 1/1，双容器 Ready，重启 0；Pod 内 `nginx -t` 成功。
+- `50e1b2a` 发布后 Gateway 回归：`/nacos/`、`/ops/headlamp/`、`/ops/api/endpoints` 和 SSH API 未认证均 HTTP 401；未知路径 HTTP 404；未知 Host HTTP 421。近 10 分钟 Nginx/ops 日志未命中 token、Cookie、ticket、JWT、password 或 secret 敏感模式。
+- 修复前诊断中票据签发接口曾返回 HTTP 200，交换 POST 到达 Nginx 但返回 HTTP 403；修复后真实 ADMIN 的 303、目标 Path Cookie、页面资源/API、重放和错目标验收仍待主线程浏览器会话补充；未记录任何票据或 Cookie。
+- `50e1b2a` 公网交换验收失败：Nacos 与 Headlamp 交换 POST 均 HTTP 403；同一新 Pod 本地 Nginx 对无效占位票据返回 HTTP 401，故按门槛仅回滚 misu-ops。回滚至镜像 `5430c92`、ConfigMap `misu-ops-nginx-config-5430c92`，Deployment 1/1、双容器 Ready、重启 0；Gateway、Headlamp 和其他资源未回滚。
 - 主节点无残留 `kubectl port-forward`、release、Docker build/push 进程。
 - 前端备份目录 `/root/backups/20260910T110417Z/html` 存在（73 个文件）；live `index.html` 已更新，ops 页面标记可见。
 - 回滚后集群内 `server.misu.chat` 首页 HTTP 200，静态 JS 资源 HTTP 200；回滚未触碰 `misu-ops` 或 gateway。
@@ -71,5 +76,5 @@
 - 需补充一个确实存在且非 ADMIN 的生产账号后，才能完成普通用户 403 负向验收；当前 `verifybot` 不存在/登录失败。
 - DNS/TLS 尚未配置，因此 Nacos/Headlamp 独立域名连接终止，不能宣称公共 HTTPS 主站 iframe 或控制台可用；未降低 Secure Cookie、添加浏览器证书例外或长期 NodePort。
 - 本次真实 ADMIN 浏览器 session 的 Nacos state/API 与页面静态资源验收需由持有浏览器会话的主线程补充；本代理未获取或记录任何浏览器凭据。
-- 5430c92 的真实 ADMIN 控制台 HTML/CSS/JS/state/API、redirect 和 HTTP/WS 页面验收仍需由持有登录浏览器会话的主线程补充；当前本机无浏览器 tab，未伪造会话或令牌。
+- `50e1b2a` 修复后的真实 ADMIN 控制台验收因公网交换 HTTP 403 未通过；目标 Path Cookie、HTML/CSS/JS/state/API、redirect、错目标/重放和 HTTP/WS 页面验收未执行。发布已回滚至 `5430c92`，需先修复 Gateway→sidecar 交换链路，再由持有登录浏览器会话的主线程重试；当前本机无浏览器 tab，未伪造会话或令牌。
 - 前端未重新发布；现网前端继续使用已验收版本。DNS/TLS 仍未配置，不宣称新 console URL 可从公共 HTTPS 主站使用。
