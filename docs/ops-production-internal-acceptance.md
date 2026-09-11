@@ -12,12 +12,14 @@
 - Spring Security 默认密码日志修复发布：`fb625512d99c12ed7f4e4b06f620ca332fe7511c`
 - 交换入口修复发布：`50e1b2a0bfb7f5d0992854727d17415c774db166`（sidecar 信任头、Host 和单次目标票据负责交换授权）
 - Gateway 转发头修复发布：`d0c09109e2948a8d376420823e2d6ae0944ce0e1`（包含 `50e1b2a`、`1730861`）
+- 运维会话校验与撤销修复发布：`37e77d013663e002dbc56c7d95732cd774e3499b`
 - 控制台 iframe 响应头修复：`28797c846fead2b3fde10a6e09eac12616becfca`（config-only 发布，保留 d0c0910 Java 镜像）
 - SameSite 修复发布尝试：`5d927c1335b854d558f4eedb31bbbdbb1892f4ab`（rollout 超时后进入自动回滚）
 - 生产回滚点：Kubernetes 备份 `/root/backups/20260910T100559Z/k8s`；`misu-ops` 修复备份 `/root/backups/20260910T111606Z/k8s`；前端备份 `/root/backups/20260910T111035Z/html`；Nacos 备份 `/root/backups/20260910T100842Z/nacos/misu-gateway-prod.yml`
 - 本次 `misu-ops` 发布回滚点：`/root/backups/20260910T121744Z/k8s`（另有发布前资源快照 `/root/backups/20260910T121719Z/k8s-ops-sso`）
 - 本次日志修复发布回滚点：`/root/backups/20260910T165319Z/k8s`（发布前资源快照 `/root/backups/20260910T165308Z/k8s-ops-logfix`）
 - 5430c92 发布前资源备份：`/root/backups/20260911T034419Z/ops-release-5430c92`；本次 misu-ops 发布备份：`/root/backups/20260911T041457Z/k8s`；Gateway ConfigMap 发布备份：`/root/backups/20260911T042120Z/k8s`
+- 37e77d0 发布前完整资源备份：`/root/backups/20260911T055033Z/ops-release-37e77d0`；release Kubernetes 回滚点：`/root/backups/20260911T055115Z/k8s`
 
 ## 阶段状态
 
@@ -34,6 +36,7 @@
 | 3d Gateway 路由 | PASS | Nacos prod 路由 console HTTP/WS 各 1 条、`misu-ops-api` 1 条；仓库实际挂载 ConfigMap 同步 console HTTP/WS 路由；Gateway rollout 1/1。 |
 | 3e d0c0910 交换修复 | PASS | 仅重发 misu-ops；Gateway/Headlamp 保持现状。公网两端 exchange 对无效票据均 HTTP 401，Pod 内 `nginx -t` 成功；Deployment 1/1、双容器 Ready、重启 0。 |
 | 3f 28797c8 iframe 响应头 | PASS | config-only 备份 `/root/backups/20260911T051051Z/k8s`；生效 ConfigMap `misu-ops-nginx-config-cfg-28797c8-20260911t051051z`；Java 镜像保持 d0c0910；Deployment 1/1、双容器 Ready、重启 0。 |
+| 3g 37e77d0 会话校验与撤销修复 | PASS | 镜像 manifest digest 前缀 `73b6bbfa2bbd`；生效 ConfigMap `misu-ops-nginx-config-37e77d0`；Deployment 1/1、双容器 Ready、重启 0；Pod 内 `nginx -t` 成功。 |
 
 ## 已执行的内部检查
 
@@ -47,6 +50,7 @@
 - Nacos 与 Headlamp 上游 Service：HTTP 200。
 - misu-ops 与 gateway 最近 30 分钟日志中的 Bearer、长票据、Cookie、运维会话标识模式：0 命中。
 - `misu-ops` Service endpoints：Pod `10.244.1.131:8080`；Pod 两容器 Ready，重启次数 0。
+- 37e77d0 发布后 Service 仍为 ClusterIP `10.98.237.214:30264`；当前 Pod `10.244.1.102`，两个容器 Ready，重启次数 0；实际 Java 镜像为 `10.8.0.26:30500/misuaa/misu-ops:37e77d0`，Nginx 镜像保持 `nginx:1.27-alpine`。
 - `misu-ops` Secret 投影文件存在且目标文件 mode `0400`；未读取文件内容。
 - 本次发布：镜像 `10.8.0.26:30500/misuaa/misu-ops:3a1d74c`，digest 前缀 `30008ddb`；ConfigMap `misu-ops-nginx-config-3a1d74c`；Deployment 1/1、双容器 Ready、重启次数 0；Pod 内 `nginx -t` 成功。
 - 最终日志修复发布：镜像 `10.8.0.26:30500/misuaa/misu-ops:fb62551`，digest 前缀 `1d3c2c28`；ConfigMap `misu-ops-nginx-config-fb62551`；Deployment 1/1、双容器 Ready、重启次数 0；Pod 内 `nginx -t` 成功。
@@ -68,6 +72,9 @@
 - `d0c0910` 最终重发：镜像 manifest digest 前缀 `24b487676f5d`；备份 `/root/backups/20260911T050033Z/k8s`；ConfigMap `misu-ops-nginx-config-d0c0910`；Deployment 1/1、双容器 Ready、重启 0；Pod 内 `nginx -t` 成功。公网 Nacos/Headlamp exchange 对无效票据均 HTTP 401（无 Origin 与允许 Origin 均相同），内部健康 HTTP 200、未知 Host HTTP 421、未知路径 HTTP 404。
 - `d0c0910` 发布后匿名回归：`/nacos/`、`/ops/headlamp/`、`/ops/api/endpoints` 和 SSH API 均 HTTP 401；公网未知路径 HTTP 404；近 10 分钟 Nginx/ops 日志未命中 authorization、cookie、ticket、password、secret 或 generated security password 模式。
 - `28797c8` 发布后：两端无效 exchange 均 HTTP 401，响应无 `X-Frame-Options`，CSP 含 `frame-ancestors https://server.misu.chat`；匿名 Nacos/Headlamp/API/SSH 均 HTTP 401，公网未知路径 HTTP 404，sidecar 内未知 Host HTTP 421；内部健康 HTTP 200；近 10 分钟 Nginx/ops 日志敏感模式计数均为 0。
+- 37e77d0 发布后：Pod 内健康 HTTP 200、未知 Host HTTP 421；公网 `/nacos/`、`/ops/headlamp/`、`/ops/api/endpoints`、`/ops/api/ssh/sessions` 均 HTTP 401，未知路径 HTTP 404；两端无效 exchange 均 HTTP 401，响应无 `X-Frame-Options`，CSP 仅报告 `frame-ancestors https://server.misu.chat`。近 15 分钟日志敏感模式仅命中 3 次通用 `Authorization` 请求字段，未输出其值；未命中 Cookie、ticket、password、secret 或 generated security password 模式。
+- 37e77d0 发布期间无新的 release、Docker build/push 或 port-forward 残留；近期事件仅记录本次 Pod 正常创建/拉取/启动，另有 Nacos readiness 警告，与本次 Ops 发布无关。
+- 独立依赖状态：`misu-account` Deployment 1/1 且 Service endpoint 存在；MySQL Deployment 0/1、Pod Running 但未 Ready，MySQL Service endpoints 为空，PVC 仍 Bound。未重启或修改 MySQL/account；该依赖故障单独记录，不归因于本次 Ops 发布。
 - `5d927c1` 发布尝试：镜像 manifest digest 前缀 `510d03749a68`；备份 `/root/backups/20260911T052240Z/k8s`；rollout 等待 180 秒超时，release 脚本进入 misu-ops 自动回滚。回滚收尾时主节点 SSH banner timeout，最终资源状态待 SSH 恢复后确认；未进行真实 ADMIN ticket 验收。
 - 主节点无残留 `kubectl port-forward`、release、Docker build/push 进程。
 - 前端备份目录 `/root/backups/20260910T110417Z/html` 存在（73 个文件）；live `index.html` 已更新，ops 页面标记可见。
@@ -87,4 +94,5 @@
 - 本次真实 ADMIN 浏览器 session 的 Nacos state/API 与页面静态资源验收需由持有浏览器会话的主线程补充；本代理未获取或记录任何浏览器凭据。
 - `d0c0910` 修复后的真实 ADMIN 303、目标 Path Cookie、HTML/CSS/JS/state/API、redirect、错目标/重放和 HTTP/WS 页面验收仍需由持有登录浏览器会话的主线程补充；当前本机无浏览器 tab，未伪造会话或令牌。
 - `5d927c1` 的 SameSite=None 真实 Cookie 验收未执行；需先确认自动回滚最终状态，再由主线程浏览器重试。
+- 37e77d0 的真实 ADMIN session 撤销/重放行为仍需由持有登录浏览器会话的主线程完成；本代理未获取或记录任何浏览器凭据。
 - 前端未重新发布；现网前端继续使用已验收版本。DNS/TLS 仍未配置，不宣称新 console URL 可从公共 HTTPS 主站使用。
