@@ -8,6 +8,10 @@ spec:
     spec:
       containers:
         - name: headlamp
+          # v0.43.0 is the first release with proxy-auth. Pin the latest
+          # stable release to the official multi-architecture image digest.
+          image: ghcr.io/headlamp-k8s/headlamp:v0.45.0@sha256:db3f0e0fc58d358d41daa3fe7fc852437552c7ee873c3645470f7b86a8e0db49
+          imagePullPolicy: IfNotPresent
           # Headlamp documents -base-url as the supported Kubernetes setting.
           # Keep -in-cluster so the existing service-account login remains in use.
           args:

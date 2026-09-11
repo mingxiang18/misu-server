@@ -123,6 +123,12 @@ rg -q 'Path=/nacos/\*\*,/ops/headlamp/\*\*,/ops/api/\*\*' "${ROOT_DIR}/scripts/d
 rg -q 'PreserveHostHeader' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-gateway-config.yaml"
 rg -q -- '-base-url' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/headlamp-base-url-patch.yaml"
 rg -q -- '-proxy-auth=true' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/headlamp-base-url-patch.yaml"
+rg -q 'image: ghcr\.io/headlamp-k8s/headlamp:v0\.45\.0@sha256:db3f0e0fc58d358d41daa3fe7fc852437552c7ee873c3645470f7b86a8e0db49' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/headlamp-base-url-patch.yaml"
+rg -q 'imagePullPolicy: IfNotPresent' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/headlamp-base-url-patch.yaml"
+if rg -q 'c9754bae|headlamp-k8s/headlamp:latest' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/headlamp-base-url-patch.yaml"; then
+  echo 'Headlamp patch must not use the old v0.42 digest or a floating tag' >&2
+  exit 1
+fi
 rg -q 'proxy_set_header X-Forwarded-User \$ops_headlamp_identity' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header X-Forwarded-Groups ""' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header X-Forwarded-Group ""' "${TMP_DIR}/normal-nginx.yaml"

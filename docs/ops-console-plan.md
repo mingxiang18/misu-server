@@ -14,7 +14,7 @@
 | 前端 | Vue 3、Element Plus、Vite；桌面 SideNav、移动 TabBar |
 | 权限 | USER、ADMIN、FILE_ADMIN；运维中心仅 ADMIN |
 | Nacos | `http://10.8.0.26:8848/nacos/`，HTTP 200；镜像 `nacos/nacos-server:v2.5.0` |
-| 集群控制台 | `http://10.8.0.26:30087/c/main/pods`，HTTP 200；产品为 Headlamp，位于 kuboard 命名空间，镜像标签 latest，确切版本待核验 |
+| 集群控制台 | `http://10.8.0.26:30087/c/main/pods`，HTTP 200；产品为 Headlamp，位于 kuboard 命名空间；仓库 patch 固定官方 `ghcr.io/headlamp-k8s/headlamp:v0.45.0@sha256:db3f0e0fc58d358d41daa3fe7fc852437552c7ee873c3645470f7b86a8e0db49` |
 | 集群内入口 | `nacos.misu-server.svc.cluster.local:8848`、`headlamp.kuboard.svc.cluster.local:80` |
 | SSH | 用户提供的临时密钥能登录 `root@10.8.0.1` 和 `root@10.8.0.26` |
 | 发布 | CLAUDE.md 指明 push master 自动部署；新模块必须加入 CI 构建、路径筛选及部署清单 |
@@ -74,7 +74,7 @@ flowchart LR
 
 - Nacos 2.5.0 仍使用自己的权限体系，但运维入口由 Java 服务端使用只读 Kubernetes Secret 中的专用 Nacos 账号登录 `v1/auth/users/login`，按每个 ops session 缓存短时 `accessToken`，并通过内部代理注入 `Authorization: Bearer ...`。账号、密码和 token 均不进入浏览器、Cookie、URL 或日志；logout、撤销、角色失效和过期会清理 session 缓存，Nacos token 随其服务端 TTL 失效。
 - Nacos 2.5.0 认证关闭时保留上游原生 `/nacos/` 响应，不做 HTML、JSON 或 JavaScript 响应体替换；未来启用认证时，Java 仍按 ops session 使用只读 Secret 获取短时 token，并只通过内部 `Authorization` 注入，浏览器不会得到 Nacos 凭据。
-- Headlamp 使用官方 `-proxy-auth=true` 身份感知代理模式：sidecar 只把 Java 已校验的 ADMIN 用户名写入内部结果，再由代理覆盖 `X-Forwarded-User`；浏览器不接收 Kubernetes token。Headlamp 继续使用自身 `-in-cluster` ServiceAccount 访问 Kubernetes API，资源权限仍由该 ServiceAccount 的 RBAC 决定，主站 JWT 不直接充当 Kubernetes Token。部署前须核对实际 Headlamp 镜像版本支持该参数并保留其 ServiceAccount/RBAC。
+- Headlamp 使用官方 `-proxy-auth=true` 身份感知代理模式：sidecar 只把 Java 已校验的 ADMIN 用户名写入内部结果，再由代理覆盖 `X-Forwarded-User`；浏览器不接收 Kubernetes token。Headlamp 继续使用自身 `-in-cluster` ServiceAccount 访问 Kubernetes API，资源权限仍由该 ServiceAccount 的 RBAC 决定，主站 JWT 不直接充当 Kubernetes Token。官方 v0.43.0 release 首次加入 proxy-auth；仓库 patch 固定当前稳定 v0.45.0 及官方 GHCR 多架构 manifest digest，避免继续运行不支持该参数的 v0.42.0 镜像。
 - 所有原有内网管理入口保持原有认证边界；本模块的 ADMIN 限制针对新增网站入口。Headlamp 的 identity-aware proxy 只在 sidecar 受保护路径启用；保留现有 NodePort 资源时，生产网络仍必须限制该 NodePort 只供受控网络访问，不能让未鉴权客户端直接到达开启 `-proxy-auth=true` 的 Headlamp 实例。
 
 ## 代理兼容性
@@ -108,7 +108,7 @@ flowchart LR
 | 部署 | 独立 Deployment/Service/ConfigMap/Secret 模板；集群 DNS、健康检查、资源与网络访问规则 |
 | CI/CD | 根模块列表、新模块 paths-filter、Maven 构建、镜像构建/发布、清单下发；同时覆盖本地 release 脚本 |
 
-1. 先做接入验证：固定 Headlamp 版本/摘要、确认实际网站域名和 HTTPS 入口、Cookie 使用范围；证明 iframe 登录、资源、日志和 WS 可用。
+1. 先做接入验证：使用 `headlamp-base-url-patch.yaml` 固定 Headlamp v0.45.0 版本/摘要，确认实际网站域名和 HTTPS 入口、Cookie 使用范围；证明 iframe 登录、资源、日志和 WS 可用。
 2. 实施授权和独立模块骨架：完成 ADMIN 的闭环保护、会话交换/撤销及两控制台代理。
 3. 实施双节点 SSH：PTY、交互键、尺寸、断连、到期关闭、审计。
 4. 验收发布：普通用户/ADMIN/FILE_ADMIN 均不能绕过访问；两控制台关键操作和 SSH 交互可用；1280×800 与 414×800 两种视口验证；部署、重启和回滚验证。
