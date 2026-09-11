@@ -75,7 +75,7 @@ data:
 
       server {
         listen 8080;
-        server_name api.misu.chat;
+        server_name api.misu.chat server.misu.chat;
         add_header Content-Security-Policy "frame-ancestors https://server.misu.chat" always;
         set $ops_original_uri $request_uri;
         # Keep the browser URI across the internal HTTP/WS dispatch so query

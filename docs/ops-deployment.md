@@ -1,6 +1,6 @@
 # 运维中心部署说明
 
-`misu-ops` 是单副本 Deployment，Java 后端只监听 Pod 内的 `127.0.0.1:30264`，Nginx sidecar 监听 `8080`，Service `misu-ops` 只提供 ClusterIP `30264`。主站 Nginx 把控制台路径和 SSH WebSocket 转给该 Service，并固定内部 `Host=api.misu.chat`；现有 Gateway 继续提供 `/ops/api/**` 和 `/ops/ws/**`。sidecar 按路径固定选择 Nacos 或 Headlamp 上游：
+`misu-ops` 是单副本 Deployment，Java 后端只监听 Pod 内的 `127.0.0.1:30264`，Nginx sidecar 监听 `8080`，Service `misu-ops` 只提供 ClusterIP `30264`。主站 Nginx 把控制台路径和 SSH WebSocket 转给该 Service并保留 `Host=server.misu.chat`；现有 Gateway 继续以 `Host=api.misu.chat` 提供 `/ops/api/**` 和 `/ops/ws/**`。sidecar 仅接受这两个 Host，并按路径固定选择 Nacos 或 Headlamp 上游：
 
 - `https://server.misu.chat/nacos/` → `nacos.misu-server.svc.cluster.local:8848`
 - `https://server.misu.chat/ops/headlamp/` → `headlamp.kuboard.svc.cluster.local:80`

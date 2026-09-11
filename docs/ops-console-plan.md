@@ -68,7 +68,7 @@ flowchart LR
 5. SSH 使用短时单次握手凭证，禁止 URL 中携带长期 JWT/SSH 密钥；日志脱敏。连接期间定期重新核验角色和账号状态（建议最多 30 秒），失效即关闭现有连接。新连接必须查当前权限，不能只相信旧 JWT 的角色快照。
 6. 退出登录增加服务端运维会话撤销；目前前端 logOut 仅清 Cookie。建议空闲 15 分钟、最长 2 小时后重新验证；鉴权服务不可达时拒绝新会话，现有会话到核验期限关闭。
 
-运维控制台与主站共用 `server.misu.chat` Origin，会话 Cookie 为 host-only、HttpOnly、Secure、SameSite=None，并按 `/nacos/` 与 `/ops/headlamp/` Path 隔离。主站 Nginx 转发时固定内部 Host 为 `api.misu.chat`，运维代理必须清除浏览器发来的 `User-Token`、`User-Refresh-Token` 等主站凭据；主站退出通过统一 revoke 流程撤销运维会话并删除两个目标 Path 的 Cookie。
+运维控制台与主站共用 `server.misu.chat` Origin，会话 Cookie 为 host-only、HttpOnly、Secure、SameSite=None，并按 `/nacos/` 与 `/ops/headlamp/` Path 隔离。主站 Nginx 保留 `server.misu.chat` Host，sidecar 仅接受 `server.misu.chat` 与 API Gateway 使用的 `api.misu.chat`；运维代理必须清除浏览器发来的 `User-Token`、`User-Refresh-Token` 等主站凭据。主站退出通过统一 revoke 流程撤销运维会话并删除两个目标 Path 的 Cookie。
 
 ### 上游认证
 

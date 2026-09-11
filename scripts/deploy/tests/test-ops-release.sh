@@ -109,7 +109,8 @@ rg -q 'https://server\.misu\.chat/ops/headlamp/' "${TMP_DIR}/normal-misu-ops.yam
 rg -q 'location \^~ /nacos/' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
 rg -q 'location \^~ /ops/headlamp/' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
 rg -q 'location \^~ /ops/ws/ssh/' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
-rg -q 'proxy_set_header Host api\.misu\.chat' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
+rg -q 'proxy_set_header Host server\.misu\.chat' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
+rg -q 'server_name api\.misu\.chat server\.misu\.chat' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'Path=/nacos/\*\*,/ops/headlamp/\*\*,/ops/api/\*\*' "${ROOT_DIR}/misu-gateway/src/main/resources/application-prod.yml"
 rg -q 'PreserveHostHeader' "${ROOT_DIR}/misu-gateway/src/main/resources/application-prod.yml"
 # Production mounts this ConfigMap over the packaged profile file. Keep the
