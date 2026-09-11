@@ -4,6 +4,15 @@
 
 ## 最终发布
 
+### 2ecd9d0 最终 sidecar 修复
+
+- 最终修复提交：`2ecd9d0`。根因是 sidecar `/_ops/ws` 将边缘传入的 `Forwarded`、`X-Forwarded-For`、`X-Real-IP`、`X-Forwarded-Port` 继续转发给 Java；Spring forwarded-header 处理改写 remote address 后，Java 的 loopback 代理信任检查拒绝了 WebSocket。修复显式清空这四类头，仅保留已校验的 `X-Ops-*` 上下文。
+- 发布后的 ConfigMap：`misu-ops-nginx-config-2ecd9d0`。
+- 发布后的 Pod：`misu-ops-7f99fc8fd4-tzcpp`，`2/2 Ready`，restart `0`。
+- sidecar 发布前备份：`/root/backups/20260911T133246Z/ops-sidecar-2ecd9d0`。
+- 浏览器重新交换会话后，Headlamp Overview 显示 `3/3 Ready`；打开 kuboard/headlamp Pod 的 Show Logs 后窗口可见实际日志，Follow 已开启且无 Reconnect。
+- 对应服务端窗口统计：main + sidecar 观察到 `27` 次 `101`，Java bridge `27` 次，Headlamp 成功 `75` 次且无错误。
+
 - 核对时间：2026-09-11T12:04:50Z。
 - 本次相关发布提交：`d6a5b57`（sidecar 配置修复）、`0df3c4e`（misu-ops 镜像）、`c7e7339`（Headlamp v0.45 SSO patch）、`ebcf64e`（Headlamp Service 收回 ClusterIP）、`4acea56`（启用 service-account-token 代理模式）。
 - misu-ops 当前镜像：`10.8.0.26:30500/misuaa/misu-ops:0df3c4e`，实际 image digest `sha256:47dc036a6e1b043a0066280c52e06bb81b3e71f9043704693ea5398967a467ef`。
@@ -15,7 +24,7 @@
 
 | 资源 | 实际状态 | 只读证据 |
 | --- | --- | --- |
-| `misu-server/misu-ops` | 1/1，双容器 Ready，restart 0 | Pod `misu-ops-6d8cfb6958-qqp46`，Service endpoint `10.244.1.104:8080` |
+| `misu-server/misu-ops` | 2/2，双容器 Ready，restart 0 | Pod `misu-ops-7f99fc8fd4-tzcpp`，ConfigMap `misu-ops-nginx-config-2ecd9d0` |
 | `kuboard/headlamp` | 1/1，Ready，restart 0 | Pod `headlamp-565c6b6b89-ggfvv`，Service ClusterIP-only，Endpoint ready |
 | `mysql/mysql` | 1/1，Ready，restart 0 | Pod `mysql-689ffd464b-z8dx2`，Service endpoint `10.244.1.176:3306` |
 | `misu-server/q-bit-torrent-pi` | Running，Ready，restart 0 | Pod `q-bit-torrent-pi-854fcf5f6d-sghg6` |
@@ -26,11 +35,13 @@
 
 - 主线程持有的真实 ADMIN 会话已打开 Nacos 配置管理页面。
 - Headlamp 页面已加载，Overview 显示 `3/3`。
+- Headlamp Pod Show Logs 已打开，窗口显示实际日志、Follow 已开启，无 Reconnect；服务端同一窗口记录 main+sidecar `27` 次 `101`、Java bridge `27` 次、Headlamp 成功 `75` 次且无错误。浏览器控制台仍有少量短生命周期 watch stream 的 WebSocket error 记录，但这些连接均完成 `101`，不影响日志流，不能据此宣称整个控制台零错误。
 - SSH 主节点与工作节点均通过 Ops 页面建立连接并执行只读命令：输出 `MISU_OPS_OK`、uid 0；主节点 hostname 为 `iZ7xv6ttskek29itscng14Z`，工作节点 hostname 为 `misu-MACO`；两条连接均显式断开成功。
 - 可信 sidecar 对 Headlamp Kubernetes API 的只读验证：匿名请求 HTTP 401，带代理用户身份请求 HTTP 200。
 - Headlamp 使用现有 `headlamp-admin` ServiceAccount；该账号保留现有 `cluster-admin` RBAC。安全边界是：只有主站 ADMIN 鉴权后通过受信 sidecar 的用户，才能进入该共享权限路径；普通用户仍受 Ops 鉴权拒绝。该权限扩大已由用户明确确认。
 - Headlamp 日志无 flag/fatal/panic；Nginx 与 Headlamp 日志的凭据值模式扫描为 0。唯一 `error` 字段为 info 级 kubeadm 默认 clusterName 提示。
 - 当前浏览器入口使用同源 `/ops/headlamp/`。独立 `ops-nacos`/`ops-k8s` 域名仍未配置 DNS/TLS，因此不宣称其可从公共 HTTPS 直接访问；未降低 HTTPS、Secure Cookie 或证书校验策略。
+- `10.8.0.26:30087` 不能访问是预期结果：Headlamp Service 已由 NodePort 改为 ClusterIP，防止绕过网站 ADMIN 鉴权；正确浏览器入口为 `https://server.misu.chat/ops`。
 
 ## 备份与回滚点
 
@@ -44,3 +55,4 @@
 - 普通非 ADMIN 账号的 403 负向验收仍未完成：仓库提供的 `verifybot` 在生产登录失败，未伪造身份或令牌。
 - 独立 Nacos/Headlamp 域名的 DNS/TLS 尚未配置；同源 Ops 页面验收不代表这些独立域名可用。
 - 本记录不包含任何浏览器 Cookie、票据、JWT、ServiceAccount token 或凭据值。
+- 本次验收未触碰 NFS、下载配置或下载目录，也未修改 MySQL 配置。
