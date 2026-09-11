@@ -84,6 +84,25 @@ public class OpsOriginPolicy {
         return resolveConsoleHost(request.getHeader("Host"));
     }
 
+    /**
+     * Console exchange is a sidecar capability endpoint. The browser Origin
+     * is intentionally not part of this check because a form redirect may
+     * omit or normalize it; the one-time target-bound ticket and trusted
+     * loopback sidecar headers provide the authorization boundary.
+     */
+    public ConsoleTarget requireTrustedConsoleTarget(HttpServletRequest request) {
+        if (!isLoopback(request.getRemoteAddr()) || !validProxySecret(request.getHeader("X-Ops-Proxy-Key"))) {
+            throw new ServiceException(HttpStatus.FORBIDDEN, "代理目标不受信任");
+        }
+        String targetHeader = request.getHeader("X-Ops-Target");
+        if (targetHeader == null || targetHeader.isBlank()) {
+            throw new ServiceException(HttpStatus.FORBIDDEN, "代理目标缺失");
+        }
+        ConsoleTarget target = ConsoleTarget.parse(targetHeader);
+        requireConsoleHost(request.getHeader("Host"), target);
+        return target;
+    }
+
     private boolean validProxySecret(String supplied) {
         String expected = properties.getProxySharedSecret();
         return expected != null && !expected.isBlank() && supplied != null

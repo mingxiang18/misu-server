@@ -12,6 +12,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class OpsControllerConsolePathTest {
 
@@ -36,7 +37,6 @@ class OpsControllerConsolePathTest {
             MockHttpServletRequest request = new MockHttpServletRequest();
             request.setRemoteAddr("127.0.0.1");
             request.addHeader("Host", "api.misu.chat");
-            request.addHeader("Origin", "https://server.misu.chat");
             request.addHeader("X-Ops-Target", target.id());
             request.addHeader("X-Ops-Proxy-Key", "proxy-secret");
             MockHttpServletResponse response = new MockHttpServletResponse();
@@ -53,20 +53,51 @@ class OpsControllerConsolePathTest {
     }
 
     @Test
-    void browserCannotSelectExchangeTargetHeader() {
+    void exchangeRejectsUntrustedHeadersAndWrongHostBeforeTicketConsumption() {
         OpsProperties properties = new OpsProperties();
         properties.setProxySharedSecret("proxy-secret");
         properties.setNacosUrl("https://api.misu.chat/nacos/");
+        properties.setHeadlampUrl("https://api.misu.chat/ops/headlamp/");
         OpsSessionStore store = new OpsSessionStore(properties, adminVerifier());
-        OpsOriginPolicy policy = new OpsOriginPolicy(properties);
+        OpsController controller = new OpsController(properties, null,
+                new OpsOriginPolicy(properties), store, null, null);
+
+        OpsSessionStore.Ticket validTicket = store.issueTicket(
+                new LoginUser(7L, "admin", java.util.List.of("ADMIN")), ConsoleTarget.NACOS);
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setRemoteAddr("192.0.2.10");
         request.addHeader("Host", "api.misu.chat");
         request.addHeader("X-Ops-Target", "nacos");
         request.addHeader("X-Ops-Proxy-Key", "proxy-secret");
-        org.junit.jupiter.api.Assertions.assertThrows(
-                com.misu.common.exception.ServiceException.class,
-                () -> policy.resolveConsoleTarget(request));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        assertThrows(com.misu.common.exception.ServiceException.class,
+                () -> controller.exchangeConsoleSession(request, response, validTicket.token()));
+
+        OpsSessionStore.Ticket wrongHostTicket = store.issueTicket(
+                new LoginUser(7L, "admin", java.util.List.of("ADMIN")), ConsoleTarget.NACOS);
+        MockHttpServletRequest wrongHost = trustedRequest("nacos", "wrong.misu.chat");
+        assertThrows(com.misu.common.exception.ServiceException.class,
+                () -> controller.exchangeConsoleSession(wrongHost, new MockHttpServletResponse(), wrongHostTicket.token()));
+        // Host validation happens before the store consumes the ticket.
+        controller.exchangeConsoleSession(trustedRequest("nacos", "api.misu.chat"),
+                new MockHttpServletResponse(), wrongHostTicket.token());
+
+        OpsSessionStore.Ticket replayTicket = store.issueTicket(
+                new LoginUser(7L, "admin", java.util.List.of("ADMIN")), ConsoleTarget.NACOS);
+        controller.exchangeConsoleSession(trustedRequest("nacos", "api.misu.chat"),
+                new MockHttpServletResponse(), replayTicket.token());
+        assertThrows(com.misu.common.exception.ServiceException.class,
+                () -> controller.exchangeConsoleSession(trustedRequest("nacos", "api.misu.chat"),
+                        new MockHttpServletResponse(), replayTicket.token()));
+    }
+
+    private MockHttpServletRequest trustedRequest(String target, String host) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("127.0.0.1");
+        request.addHeader("Host", host);
+        request.addHeader("X-Ops-Target", target);
+        request.addHeader("X-Ops-Proxy-Key", "proxy-secret");
+        return request;
     }
 
     private CurrentAccountVerifier adminVerifier() {

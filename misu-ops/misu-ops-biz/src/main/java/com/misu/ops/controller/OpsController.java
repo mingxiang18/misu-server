@@ -77,7 +77,9 @@ public class OpsController {
 
     /**
      * This endpoint is intended for a top-level form POST from the main site.
-     * It consumes the ticket before setting the host-only ops cookie.
+     * It consumes the ticket before setting the target-scoped ops cookie. The
+     * browser Origin is deliberately not required; sidecar trust, Host and
+     * the one-time target-bound ticket are the exchange authorization.
      */
     @Anonymous
     @PostMapping(value = "/console-sessions/exchange",
@@ -91,10 +93,9 @@ public class OpsController {
     private ResponseEntity<Void> exchangeConsoleSessionInternal(HttpServletRequest request,
                                                                 HttpServletResponse response,
                                                                 String ticketToken) {
-        originPolicy.requireAllowedMainOrigin(request);
         // Resolve and validate the destination Host before consuming the
         // one-time ticket, then atomically consume/create under the store lock.
-        ConsoleTarget hostTarget = originPolicy.resolveConsoleTarget(request);
+        ConsoleTarget hostTarget = originPolicy.requireTrustedConsoleTarget(request);
         OpsSessionStore.ConsoleSession session = sessions.exchangeConsoleSession(ticketToken, hostTarget);
         ResponseCookie cookie = ResponseCookie.from(properties.getCookieName(), session.id())
                 .httpOnly(true)
