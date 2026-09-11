@@ -13,6 +13,7 @@
 - 生产回滚点：Kubernetes 备份 `/root/backups/20260910T100559Z/k8s`；`misu-ops` 修复备份 `/root/backups/20260910T111606Z/k8s`；前端备份 `/root/backups/20260910T111035Z/html`；Nacos 备份 `/root/backups/20260910T100842Z/nacos/misu-gateway-prod.yml`
 - 本次 `misu-ops` 发布回滚点：`/root/backups/20260910T121744Z/k8s`（另有发布前资源快照 `/root/backups/20260910T121719Z/k8s-ops-sso`）
 - 本次日志修复发布回滚点：`/root/backups/20260910T165319Z/k8s`（发布前资源快照 `/root/backups/20260910T165308Z/k8s-ops-logfix`）
+- 5430c92 发布前资源备份：`/root/backups/20260911T034419Z/ops-release-5430c92`；本次 misu-ops 发布备份：`/root/backups/20260911T041457Z/k8s`；Gateway ConfigMap 发布备份：`/root/backups/20260911T042120Z/k8s`
 
 ## 阶段状态
 
@@ -24,6 +25,9 @@
 | 3 misu-ops 与网关 | PASS | `misu-ops` Deployment 1/1、Pod 双容器 Ready、Service `10.98.237.214`；最终镜像 `fb62551`，digest 前缀 `1d3c2c28`；既有 Nacos 唯一 `misu-ops-api` 路由保持不变并已完成 gateway rollout。 |
 | 4 内部验收 | PASS / DNS-TLS BLOCKED | 内部 Service 验证健康、Host 路由、无会话拒绝和 Headlamp 上游；Nacos 认证关闭时匿名 API 可达且不注入 Authorization。真实 ADMIN 浏览器会话的页面/API验收由主线程补充；独立域名仍因 DNS/TLS 未配置而不能公共访问。 |
 | 5 前端 | PASS / DNS-TLS BLOCKED | 修复权限后的 production build 已重新发布（tag `18378d6`）；首页与实际引用 JS/CSS 均 HTTP 200，`misu-server-nginx` 1/1；ADMIN 菜单已可见并进入 `/ops`。 |
+| 3b 5430c92 运维代理 | PASS | 镜像已推送并发布；sidecar Nginx 配置通过 `nginx -t`，Deployment 1/1，双容器 Ready，重启 0。 |
+| 3c Headlamp base URL | PASS | `headlamp` rollout 1/1；保留 `-in-cluster`，设置 `/headlamp/plugins` 和 `/ops/headlamp`；探针 4466、Service NodePort 30087、`headlamp-admin:cluster-admin` 保持。 |
+| 3d Gateway 路由 | PASS | Nacos prod 路由 console HTTP/WS 各 1 条、`misu-ops-api` 1 条；仓库实际挂载 ConfigMap 同步 console HTTP/WS 路由；Gateway rollout 1/1。 |
 
 ## 已执行的内部检查
 
@@ -45,6 +49,12 @@
 - 3a1d74c 发布后曾发现 Spring Security 自动生成密码启动日志模式；fb62551 发布后最近 15 分钟扫描中 `Using generated security password` 为 0，token/Cookie/ticket/session id/密码赋值模式均为 0，未读取或记录任何敏感值。
 - 最终发布后的临时 port-forward、release 和 Docker build/push 进程计数均为 0。
 - 网关配置精确核对：`misu-ops-api` 数量 1，URI、Path 谓词和 PreserveHostHeader 与部署计划一致。
+- 5430c92 后网关精确核对：Nacos `misu-gateway-prod.yml` 中 console HTTP/WS 路由各唯一 1 条，既有 `misu-ops-api` 唯一 1 条，总路由 6；实际挂载 `misu-gateway-config` 中 console HTTP/WS 路由各 1 条；均保留 `PreserveHostHeader`。
+- 5430c92 misu-ops 发布：镜像 tag `5430c92`，manifest digest 前缀 `3a6aba2cade1`；ConfigMap `misu-ops-nginx-config-5430c92`；Deployment 1/1，双容器 Ready，重启 0；Pod 内 `nginx -t` 成功。
+- Headlamp base URL 发布：Deployment 1/1，参数保留 `-in-cluster` 并设置 `/headlamp/plugins`、`/ops/headlamp`；探针 `/ops/headlamp/` 端口 4466；Service 仍为 NodePort 30087；`headlamp-admin` 仍绑定 `cluster-admin`。
+- 5430c92 内部 Gateway NodePort 回归：`/nacos/`、`/ops/headlamp/` 未认证均 HTTP 401；未知路径 HTTP 404；未知 Host HTTP 421；`/ops/api/endpoints` 和 SSH API 未认证均 HTTP 401。
+- 5430c92 最近 30 分钟 misu-ops/nginx 日志敏感模式计数均为 0，`Using generated security password` 均为 0；SSH Secret 投影目标文件 mode 0400，未读取文件内容。
+- 5430c92 发布后无残留 port-forward、release 或 Docker build/push 进程；临时 Headlamp patch 文件已清理。
 - 主节点无残留 `kubectl port-forward`、release、Docker build/push 进程。
 - 前端备份目录 `/root/backups/20260910T110417Z/html` 存在（73 个文件）；live `index.html` 已更新，ops 页面标记可见。
 - 回滚后集群内 `server.misu.chat` 首页 HTTP 200，静态 JS 资源 HTTP 200；回滚未触碰 `misu-ops` 或 gateway。
@@ -61,3 +71,5 @@
 - 需补充一个确实存在且非 ADMIN 的生产账号后，才能完成普通用户 403 负向验收；当前 `verifybot` 不存在/登录失败。
 - DNS/TLS 尚未配置，因此 Nacos/Headlamp 独立域名连接终止，不能宣称公共 HTTPS 主站 iframe 或控制台可用；未降低 Secure Cookie、添加浏览器证书例外或长期 NodePort。
 - 本次真实 ADMIN 浏览器 session 的 Nacos state/API 与页面静态资源验收需由持有浏览器会话的主线程补充；本代理未获取或记录任何浏览器凭据。
+- 5430c92 的真实 ADMIN 控制台 HTML/CSS/JS/state/API、redirect 和 HTTP/WS 页面验收仍需由持有登录浏览器会话的主线程补充；当前本机无浏览器 tab，未伪造会话或令牌。
+- 前端未重新发布；现网前端继续使用已验收版本。DNS/TLS 仍未配置，不宣称新 console URL 可从公共 HTTPS 主站使用。
