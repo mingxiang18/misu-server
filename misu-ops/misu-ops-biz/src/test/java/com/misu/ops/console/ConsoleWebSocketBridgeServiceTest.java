@@ -8,6 +8,7 @@ import com.misu.ops.session.OpsSessionStore;
 import com.misu.security.dto.LoginUser;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.web.socket.WebSocketMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -60,8 +61,10 @@ class ConsoleWebSocketBridgeServiceTest {
             OpsSessionStore.Ticket ticket = sessions.issueTicket(
                     new LoginUser(1L, "admin", java.util.List.of("ADMIN")), ConsoleTarget.NACOS);
             OpsSessionStore.ConsoleSession session = sessions.createConsoleSession(ticket);
+            MockEnvironment environment = new MockEnvironment();
+            environment.setActiveProfiles("test");
             ConsoleWebSocketBridgeService service = new ConsoleWebSocketBridgeService(properties, sessions,
-                    new NacosUpstreamAuthService(properties));
+                    new NacosUpstreamAuthService(properties, environment));
 
             HttpHeaders headers = new HttpHeaders();
             headers.set(ConsoleWebSocketBridgeService.ORIGINAL_URI_HEADER,

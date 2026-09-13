@@ -3,6 +3,7 @@ package com.misu.ops.console;
 import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.env.MockEnvironment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -64,6 +65,21 @@ class NacosUpstreamAuthServiceTest {
 
         assertThrows(ServiceException.class, service::validatedUpstreamUri);
         assertEquals(0, service.cachedSessionCount());
+    }
+
+    @Test
+    void testProfileAllowsOnlyLoopbackHttpForLocalServers() {
+        OpsProperties properties = new OpsProperties();
+        properties.setNacosUsername("nacos-ops");
+        properties.setNacosPassword("secret");
+        properties.setNacosUpstreamUrl("http://127.0.0.1:18848/nacos/");
+        properties.setNacosAuthUrl("http://localhost:18848/nacos/");
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("test");
+        NacosUpstreamAuthService service = new NacosUpstreamAuthService(properties, environment);
+
+        assertEquals("http://127.0.0.1:18848/nacos/", service.validatedUpstreamUri().toString());
+        assertEquals("http://localhost:18848/nacos/", service.validatedAuthBaseUri().toString());
     }
 
     @Test

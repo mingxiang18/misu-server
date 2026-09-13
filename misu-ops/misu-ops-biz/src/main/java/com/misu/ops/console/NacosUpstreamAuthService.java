@@ -4,6 +4,10 @@ import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
+import org.springframework.core.env.StandardEnvironment;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -31,11 +35,18 @@ public class NacosUpstreamAuthService {
             "http://nacos.misu-server.svc.cluster.local:8848/nacos/";
 
     private final OpsProperties properties;
+    private final Environment environment;
     private final RestClient restClient;
     private final Map<String, CachedToken> tokens = new ConcurrentHashMap<>();
 
     public NacosUpstreamAuthService(OpsProperties properties) {
+        this(properties, new StandardEnvironment());
+    }
+
+    @Autowired
+    public NacosUpstreamAuthService(OpsProperties properties, Environment environment) {
         this.properties = properties;
+        this.environment = environment;
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(properties.getAccountConnectTimeoutMillis()))
                 .build();
@@ -137,7 +148,7 @@ public class NacosUpstreamAuthService {
         }
         try {
             URI base = URI.create(configured.endsWith("/") ? configured : configured + "/");
-            if (!isFixedNacosBase(base)) {
+            if (!isFixedNacosBase(base) && !isTestLoopbackBase(base)) {
                 throw new IllegalArgumentException("invalid Nacos URL");
             }
             return base;
@@ -150,6 +161,20 @@ public class NacosUpstreamAuthService {
         return "http".equals(uri.getScheme())
                 && "nacos.misu-server.svc.cluster.local".equals(uri.getHost())
                 && uri.getPort() == 8848
+                && "/nacos/".equals(uri.getPath())
+                && uri.getUserInfo() == null
+                && uri.getQuery() == null
+                && uri.getFragment() == null;
+    }
+
+    private boolean isTestLoopbackBase(URI uri) {
+        return environment.acceptsProfiles(Profiles.of("test"))
+                && "http".equals(uri.getScheme())
+                && ("localhost".equals(uri.getHost())
+                || "127.0.0.1".equals(uri.getHost())
+                || "::1".equals(uri.getHost())
+                || "[::1]".equals(uri.getHost()))
+                && uri.getPort() > 0
                 && "/nacos/".equals(uri.getPath())
                 && uri.getUserInfo() == null
                 && uri.getQuery() == null

@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.servlet.handler.AbstractUrlHandlerMapping;
 
 import java.io.ByteArrayOutputStream;
@@ -35,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Exercises the actual Spring MVC/Tomcat WebSocket handshake and close path. */
 @SpringBootTest(classes = OpsApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ActiveProfiles("test")
 @TestPropertySource(properties = {
         "token.secret=01234567890123456789012345678901",
         "server.servlet.context-path=/ops",
