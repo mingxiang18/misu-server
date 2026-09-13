@@ -13,6 +13,7 @@ final class DatabaseValidation {
     static final Pattern IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{0,63}");
     private static final Pattern DECIMAL = Pattern.compile("DECIMAL\\((\\d{1,3}),(\\d{1,3})\\)");
     private static final Pattern VARCHAR = Pattern.compile("VARCHAR\\((\\d{1,5})\\)");
+    private static final Pattern STRICT_DECIMAL = Pattern.compile("-?(?:0|[1-9]\\d*)(?:\\.\\d+)?");
     private static final Set<String> RESERVED = Set.of(
             "ACCESSIBLE", "ADD", "ALL", "ALTER", "ANALYZE", "AND", "AS", "ASC", "ASENSITIVE",
             "BEFORE", "BETWEEN", "BIGINT", "BINARY", "BLOB", "BOTH", "BY", "CALL", "CASE",
@@ -118,10 +119,30 @@ final class DatabaseValidation {
                 throw error(500, "OPS_DB_DDL_REJECTED", "默认值不受支持");
             }
         }
-        if (value instanceof Number number && type.startsWith("DECIMAL")) {
+        if (type.startsWith("DECIMAL")) {
+            Matcher decimalType = DECIMAL.matcher(type);
+            if (!decimalType.matches()) {
+                throw error(500, "OPS_DB_DDL_REJECTED", "默认值不受支持");
+            }
+            String text = null;
+            if (value instanceof Number number) {
+                try {
+                    text = number instanceof BigDecimal decimal
+                            ? decimal.toPlainString() : new BigDecimal(number.toString()).toPlainString();
+                } catch (NumberFormatException ignored) {
+                    // Reject NaN, infinity, and other non-decimal JSON numbers below.
+                }
+            } else if (value instanceof String string) {
+                text = string;
+            }
+            if (text == null || !STRICT_DECIMAL.matcher(text).matches()) {
+                throw error(500, "OPS_DB_DDL_REJECTED", "默认值不受支持");
+            }
             try {
-                BigDecimal decimal = new BigDecimal(number.toString());
-                if (decimal.precision() > 65) {
+                BigDecimal decimal = new BigDecimal(text);
+                int precision = Integer.parseInt(decimalType.group(1));
+                int scale = Integer.parseInt(decimalType.group(2));
+                if (decimal.precision() > precision || decimal.scale() > scale) {
                     throw new NumberFormatException();
                 }
                 return decimal.toPlainString();

@@ -113,7 +113,7 @@ misu-ops 使用 `JdbcTemplate` 配合独立的小型 Hikari 数据源，不复�
 
 值全部使用 `?` 参数和 `PreparedStatement`。筛选、主键、默认字面量、更新值不得通过字符串拼接；LIKE 通配符、NULL 和空字符串分别按 DTO 语义绑定。每次 DML 执行使用显式写事务，查询使用受限连接，禁止多语句和任意 SQL 文本。数据库 API 的写请求体在 HTTP 入口由 bounded wrapper 限制为 64 KiB；Content-Length 和 chunked 请求都受限。
 
-类型转换由集中校验和 `PreparedStatement` 绑定处理：整数按 JDBC 类型范围检查，小数按 metadata 的 precision/scale 检查，字符串按 metadata 的 size 检查，日期时间使用 ISO-8601 到 JDBC 时间类型，JSON 必须先解析，布尔只接受 JSON boolean/规定的 0/1。binary/blob/SQLXML/数组/结构体等对象类型明确拒绝并返回 400。结果统一转换为 JSON 安全值；驱动异常只映射为稳定错误码。
+类型转换由集中校验和 `PreparedStatement` 绑定处理：整数按 JDBC 类型范围检查，小数按 metadata 的 precision/scale 检查，字符串按 metadata 的 size 检查，日期时间使用 ISO-8601 到 JDBC 时间类型，JSON 必须先解析，布尔只接受 JSON boolean/规定的 0/1。binary/blob/SQLXML/数组/结构体等对象类型明确拒绝并返回 400。BIGINT、BigInteger、DECIMAL/NUMERIC、BigDecimal 及超出 JavaScript 安全整数范围的整数统一以十进制字符串返回，避免主键和金额丢精度；其余安全范围整数才返回 JSON number。驱动异常只映射为稳定错误码。
 
 审计记录 actor、ADMIN user id、动作、database/table/column 名、请求 ID、结果码和影响行数，不记录任何值、筛选内容、SQL 文本、连接 URL、Cookie、票据、密码或上游响应。日志中的路径只保留固定模板和脱敏 query。
 

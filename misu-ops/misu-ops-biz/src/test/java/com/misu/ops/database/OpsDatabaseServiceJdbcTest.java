@@ -20,7 +20,10 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 import static com.misu.ops.database.DatabaseModels.DeleteRowRequest;
+import static com.misu.ops.database.DatabaseModels.ColumnRequest;
+import static com.misu.ops.database.DatabaseModels.CreateTableRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class OpsDatabaseServiceJdbcTest {
@@ -71,11 +74,11 @@ class OpsDatabaseServiceJdbcTest {
         ObjectProvider<DataSource> provider = new SingleDataSourceProvider(dataSource);
         OpsDatabaseService service = new OpsDatabaseService(provider, properties, new ObjectMapper());
 
-        service.delete("misu_test", "users", "7", new DeleteRowRequest("v1"));
+        service.delete("misu_test", "users", "9223372036854775807", new DeleteRowRequest("v1"));
 
         assertEquals(List.of("DELETE FROM `misu_test`.`users` WHERE `id` = ? AND `updated_at` = ?"), sql);
         assertEquals(2, bound.size());
-        assertEquals(7, ((Number) bound.get(0)).intValue());
+        assertEquals(Long.MAX_VALUE, bound.get(0));
         assertEquals("v1", String.valueOf(bound.get(1)));
     }
 
@@ -106,6 +109,87 @@ class OpsDatabaseServiceJdbcTest {
                 () -> service(dataSource).rows("misu_test", "files", 1, 10, null, "asc", null));
 
         assertEquals(400, exception.getCode());
+    }
+
+    @Test
+    void rowsKeepBigIntAndDecimalPrecisionAsStrings() {
+        ResultSet tables = resultSet(List.of(row("TABLE_NAME", "payments", "TABLE_TYPE", "TABLE")));
+        ResultSet columns = resultSet(List.of(
+                row("COLUMN_NAME", "id", "DATA_TYPE", Types.BIGINT, "TYPE_NAME", "BIGINT",
+                        "COLUMN_SIZE", 19, "DECIMAL_DIGITS", 0,
+                        "NULLABLE", DatabaseMetaData.columnNoNulls, "COLUMN_DEF", null,
+                        "IS_AUTOINCREMENT", "NO", "IS_GENERATEDCOLUMN", "NO"),
+                row("COLUMN_NAME", "amount", "DATA_TYPE", Types.DECIMAL, "TYPE_NAME", "DECIMAL",
+                        "COLUMN_SIZE", 30, "DECIMAL_DIGITS", 10,
+                        "NULLABLE", DatabaseMetaData.columnNullable, "COLUMN_DEF", null,
+                        "IS_AUTOINCREMENT", "NO", "IS_GENERATEDCOLUMN", "NO")));
+        ResultSet primaryKeys = resultSet(List.of(row("COLUMN_NAME", "id")));
+        ResultSet indexes = resultSet(List.of());
+        DatabaseMetaData metadata = proxy(DatabaseMetaData.class, (ignored, method, args) -> switch (method.getName()) {
+            case "getTables" -> tables;
+            case "getColumns" -> columns;
+            case "getPrimaryKeys" -> primaryKeys;
+            case "getIndexInfo" -> indexes;
+            default -> defaultValue(method.getReturnType());
+        });
+        ResultSet rows = resultSet(List.of(row("id", Long.MAX_VALUE,
+                "amount", new java.math.BigDecimal("12345678901234567890.1234567890"))));
+        PreparedStatement statement = proxy(PreparedStatement.class, (ignored, method, args) ->
+                "executeQuery".equals(method.getName()) ? rows : defaultValue(method.getReturnType()));
+        Connection connection = proxy(Connection.class, (ignored, method, args) -> {
+            if ("getMetaData".equals(method.getName())) return metadata;
+            if ("prepareStatement".equals(method.getName())) return statement;
+            return defaultValue(method.getReturnType());
+        });
+        DataSource dataSource = proxy(DataSource.class, (ignored, method, args) ->
+                "getConnection".equals(method.getName()) ? connection : defaultValue(method.getReturnType()));
+
+        var page = service(dataSource).rows("misu_test", "payments", 1, 10, null, "asc", null);
+
+        assertEquals("9223372036854775807", page.items().get(0).values().get("id"));
+        assertEquals("12345678901234567890.1234567890", page.items().get(0).values().get("amount"));
+    }
+
+    @Test
+    void ddlPostconditionComparesMetadataDefaultValue() {
+        CreateTableRequest request = new CreateTableRequest("orders", null,
+                List.of(new ColumnRequest("id", "INT", false, 7, false, false)));
+
+        assertDoesNotThrow(() -> createTableService("7").createTable("misu_test", request));
+        ServiceException exception = assertThrows(ServiceException.class,
+                () -> createTableService("8").createTable("misu_test", request));
+
+        assertEquals(500, exception.getCode());
+    }
+
+    private static OpsDatabaseService createTableService(String actualDefault) {
+        boolean[] created = {false};
+        DatabaseMetaData metadata = proxy(DatabaseMetaData.class, (ignored, method, args) -> switch (method.getName()) {
+            case "getTables" -> resultSet(created[0]
+                    ? List.of(row("TABLE_NAME", "orders", "TABLE_TYPE", "TABLE")) : List.of());
+            case "getColumns" -> resultSet(created[0] ? List.of(row(
+                    "COLUMN_NAME", "id", "DATA_TYPE", Types.INTEGER, "TYPE_NAME", "INT",
+                    "COLUMN_SIZE", 10, "DECIMAL_DIGITS", 0,
+                    "NULLABLE", DatabaseMetaData.columnNoNulls, "COLUMN_DEF", actualDefault,
+                    "IS_AUTOINCREMENT", "NO", "IS_GENERATEDCOLUMN", "NO")) : List.of());
+            case "getPrimaryKeys", "getIndexInfo" -> resultSet(List.of());
+            default -> defaultValue(method.getReturnType());
+        });
+        PreparedStatement statement = proxy(PreparedStatement.class, (ignored, method, args) -> {
+            if ("executeUpdate".equals(method.getName())) {
+                created[0] = true;
+                return 0;
+            }
+            return defaultValue(method.getReturnType());
+        });
+        Connection connection = proxy(Connection.class, (ignored, method, args) -> {
+            if ("getMetaData".equals(method.getName())) return metadata;
+            if ("prepareStatement".equals(method.getName())) return statement;
+            return defaultValue(method.getReturnType());
+        });
+        DataSource dataSource = proxy(DataSource.class, (ignored, method, args) ->
+                "getConnection".equals(method.getName()) ? connection : defaultValue(method.getReturnType()));
+        return service(dataSource);
     }
 
     private static OpsDatabaseService service(DataSource dataSource) {

@@ -20,6 +20,7 @@ import org.slf4j.MDC;
 
 import javax.sql.DataSource;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.JDBCType;
@@ -429,10 +430,11 @@ public class OpsDatabaseService {
                 String name = rs.getString("COLUMN_NAME");
                 if (validMetadataIdentifier(name)) {
                     String typeName = safe(rs.getString("TYPE_NAME"));
+                    String defaultValue = safe(rs.getString("COLUMN_DEF"));
                     columns.add(new ColumnInfo(name, rs.getInt("DATA_TYPE"), typeName, typeName,
                             rs.getInt("COLUMN_SIZE"), rs.getInt("DECIMAL_DIGITS"),
-                            rs.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls,
-                            rs.getString("COLUMN_DEF") != null, "YES".equalsIgnoreCase(rs.getString("IS_AUTOINCREMENT")),
+                            rs.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls, defaultValue,
+                            defaultValue != null, "YES".equalsIgnoreCase(rs.getString("IS_AUTOINCREMENT")),
                             "YES".equalsIgnoreCase(rs.getString("IS_GENERATEDCOLUMN"))));
                 }
             }
@@ -475,7 +477,7 @@ public class OpsDatabaseService {
                     while (rs.next()) {
                         Map<String, Object> values = new LinkedHashMap<>();
                         for (ColumnInfo column : info.columns) {
-                            values.put(column.name, jsonValue(rs.getObject(column.name)));
+                            values.put(column.name, jsonValue(rs.getObject(column.name), column));
                         }
                         String rowVersion = info.versionColumn == null || values.get(info.versionColumn.name) == null
                                 ? null : String.valueOf(values.get(info.versionColumn.name));
@@ -580,12 +582,48 @@ public class OpsDatabaseService {
     private boolean columnMatches(ColumnInfo actual, ColumnRequest expected, String type) {
         boolean nullable = expected.nullable() && !expected.primaryKey();
         return nullable == actual.nullable && typeMatches(actual, type)
-                && (expected.defaultValue() != null) == actual.defaultValuePresent;
+                && defaultMatches(actual.defaultValue, expected.defaultValue(), type);
     }
 
     private boolean columnMatches(ColumnInfo actual, AddColumnRequest expected, String type) {
         return expected.nullable() == actual.nullable && typeMatches(actual, type)
-                && (expected.defaultValue() != null) == actual.defaultValuePresent;
+                && defaultMatches(actual.defaultValue, expected.defaultValue(), type);
+    }
+
+    private static boolean defaultMatches(String actual, Object expected, String type) {
+        if (expected == null) return actual == null;
+        if (actual == null) return false;
+        try {
+            return normalizeDefault(actual, type).equals(normalizeExpectedDefault(expected, type));
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    private static String normalizeExpectedDefault(Object value, String type) {
+        String literal = DatabaseValidation.defaultLiteral(value, type);
+        if (isCurrentTimestamp(literal)) return "CURRENT_TIMESTAMP";
+        if (isNumericType(type)) return new BigDecimal(literal).toPlainString();
+        return normalizeDefault(literal, type);
+    }
+
+    private static String normalizeDefault(String value, String type) {
+        String text = value.trim();
+        if (isCurrentTimestamp(text)) return "CURRENT_TIMESTAMP";
+        if (isNumericType(type)) return new BigDecimal(text).toPlainString();
+        if (text.length() >= 2 && text.charAt(0) == '\'' && text.charAt(text.length() - 1) == '\'') {
+            text = text.substring(1, text.length() - 1).replace("''", "'");
+        }
+        return text;
+    }
+
+    private static boolean isCurrentTimestamp(String value) {
+        return value != null && value.trim().toUpperCase(Locale.ROOT)
+                .matches("CURRENT_TIMESTAMP(?:\\(\\d{1,2}\\))?");
+    }
+
+    private static boolean isNumericType(String type) {
+        return Set.of("TINYINT", "INT", "BIGINT").contains(type) || type.startsWith("DECIMAL");
     }
 
     private static boolean typeMatches(ColumnInfo actual, String expected) {
@@ -800,8 +838,34 @@ public class OpsDatabaseService {
         }
     }
 
-    private static Object jsonValue(Object value) {
-        if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean) return value;
+    private static Object jsonValue(Object value, ColumnInfo column) {
+        if (value == null) return null;
+        if (value instanceof BigInteger integer) return integer.toString();
+        if (value instanceof BigDecimal decimal) return decimal.toPlainString();
+        if (column != null) {
+            try {
+                JDBCType type = JDBCType.valueOf(column.jdbcType);
+                if (type == JDBCType.BIGINT) return String.valueOf(value);
+                if (Set.of(JDBCType.TINYINT, JDBCType.SMALLINT, JDBCType.INTEGER).contains(type)
+                        && value instanceof Number number) {
+                    long integer = number.longValue();
+                    return integer >= -9_007_199_254_740_991L && integer <= 9_007_199_254_740_991L
+                            ? value : Long.toString(integer);
+                }
+                if (Set.of(JDBCType.DECIMAL, JDBCType.NUMERIC).contains(type)) {
+                    return new BigDecimal(String.valueOf(value)).toPlainString();
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Keep generic JSON conversion for an unknown JDBC type.
+            }
+        }
+        if (value instanceof Number number
+                && (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long)) {
+            long integer = number.longValue();
+            return integer >= -9_007_199_254_740_991L && integer <= 9_007_199_254_740_991L
+                    ? value : Long.toString(integer);
+        }
+        if (value instanceof String || value instanceof Number || value instanceof Boolean) return value;
         if (value instanceof byte[] bytes) return Base64.getEncoder().encodeToString(bytes);
         if (value instanceof java.sql.Date date) return date.toLocalDate().toString();
         if (value instanceof Timestamp timestamp) return timestamp.toLocalDateTime().toString();
@@ -843,7 +907,7 @@ public class OpsDatabaseService {
     private static ServiceException upstream(Throwable ignored) { return DatabaseValidation.error(502, "OPS_DB_UPSTREAM", "数据库暂不可用"); }
 
     private record ColumnInfo(String name, int jdbcType, String typeName, String objectType,
-                              int size, int scale, boolean nullable,
+                              int size, int scale, boolean nullable, String defaultValue,
                               boolean defaultValuePresent, boolean autoIncrement, boolean generated) {
         ColumnDto dto() {
             return new ColumnDto(name, jdbcType, typeName, nullable, defaultValuePresent,

@@ -35,11 +35,19 @@ class DatabaseValidationTest {
     void ddlDefaultsAllowOnlySafeLiterals() {
         assertEquals("'O''Reilly'", DatabaseValidation.defaultLiteral("O'Reilly", "VARCHAR(120)"));
         assertEquals("'C:\\\\tmp''x'", DatabaseValidation.defaultLiteral("C:\\tmp'x", "VARCHAR(120)"));
+        assertEquals("12.30", DatabaseValidation.defaultLiteral("12.30", "DECIMAL(8,2)"));
+        assertEquals("-0.50", DatabaseValidation.defaultLiteral(new java.math.BigDecimal("-0.50"), "DECIMAL(8,2)"));
         assertEquals("CURRENT_TIMESTAMP", DatabaseValidation.defaultLiteral("CURRENT_TIMESTAMP", "DATETIME"));
         assertThrows(ServiceException.class,
                 () -> DatabaseValidation.defaultLiteral("1); DROP TABLE users; --", "VARCHAR(120)"));
         assertThrows(ServiceException.class,
                 () -> DatabaseValidation.defaultLiteral("CURRENT_TIMESTAMP", "VARCHAR(120)"));
+        assertThrows(ServiceException.class,
+                () -> DatabaseValidation.defaultLiteral("1e2", "DECIMAL(8,2)"));
+        assertThrows(ServiceException.class,
+                () -> DatabaseValidation.defaultLiteral("+1.2", "DECIMAL(8,2)"));
+        assertThrows(ServiceException.class,
+                () -> DatabaseValidation.defaultLiteral("123.456", "DECIMAL(8,2)"));
     }
 
     @Test
