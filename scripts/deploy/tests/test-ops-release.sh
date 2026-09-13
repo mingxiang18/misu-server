@@ -67,6 +67,10 @@ run_release() {
 
 sha="$(git -C "${ROOT_DIR}" rev-parse --short HEAD)"
 
+grep -Fq 'image: ${REGISTRY_PULL}/misuaa/misu-ops:${IMAGE_TAG}' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-ops.yaml"
+grep -Fq "envsubst '\${REGISTRY_PULL} \${IMAGE_TAG} \${OPS_CONFIG_TAG}'" "${ROOT_DIR}/scripts/deploy/release.sh"
+echo 'misu-ops image tag placeholder remains release-compatible: PASS'
+
 # Frontend publishing must be independent of the caller's umask.  Keep these
 # source-level guards in the offline harness so a future refactor cannot
 # reintroduce nginx 403s caused by rsync preserving mode 0600/0700 artifacts.
@@ -86,6 +90,17 @@ rg -q 'key: password' "${TMP_DIR}/normal-misu-ops.yaml"
 ruby - "${TMP_DIR}/normal-misu-ops.yaml" <<'RB'
 require 'yaml'
 deployment = YAML.load_stream(File.read(ARGV.fetch(0))).first
+pod = deployment.dig('spec', 'template', 'spec')
+seccomp = pod.dig('securityContext', 'seccompProfile', 'type')
+raise "expected RuntimeDefault seccomp profile, got #{seccomp.inspect}" unless seccomp == 'RuntimeDefault'
+containers = pod.fetch('containers')
+raise 'expected misu-ops and nginx containers' unless containers.map { |entry| entry['name'] }.sort == %w[misu-ops nginx]
+containers.each do |container|
+  context = container.fetch('securityContext')
+  raise "#{container['name']} allows privilege escalation" unless context['allowPrivilegeEscalation'] == false
+  raise "#{container['name']} does not drop all capabilities" unless context.dig('capabilities', 'drop') == ['ALL']
+end
+puts 'RuntimeDefault + no privilege escalation + drop ALL on both containers: PASS'
 env = deployment.dig('spec', 'template', 'spec', 'containers').first.fetch('env')
 auth_refs = env.select { |entry| entry['valueFrom']&.dig('secretKeyRef', 'name') == 'misu-ops-nacos-auth' }
 raise 'expected both optional Nacos auth Secret refs' unless auth_refs.size == 2

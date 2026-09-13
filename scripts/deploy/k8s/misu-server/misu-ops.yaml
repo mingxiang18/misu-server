@@ -18,6 +18,12 @@ spec:
       labels: { app: misuops }
     spec:
       automountServiceAccountToken: false
+      # Both images run without a service-account token or Linux capabilities.
+      # Keep the default user for now: the Java image must read the 0400 SSH
+      # Secret and the stock Nginx entrypoint renders /etc/nginx at startup.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       terminationGracePeriodSeconds: 30
       affinity:
         nodeAffinity:
@@ -32,6 +38,10 @@ spec:
         - name: misu-ops
           image: ${REGISTRY_PULL}/misuaa/misu-ops:${IMAGE_TAG}
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
           ports:
             - { name: backend, containerPort: 30264, protocol: TCP }
           env:
@@ -104,6 +114,10 @@ spec:
         - name: nginx
           image: nginx:1.27-alpine
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
           env:
             - { name: NGINX_ENVSUBST_OUTPUT_DIR, value: "/etc/nginx" }
             - { name: OPS_PROXY_SHARED_SECRET, valueFrom: { secretKeyRef: { name: misu-ops-config, key: proxy-shared-secret } } }
