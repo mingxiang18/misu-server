@@ -105,7 +105,32 @@ data:
           proxy_pass http://misu_ops_backend/ops/internal/health;
           proxy_set_header Host $host;
           proxy_set_header X-Forwarded-Proto https;
-          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header Authorization "";
+          proxy_set_header Cookie "";
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
         }
 
         # auth_request 的内部子请求，Java 服务负责校验 ADMIN 运维会话，
@@ -116,6 +141,7 @@ data:
           proxy_pass_request_body off;
           proxy_set_header Content-Length "";
           proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host "";
           proxy_set_header X-Original-URI $ops_original_uri;
           proxy_set_header X-Original-Method $request_method;
           proxy_set_header X-Original-Host $host;
@@ -136,8 +162,13 @@ data:
           proxy_set_header X-Forwarded-For "";
           proxy_set_header X-Real-IP "";
           proxy_set_header X-Forwarded-Port "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
           proxy_set_header Cookie $http_cookie;
-          proxy_set_header Authorization $http_authorization;
+          proxy_set_header Authorization "";
         }
 
         # Each exchange path is target-specific. The Java endpoint only
@@ -146,7 +177,7 @@ data:
           proxy_pass http://misu_ops_backend/ops/api/console-sessions/exchange;
           proxy_http_version 1.1;
           proxy_set_header Host $host;
-          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Host "";
           proxy_set_header X-Forwarded-Proto https;
           # Do not let edge forwarding headers rewrite Java's remote address;
           # the exchange trust check must see the sidecar's 127.0.0.1 peer.
@@ -154,6 +185,11 @@ data:
           proxy_set_header X-Forwarded-For "";
           proxy_set_header X-Real-IP "";
           proxy_set_header X-Forwarded-Port "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
           proxy_set_header X-Ops-Target nacos;
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
           proxy_set_header X-Ops-User "";
@@ -181,12 +217,17 @@ data:
           proxy_pass http://misu_ops_backend/ops/api/console-sessions/exchange;
           proxy_http_version 1.1;
           proxy_set_header Host $host;
-          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Host "";
           proxy_set_header X-Forwarded-Proto https;
           proxy_set_header Forwarded "";
           proxy_set_header X-Forwarded-For "";
           proxy_set_header X-Real-IP "";
           proxy_set_header X-Forwarded-Port "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
           proxy_set_header X-Ops-Target headlamp;
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
           proxy_set_header X-Ops-User "";
@@ -317,7 +358,7 @@ data:
           proxy_pass http://misu_ops_backend/ops/ws/console/$ops_console_target;
           proxy_http_version 1.1;
           proxy_set_header Host $host;
-          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Host "";
           proxy_set_header X-Forwarded-Proto https;
           # Spring's forwarded-header handling must see the sidecar's
           # loopback peer for its trusted-proxy check. Preserve the explicit
@@ -346,6 +387,12 @@ data:
           proxy_set_header X-Forwarded-Group "";
           proxy_set_header X-Forwarded-Email "";
           proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
           proxy_hide_header Set-Cookie;
           proxy_hide_header Authorization;
           proxy_hide_header X-Frame-Options;
@@ -362,12 +409,22 @@ data:
           proxy_pass http://misu_ops_backend;
           proxy_http_version 1.1;
           proxy_set_header Host $host;
-          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Host "";
           proxy_set_header X-Forwarded-Proto https;
-          proxy_set_header X-Real-IP $remote_addr;
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
           proxy_set_header Upgrade $http_upgrade;
           proxy_set_header Connection $connection_upgrade;
+          proxy_set_header Authorization "";
+          proxy_set_header Cookie "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
           proxy_set_header X-Ops-User "";
           proxy_set_header X-Ops-Console-Target "";
           proxy_set_header X-Ops-Original-URI "";
@@ -390,12 +447,20 @@ data:
           proxy_pass http://misu_ops_backend;
           proxy_http_version 1.1;
           proxy_set_header Host $host;
-          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Host "";
           proxy_set_header X-Forwarded-Proto https;
-          proxy_set_header X-Real-IP $remote_addr;
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
           proxy_set_header Authorization $http_authorization;
           proxy_set_header Cookie "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
           proxy_set_header X-Ops-User "";
           proxy_set_header X-Ops-Console-Target "";
           proxy_set_header X-Ops-Original-URI "";

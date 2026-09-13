@@ -49,6 +49,41 @@ for _ in {1..30}; do
   sleep 0.2
 done
 
+forged_headers=(
+  -H 'Authorization: Bearer browser-token'
+  -H 'Cookie: MISU_OPS_SESSION=forged'
+  -H 'Forwarded: for=203.0.113.9'
+  -H 'X-Forwarded-For: 203.0.113.9'
+  -H 'X-Real-IP: 203.0.113.9'
+  -H 'X-Forwarded-Port: 443'
+  -H 'X-Forwarded-Host: attacker.example'
+  -H 'X-Forwarded-User: attacker'
+  -H 'X-Forwarded-Groups: attacker-group'
+  -H 'X-Forwarded-Group: attacker-compat-group'
+  -H 'X-Forwarded-Email: attacker@example.com'
+  -H 'X-Forwarded-Id-Token: attacker-token'
+  -H 'X-Ops-User: attacker'
+  -H 'X-Ops-Target: headlamp'
+  -H 'X-Ops-Proxy-Key: attacker-key'
+  -H 'X-Original-URI: /evil'
+)
+curl -sS -o /dev/null -H 'Host: api.misu.chat' "${forged_headers[@]}" \
+  "http://127.0.0.1:${NGINX_PORT}/_ops/healthz"
+rg -q 'HEALTH_HEADERS auth= cookie= forwarded= xff= real= port= xfh= user= groups= group= email= id_token= ops_user= ops_target= original_uri=' "${MOCK_LOG}"
+curl -sS -o /dev/null -H 'Host: api.misu.chat' "${forged_headers[@]}" \
+  "http://127.0.0.1:${NGINX_PORT}/ops/ws/ssh/forged"
+rg -q 'BACKEND_UPSTREAM path=/ops/ws/ssh/forged.*cookie= auth= user= groups= group= email= id_token= ops_user= ops_target= ops_key= original_uri= original_host=' "${MOCK_LOG}"
+curl -sS -o /dev/null -H 'Host: api.misu.chat' -H 'Authorization: Bearer main-jwt' \
+  -H 'Cookie: MISU_OPS_SESSION=forged' \
+  -H 'Forwarded: for=203.0.113.9' -H 'X-Forwarded-For: 203.0.113.9' \
+  -H 'X-Real-IP: 203.0.113.9' -H 'X-Forwarded-Port: 443' \
+  -H 'X-Forwarded-User: attacker' -H 'X-Forwarded-Groups: attacker-group' \
+  -H 'X-Forwarded-Group: attacker-compat-group' -H 'X-Forwarded-Email: attacker@example.com' \
+  -H 'X-Forwarded-Id-Token: attacker-token' -H 'X-Ops-User: attacker' \
+  -H 'X-Ops-Target: headlamp' -H 'X-Ops-Proxy-Key: attacker-key' -H 'X-Original-URI: /evil' \
+  "http://127.0.0.1:${NGINX_PORT}/ops/api/ops/ping"
+rg -q 'API_BACKEND path=/ops/api/ops/ping auth=Bearer main-jwt cookie= forwarded= xff= real= port= xfh= user= groups= group= email= id_token= ops_user= ops_target= original_uri=' "${MOCK_LOG}"
+
 code=$(curl -sS -o "${TMP_DIR}/unauthorized" -w '%{http_code}' -H 'Host: api.misu.chat' "http://127.0.0.1:${NGINX_PORT}/nacos/")
 [[ "${code}" == 401 ]]
 code=$(curl -sS -o "${TMP_DIR}/nacos" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=nacos-session' \
@@ -63,6 +98,7 @@ rg -q 'NACOS_UPSTREAM path=/nacos/v1/console/server/state\?format=json' "${TMP_D
 rg -q 'NACOS_UPSTREAM.*user= groups= group= email= id_token= ops_user= ops_target= ops_key= original_uri= original_host=' "${TMP_DIR}/nacos"
 rg -q 'AUTH_REQUEST original_uri_present=True target_present=True original_uri_valid=True target_valid=True forwarding_headers_cleared=True' "${MOCK_LOG}"
 code=$(curl -sS -o "${TMP_DIR}/headlamp" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=headlamp-session' \
+  -H 'Authorization: Bearer browser-token' \
   -H 'X-Forwarded-User: attacker' -H 'X-Forwarded-Groups: attacker-group' \
   -H 'X-Forwarded-Group: attacker-group-compat' -H 'X-Forwarded-Email: attacker@example.com' \
   -H 'X-Forwarded-Id-Token: attacker-token' \
@@ -72,6 +108,7 @@ code=$(curl -sS -o "${TMP_DIR}/headlamp" -w '%{http_code}' -H 'Host: api.misu.ch
 [[ "${code}" == 200 ]]
 rg -q 'HEADLAMP_UPSTREAM path=/ops/headlamp/c/main/pods' "${TMP_DIR}/headlamp"
 rg -q 'HEADLAMP_UPSTREAM.*user=admin groups= group= email= id_token= ops_user= ops_target= ops_key= original_uri= original_host=' "${TMP_DIR}/headlamp"
+rg -q 'HEADLAMP_UPSTREAM.*cookie=UPSTREAM_TOKEN=clean auth= user=admin' "${TMP_DIR}/headlamp"
 code=$(curl -sS -o "${TMP_DIR}/headlamp-token" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=headlamp-session' "http://127.0.0.1:${NGINX_PORT}/ops/headlamp/c/main/token")
 [[ "${code}" == 200 ]]
 rg -q 'HEADLAMP_UPSTREAM path=/ops/headlamp/c/main/token.*user=admin' "${TMP_DIR}/headlamp-token"
@@ -128,7 +165,7 @@ PY
 }
 check_ws headlamp headlamp-session /ops/headlamp/wsMultiplexer
 check_ws nacos nacos-session /nacos/wsMultiplexer
-rg -q 'WS_BACKEND path=/ops/ws/console/headlamp original=/ops/headlamp/wsMultiplexer target=headlamp cookie=MISU_OPS_SESSION=headlamp-session upstream-cookie=UPSTREAM_TOKEN=clean upstream-auth=Bearer upstream user=admin groups= group= email= id_token=' "${MOCK_LOG}"
+rg -q 'WS_BACKEND path=/ops/ws/console/headlamp original=/ops/headlamp/wsMultiplexer target=headlamp cookie=MISU_OPS_SESSION=headlamp-session upstream-cookie=UPSTREAM_TOKEN=clean upstream-auth= user=admin groups= group= email= id_token=' "${MOCK_LOG}"
 rg -q 'WS_BACKEND path=/ops/ws/console/nacos original=/nacos/wsMultiplexer target=nacos cookie=MISU_OPS_SESSION=nacos-session upstream-cookie=UPSTREAM_TOKEN=clean upstream-auth=Bearer upstream user= groups= group= email= id_token=' "${MOCK_LOG}"
 [[ "$(rg -c 'WS_BACKEND_FORWARDING forwarded= xff= real= port=' "${MOCK_LOG}")" == 2 ]]
 code=$(curl -sS -D "${TMP_DIR}/exchange-headers" -o "${TMP_DIR}/exchange" -w '%{http_code}' -X POST -H 'Host: api.misu.chat' \

@@ -40,4 +40,30 @@ class NacosUpstreamAuthServiceTest {
         assertThrows(ServiceException.class, () -> service.authorization("ops-session"));
         assertEquals(0, service.cachedSessionCount());
     }
+
+    @Test
+    void configuredCredentialsRejectHttpLoopbackAliasAndCheckAuthAndUpstreamUrls() {
+        OpsProperties properties = new OpsProperties();
+        properties.setNacosUsername("nacos-ops");
+        properties.setNacosPassword("secret");
+        properties.setNacosUpstreamUrl("http://127.0.0.1:8848/nacos/");
+        properties.setNacosAuthUrl("http://localhost:8848/nacos/");
+        NacosUpstreamAuthService service = new NacosUpstreamAuthService(properties);
+
+        assertThrows(ServiceException.class, () -> service.authorization("ops-session"));
+        assertEquals(0, service.cachedSessionCount());
+    }
+
+    @Test
+    void configuredCredentialsRejectHttpUpstreamAliasEvenWithHttpsAuthUrl() {
+        OpsProperties properties = new OpsProperties();
+        properties.setNacosUsername("nacos-ops");
+        properties.setNacosPassword("secret");
+        properties.setNacosUpstreamUrl("http://localhost:8848/nacos/");
+        properties.setNacosAuthUrl("https://auth.example/nacos/");
+        NacosUpstreamAuthService service = new NacosUpstreamAuthService(properties);
+
+        assertThrows(ServiceException.class, () -> service.authorization("ops-session"));
+        assertEquals(0, service.cachedSessionCount());
+    }
 }

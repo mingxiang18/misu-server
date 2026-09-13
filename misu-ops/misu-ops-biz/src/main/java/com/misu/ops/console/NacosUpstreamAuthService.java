@@ -55,7 +55,8 @@ public class NacosUpstreamAuthService {
             throw new ServiceException(HttpStatus.ERROR, "Nacos 上游认证配置不完整");
         }
         URI authUri = loginUri();
-        if (!"https".equalsIgnoreCase(authUri.getScheme()) && !isLoopback(authUri.getHost())) {
+        URI upstreamUri = upstreamUri();
+        if (!isSecureOrLiteralLoopback(authUri) || !isSecureOrLiteralLoopback(upstreamUri)) {
             tokens.clear();
             throw new ServiceException(HttpStatus.ERROR, "Nacos 上游认证必须使用 HTTPS");
         }
@@ -111,6 +112,14 @@ public class NacosUpstreamAuthService {
     private URI loginUri() {
         String configured = StringUtils.hasText(properties.getNacosAuthUrl())
                 ? properties.getNacosAuthUrl() : properties.getNacosUpstreamUrl();
+        return parseBaseUri(configured).resolve("v1/auth/users/login");
+    }
+
+    private URI upstreamUri() {
+        return parseBaseUri(properties.getNacosUpstreamUrl());
+    }
+
+    private URI parseBaseUri(String configured) {
         if (!StringUtils.hasText(configured)) {
             throw new ServiceException(HttpStatus.ERROR, "Nacos 上游地址未配置");
         }
@@ -121,15 +130,19 @@ public class NacosUpstreamAuthService {
                     || base.getQuery() != null || base.getFragment() != null) {
                 throw new IllegalArgumentException("invalid Nacos URL");
             }
-            return base.resolve("v1/auth/users/login");
+            return base;
         } catch (IllegalArgumentException ex) {
             throw new ServiceException(HttpStatus.ERROR, "Nacos 上游地址无效");
         }
     }
 
-    private boolean isLoopback(String host) {
-        return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)
-                || "::1".equals(host) || "[::1]".equals(host);
+    private boolean isSecureOrLiteralLoopback(URI uri) {
+        return "https".equalsIgnoreCase(uri.getScheme()) || isLiteralLoopback(uri.getHost());
+    }
+
+    /** Literal hosts avoid DNS/hosts resolution TOCTOU for the HTTP exception. */
+    private boolean isLiteralLoopback(String host) {
+        return "127.0.0.1".equals(host) || "::1".equals(host) || "[::1]".equals(host);
     }
 
     private record CachedToken(String accessToken, Instant expiresAt) {

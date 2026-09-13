@@ -55,6 +55,20 @@ class OpsSessionStoreTest {
     }
 
     @Test
+    void refreshingSameUserAndTargetReplacesTheOldSession() {
+        OpsSessionStore store = new OpsSessionStore(properties, verifier);
+        OpsSessionStore.ConsoleSession oldSession = store.createConsoleSession(
+                store.issueTicket(admin, ConsoleTarget.NACOS));
+        OpsSessionStore.ConsoleSession newSession = store.createConsoleSession(
+                store.issueTicket(admin, ConsoleTarget.NACOS));
+
+        assertEquals(1, store.activeConsoleSessionCount());
+        assertThrows(ServiceException.class,
+                () -> store.requireConsoleSession(oldSession.id(), ConsoleTarget.NACOS.id()));
+        assertSame(newSession, store.requireConsoleSession(newSession.id(), ConsoleTarget.NACOS.id()));
+    }
+
+    @Test
     void sshCredentialIsSingleUseAndAccountRevocationRemovesSession() {
         OpsSessionStore store = new OpsSessionStore(properties, verifier);
         OpsSessionStore.SshSession ssh = store.createSshSession(admin, "master", 80, 24);

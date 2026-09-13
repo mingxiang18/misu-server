@@ -116,6 +116,16 @@ public class OpsSessionStore {
                 .toList();
         expiredSessionIds.forEach(id -> consoleSessions.remove(id));
         expiredSessionIds.forEach(this::removeNacosAuth);
+        // A browser refresh exchanges a new ticket for the same console. Keep
+        // one live session per user and target so refreshes cannot consume the
+        // per-user quota or leave an older cookie usable.
+        List<String> replacedSessionIds = consoleSessions.values().stream()
+                .filter(session -> session.userId().equals(ticket.userId())
+                        && session.target() == ticket.target())
+                .map(ConsoleSession::id)
+                .toList();
+        replacedSessionIds.forEach(id -> consoleSessions.remove(id));
+        replacedSessionIds.forEach(this::removeNacosAuth);
         long userSessions = consoleSessions.values().stream()
                 .filter(session -> session.userId().equals(ticket.userId()))
                 .count();

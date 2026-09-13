@@ -42,6 +42,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if role == "backend":
             if self.path == "/ops/internal/health":
+                self.append("HEALTH_HEADERS auth=%s cookie=%s forwarded=%s xff=%s real=%s port=%s xfh=%s user=%s groups=%s group=%s email=%s id_token=%s ops_user=%s ops_target=%s original_uri=%s" % (
+                    self.headers.get("Authorization", ""), self.headers.get("Cookie", ""),
+                    self.headers.get("Forwarded", ""), self.headers.get("X-Forwarded-For", ""),
+                    self.headers.get("X-Real-IP", ""), self.headers.get("X-Forwarded-Port", ""),
+                    self.headers.get("X-Forwarded-Host", ""),
+                    self.headers.get("X-Forwarded-User", ""), self.headers.get("X-Forwarded-Groups", ""),
+                    self.headers.get("X-Forwarded-Group", ""), self.headers.get("X-Forwarded-Email", ""),
+                    self.headers.get("X-Forwarded-Id-Token", ""), self.headers.get("X-Ops-User", ""),
+                    self.headers.get("X-Ops-Target", ""), self.headers.get("X-Original-URI", "")))
                 self.write(200, "health-ok")
                 return
             if self.path == "/ops/internal/proxy-auth":
@@ -66,11 +75,16 @@ class Handler(BaseHTTPRequestHandler):
                     self.append("AUTH_REJECT console_not_reached")
                     self.write(401, "bad-secret")
                 else:
-                    self.write(204, headers={
+                    response_headers = {
                         "X-Ops-User": "admin",
                         "X-Ops-Upstream-Cookie": "UPSTREAM_TOKEN=clean",
-                        "X-Ops-Upstream-Authorization": "Bearer upstream",
-                    })
+                    }
+                    # Only the Nacos path may receive a server-generated
+                    # upstream Authorization value. Headlamp uses its
+                    # in-cluster identity-aware mode and must see none.
+                    if target == "nacos":
+                        response_headers["X-Ops-Upstream-Authorization"] = "Bearer upstream"
+                    self.write(204, headers=response_headers)
                 return
             if self.path.startswith("/ops/ws/console/") and self.headers.get("Upgrade", "").lower() == "websocket":
                 self.append(
@@ -105,6 +119,15 @@ class Handler(BaseHTTPRequestHandler):
                 })
                 return
             if self.path.startswith("/ops/api/"):
+                self.append("API_BACKEND path=%s auth=%s cookie=%s forwarded=%s xff=%s real=%s port=%s xfh=%s user=%s groups=%s group=%s email=%s id_token=%s ops_user=%s ops_target=%s original_uri=%s" % (
+                    self.path, self.headers.get("Authorization", ""), self.headers.get("Cookie", ""),
+                    self.headers.get("Forwarded", ""), self.headers.get("X-Forwarded-For", ""),
+                    self.headers.get("X-Real-IP", ""), self.headers.get("X-Forwarded-Port", ""),
+                    self.headers.get("X-Forwarded-Host", ""),
+                    self.headers.get("X-Forwarded-User", ""), self.headers.get("X-Forwarded-Groups", ""),
+                    self.headers.get("X-Forwarded-Group", ""), self.headers.get("X-Forwarded-Email", ""),
+                    self.headers.get("X-Forwarded-Id-Token", ""), self.headers.get("X-Ops-User", ""),
+                    self.headers.get("X-Ops-Target", ""), self.headers.get("X-Original-URI", "")))
                 self.write(200, "API_BACKEND path=%s host=%s auth=%s cookie=%s" % (
                     self.path,
                     self.headers.get("Host", ""),
