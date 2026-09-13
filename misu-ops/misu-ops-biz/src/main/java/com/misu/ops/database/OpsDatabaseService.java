@@ -6,13 +6,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
+import com.misu.security.dto.LoginUser;
+import com.misu.security.utils.LoginMessageUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.MDC;
 
 import javax.sql.DataSource;
 import java.math.BigDecimal;
@@ -60,7 +64,7 @@ public class OpsDatabaseService {
     private final ObjectMapper objectMapper;
     private final Semaphore concurrency;
 
-    public OpsDatabaseService(ObjectProvider<DataSource> dataSourceProvider,
+    public OpsDatabaseService(@Qualifier("opsDatabaseDataSource") ObjectProvider<DataSource> dataSourceProvider,
                               OpsProperties opsProperties, ObjectMapper objectMapper) {
         this.dataSource = dataSourceProvider.getIfAvailable();
         this.jdbcTemplate = dataSource == null ? null : new JdbcTemplate(dataSource);
@@ -265,6 +269,7 @@ public class OpsDatabaseService {
         DatabaseValidation.comment(request.comment());
         Set<String> names = new LinkedHashSet<>();
         int primaryKeys = 0;
+        int autoIncrementColumns = 0;
         List<String> definitions = new ArrayList<>();
         for (ColumnRequest column : request.columns()) {
             if (column == null || !names.add(DatabaseValidation.identifier(column.name(), "字段名"))) {
@@ -277,7 +282,15 @@ public class OpsDatabaseService {
                     throw ddlRejected("只能有一个主键");
                 }
             }
-            definitions.add(columnDefinition(column.name(), type, column.nullable(), column.defaultValue(), column.primaryKey()));
+            if (column.autoIncrement() && ++autoIncrementColumns > 1) {
+                throw ddlRejected("只能有一个自增字段");
+            }
+            if (column.autoIncrement() && (!column.primaryKey()
+                    || !Set.of("TINYINT", "INT", "BIGINT").contains(type))) {
+                throw ddlRejected("自增字段必须是整数主键");
+            }
+            definitions.add(columnDefinition(column.name(), type, column.nullable(), column.defaultValue(),
+                    column.primaryKey(), column.autoIncrement()));
         }
         StringBuilder sql = new StringBuilder("CREATE TABLE ").append(DatabaseValidation.quote(schema)).append(".").append(DatabaseValidation.quote(table))
                 .append(" (").append(String.join(", ", definitions)).append(")");
@@ -302,13 +315,17 @@ public class OpsDatabaseService {
         }
         String type = DatabaseValidation.type(request.type());
         StringBuilder sql = new StringBuilder("ALTER TABLE ").append(qualified(info)).append(" ADD COLUMN ")
-                .append(columnDefinition(column, type, request.nullable(), request.defaultValue(), false));
+                .append(columnDefinition(column, type, request.nullable(), request.defaultValue(), false, false));
         if (request.position() != null && !request.position().isBlank()) {
-            ColumnInfo after = info.column(request.position());
-            if (after == null) {
-                throw ddlRejected("字段位置无效");
+            if ("FIRST".equalsIgnoreCase(request.position())) {
+                sql.append(" FIRST");
+            } else {
+                ColumnInfo after = info.column(request.position());
+                if (after == null) {
+                    throw ddlRejected("字段位置无效");
+                }
+                sql.append(" AFTER ").append(DatabaseValidation.quote(after.name));
             }
-            sql.append(" AFTER ").append(DatabaseValidation.quote(after.name));
         }
         executeDdl(sql.toString());
         return metadata(schema, existing);
@@ -637,11 +654,13 @@ public class OpsDatabaseService {
         return String.valueOf(value);
     }
 
-    private String columnDefinition(String name, String type, boolean nullable, Object defaultValue, boolean primaryKey) {
+    private String columnDefinition(String name, String type, boolean nullable, Object defaultValue,
+                                    boolean primaryKey, boolean autoIncrement) {
         StringBuilder definition = new StringBuilder(DatabaseValidation.quote(name)).append(" ").append(type);
         if (!nullable || primaryKey) definition.append(" NOT NULL");
         if (defaultValue != null) definition.append(" DEFAULT ").append(DatabaseValidation.defaultLiteral(defaultValue, type));
         if (primaryKey) definition.append(" PRIMARY KEY");
+        if (autoIncrement) definition.append(" AUTO_INCREMENT");
         return definition.toString();
     }
 
@@ -656,8 +675,9 @@ public class OpsDatabaseService {
     }
 
     private void audit(String action, TableInfo info, List<String> columns, int affected) {
-        log.info("数据库审计 action={} database={} table={} columns={} affected={}", action, info.database, info.table,
-                String.join(",", columns), affected);
+        Long actorId = LoginMessageUtil.getLoginUser().map(LoginUser::getUserId).orElse(null);
+        log.info("数据库审计 actorUserId={} requestId={} action={} database={} table={} columns={} affected={}",
+                actorId, MDC.get("requestId"), action, info.database, info.table, String.join(",", columns), affected);
     }
 
     private static ServiceException invalid(String message) { return DatabaseValidation.error(HttpStatus.BAD_REQUEST, "OPS_DB_INVALID_REQUEST", message); }
@@ -669,7 +689,10 @@ public class OpsDatabaseService {
 
     private record ColumnInfo(String name, int jdbcType, String typeName, boolean nullable,
                               boolean defaultValuePresent, boolean autoIncrement, boolean generated) {
-        ColumnDto dto() { return new ColumnDto(name, jdbcType, typeName, nullable, defaultValuePresent, autoIncrement); }
+        ColumnDto dto() {
+            return new ColumnDto(name, jdbcType, typeName, nullable, defaultValuePresent,
+                    autoIncrement, generated, autoIncrement || generated);
+        }
     }
 
     private record IndexInfo(String name, boolean unique, List<String> columns) {

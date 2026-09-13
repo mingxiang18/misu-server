@@ -31,6 +31,18 @@ ops:
   max-console-sessions-per-user: ${OPS_MAX_CONSOLE_SESSIONS_PER_USER:4}
   max-console-web-sockets: ${OPS_MAX_CONSOLE_WEBSOCKETS:8}
   console-web-socket-connect-timeout-millis: ${OPS_CONSOLE_WS_CONNECT_TIMEOUT_MILLIS:5000}
+  database:
+    enabled: ${OPS_DATABASE_ENABLED:false}
+    url: ${OPS_DATABASE_URL:}
+    username: ${OPS_DATABASE_USERNAME:}
+    password: ${OPS_DATABASE_PASSWORD:}
+    allowed-schemas: ${OPS_DATABASE_ALLOWED_SCHEMAS:}
+    maximum-pool-size: ${OPS_DATABASE_MAX_POOL_SIZE:4}
+    connection-timeout-millis: ${OPS_DATABASE_CONNECTION_TIMEOUT_MILLIS:2000}
+    idle-timeout-millis: ${OPS_DATABASE_IDLE_TIMEOUT_MILLIS:60000}
+    query-timeout-seconds: ${OPS_DATABASE_QUERY_TIMEOUT_SECONDS:5}
+    max-concurrent: ${OPS_DATABASE_MAX_CONCURRENT:4}
+    max-page-size: ${OPS_DATABASE_MAX_PAGE_SIZE:100}
   main-cookie-names: ${OPS_MAIN_COOKIE_NAMES:User-Token,User-Refresh-Token,User-Info}
   allowed-origins: ${OPS_ALLOWED_ORIGINS:https://server.misu.chat}
   ssh:

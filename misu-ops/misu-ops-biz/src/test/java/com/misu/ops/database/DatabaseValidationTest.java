@@ -5,6 +5,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Set;
 
+import com.misu.ops.database.DatabaseModels.ColumnDto;
+import com.misu.ops.database.DatabaseModels.ColumnRequest;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -36,5 +39,14 @@ class DatabaseValidationTest {
                 () -> DatabaseValidation.defaultLiteral("1); DROP TABLE users; --", "VARCHAR(120)"));
         assertThrows(ServiceException.class,
                 () -> DatabaseValidation.defaultLiteral("CURRENT_TIMESTAMP", "VARCHAR(120)"));
+    }
+
+    @Test
+    void columnDtoMarksGeneratedColumnsReadOnlyAndRequestKeepsLegacyShape() {
+        ColumnDto generated = new ColumnDto("id", java.sql.Types.BIGINT, "BIGINT", false,
+                false, true, false, true);
+        assertEquals(true, generated.readOnly());
+        ColumnRequest legacy = new ColumnRequest("id", "BIGINT", false, null, true);
+        assertEquals(false, legacy.autoIncrement());
     }
 }

@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Condition;
 import org.springframework.context.annotation.ConditionContext;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.type.AnnotatedTypeMetadata;
 
 import javax.sql.DataSource;
@@ -44,7 +45,8 @@ public class OpsDatabaseConfiguration {
     }
 
     @Bean(name = "opsDatabaseTransactionManager")
-    public PlatformTransactionManager opsDatabaseTransactionManager(org.springframework.beans.factory.ObjectProvider<DataSource> provider) {
+    public PlatformTransactionManager opsDatabaseTransactionManager(
+            @Qualifier("opsDatabaseDataSource") org.springframework.beans.factory.ObjectProvider<DataSource> provider) {
         DataSource dataSource = provider.getIfAvailable();
         return dataSource == null ? new UnavailableTransactionManager() : new DataSourceTransactionManager(dataSource);
     }

@@ -2,3 +2,8 @@ ops:
   allowed-origins:
     - https://server.misu.chat
     - http://localhost:5173
+  database:
+    enabled: ${OPS_DATABASE_ENABLED:false}
+    allowed-schemas:
+      - misu_account
+      - misu_file_server

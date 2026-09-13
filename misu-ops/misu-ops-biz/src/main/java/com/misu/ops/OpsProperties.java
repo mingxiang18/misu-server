@@ -49,6 +49,7 @@ public class OpsProperties {
     private long consoleWebSocketConnectTimeoutMillis = 5000;
     private long accountConnectTimeoutMillis = 3000;
     private long accountReadTimeoutMillis = 5000;
+    private DatabaseProperties database = new DatabaseProperties();
     /** Cookie names owned by the main site and never forwarded to a console. */
     private List<String> mainCookieNames = new ArrayList<>(List.of(
             "User-Token", "User-Refresh-Token", "User-Info"));
@@ -88,5 +89,21 @@ public class OpsProperties {
             this.host = host;
             this.port = port;
         }
+    }
+
+    @Getter
+    @Setter
+    public static class DatabaseProperties {
+        private boolean enabled;
+        private String url = "";
+        private String username = "";
+        private String password = "";
+        private List<String> allowedSchemas = new ArrayList<>();
+        private int maximumPoolSize = 4;
+        private long connectionTimeoutMillis = 2000;
+        private long idleTimeoutMillis = 60000;
+        private int queryTimeoutSeconds = 5;
+        private int maxConcurrent = 4;
+        private int maxPageSize = 100;
     }
 }

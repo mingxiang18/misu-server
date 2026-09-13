@@ -17,7 +17,13 @@ public final class DatabaseModels {
     }
 
     public record ColumnDto(String name, int jdbcType, String typeName, boolean nullable,
-                            boolean defaultValuePresent, boolean autoIncrement) {
+                            boolean defaultValuePresent, boolean autoIncrement,
+                            boolean generated, boolean readOnly) {
+        public ColumnDto(String name, int jdbcType, String typeName, boolean nullable,
+                         boolean defaultValuePresent, boolean autoIncrement) {
+            this(name, jdbcType, typeName, nullable, defaultValuePresent, autoIncrement,
+                    false, autoIncrement);
+        }
     }
 
     public record IndexDto(String name, boolean unique, List<String> columns) {
@@ -55,6 +61,10 @@ public final class DatabaseModels {
 
     @JsonIgnoreProperties(ignoreUnknown = false)
     public record ColumnRequest(String name, String type, boolean nullable,
-                                Object defaultValue, boolean primaryKey) {
+                                Object defaultValue, boolean primaryKey, boolean autoIncrement) {
+        public ColumnRequest(String name, String type, boolean nullable,
+                             Object defaultValue, boolean primaryKey) {
+            this(name, type, nullable, defaultValue, primaryKey, false);
+        }
     }
 }
