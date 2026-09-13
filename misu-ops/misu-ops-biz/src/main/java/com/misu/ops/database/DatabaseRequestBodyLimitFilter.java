@@ -1,5 +1,7 @@
 package com.misu.ops.database;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.misu.common.domain.AjaxResult;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
@@ -22,11 +24,21 @@ import java.nio.charset.StandardCharsets;
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public class DatabaseRequestBodyLimitFilter extends OncePerRequestFilter {
     public static final long MAX_BODY_BYTES = 64 * 1024;
+    private final ObjectMapper objectMapper;
+
+    public DatabaseRequestBodyLimitFilter(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String uri = request.getRequestURI();
-        return !uri.contains("/api/database") || "GET".equalsIgnoreCase(request.getMethod());
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isEmpty() && uri != null && uri.startsWith(contextPath)) {
+            uri = uri.substring(contextPath.length());
+        }
+        boolean databasePath = "/api/database".equals(uri) || (uri != null && uri.startsWith("/api/database/"));
+        return !databasePath || "GET".equalsIgnoreCase(request.getMethod());
     }
 
     @Override
@@ -34,10 +46,32 @@ public class DatabaseRequestBodyLimitFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
         long contentLength = request.getContentLengthLong();
         if (contentLength > MAX_BODY_BYTES) {
-            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "OPS_DB_INVALID_REQUEST");
+            writeError(response);
             return;
         }
-        filterChain.doFilter(new BoundedRequest(request), response);
+        try {
+            filterChain.doFilter(new BoundedRequest(request), response);
+        } catch (BodyTooLargeException ex) {
+            writeError(response);
+        } catch (ServletException ex) {
+            if (hasCause(ex, BodyTooLargeException.class)) writeError(response);
+            else throw ex;
+        }
+    }
+
+    private void writeError(HttpServletResponse response) throws IOException {
+        response.resetBuffer();
+        response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+        response.setCharacterEncoding("UTF-8");
+        response.setContentType("application/json");
+        objectMapper.writeValue(response.getWriter(), AjaxResult.error(400, "OPS_DB_INVALID_REQUEST"));
+    }
+
+    private static boolean hasCause(Throwable error, Class<? extends Throwable> type) {
+        for (Throwable current = error; current != null; current = current.getCause()) {
+            if (type.isInstance(current)) return true;
+        }
+        return false;
     }
 
     private static final class BoundedRequest extends HttpServletRequestWrapper {
@@ -88,12 +122,18 @@ public class DatabaseRequestBodyLimitFilter extends OncePerRequestFilter {
         private void increment(int amount) throws IOException {
             count += amount;
             if (count > MAX_BODY_BYTES) {
-                throw new IOException("request body too large");
+                throw new BodyTooLargeException();
             }
         }
 
         @Override public boolean isFinished() { return delegate.isFinished(); }
         @Override public boolean isReady() { return delegate.isReady(); }
         @Override public void setReadListener(ReadListener listener) { delegate.setReadListener(listener); }
+    }
+
+    private static final class BodyTooLargeException extends IOException {
+        private BodyTooLargeException() {
+            super("request body too large");
+        }
     }
 }

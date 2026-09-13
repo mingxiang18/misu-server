@@ -6,6 +6,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.context.annotation.Condition;
 import org.springframework.context.annotation.ConditionContext;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -24,8 +25,9 @@ public class OpsDatabaseConfiguration {
 
     @Bean(name = "opsDatabaseDataSource", destroyMethod = "close")
     @Conditional(DatabaseConfiguredCondition.class)
-    public DataSource opsDatabaseDataSource(OpsProperties properties) {
+    public DataSource opsDatabaseDataSource(OpsProperties properties, Environment environment) {
         OpsProperties.DatabaseProperties database = properties.getDatabase();
+        DatabaseConnectionPolicy.requireAllowed(database.getUrl(), environment.getActiveProfiles());
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(database.getUrl());
         config.setUsername(database.getUsername());

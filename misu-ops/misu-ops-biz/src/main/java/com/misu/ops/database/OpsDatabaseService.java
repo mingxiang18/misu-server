@@ -130,6 +130,7 @@ public class OpsDatabaseService {
             throw invalid("分页参数超出范围");
         }
         TableInfo info = tableInfo(database, table);
+        ensureSupportedColumns(info);
         String sortColumn = sort;
         if (sortColumn == null || sortColumn.isBlank()) {
             sortColumn = info.primaryKey != null ? info.primaryKey : info.columns.get(0).name;
@@ -319,12 +320,14 @@ public class OpsDatabaseService {
         try {
             executeDdl(sql.toString());
         } catch (ServiceException ex) {
-            rereadAfterDdlFailure(schema, table);
+            TableInfo observed = rereadAfterDdlFailure(schema, table);
+            if (createMatches(observed, request.columns())) return metadata(schema, table);
             throw ex;
         }
         TableInfo created = tableInfoOrNull(schema, table);
-        if (created == null || created.view || created.columns.size() != request.columns().size()
-                || !created.columns.stream().map(c -> c.name).toList().equals(new ArrayList<>(names))) {
+        if (!createMatches(created, request.columns())) {
+            TableInfo observed = rereadAfterDdlFailure(schema, table);
+            if (createMatches(observed, request.columns())) return metadata(schema, table);
             throw ddlRejected("建表结果与元数据不一致");
         }
         return metadata(schema, table);
@@ -358,11 +361,14 @@ public class OpsDatabaseService {
         try {
             executeDdl(sql.toString());
         } catch (ServiceException ex) {
-            rereadAfterDdlFailure(schema, existing);
+            TableInfo observed = rereadAfterDdlFailure(schema, existing);
+            if (addColumnMatches(observed, request, column, type)) return metadata(schema, existing);
             throw ex;
         }
         TableInfo changed = tableInfoOrNull(schema, existing);
-        if (changed == null || changed.column(column) == null) {
+        if (!addColumnMatches(changed, request, column, type)) {
+            TableInfo observed = rereadAfterDdlFailure(schema, existing);
+            if (addColumnMatches(observed, request, column, type)) return metadata(schema, existing);
             throw ddlRejected("加字段结果与元数据不一致");
         }
         return metadata(schema, existing);
@@ -370,6 +376,7 @@ public class OpsDatabaseService {
 
     private TableInfo writableTable(String database, String table) {
         TableInfo info = tableInfo(database, table);
+        ensureSupportedColumns(info);
         if (info.view || !"SINGLE".equals(info.primaryKeyMode()) || info.primaryKey == null) {
             throw DatabaseValidation.error(HttpStatus.FORBIDDEN, "OPS_DB_TABLE_READ_ONLY", "该表只读");
         }
@@ -421,7 +428,9 @@ public class OpsDatabaseService {
             while (rs.next()) {
                 String name = rs.getString("COLUMN_NAME");
                 if (validMetadataIdentifier(name)) {
-                    columns.add(new ColumnInfo(name, rs.getInt("DATA_TYPE"), safe(rs.getString("TYPE_NAME")),
+                    String typeName = safe(rs.getString("TYPE_NAME"));
+                    columns.add(new ColumnInfo(name, rs.getInt("DATA_TYPE"), typeName, typeName,
+                            rs.getInt("COLUMN_SIZE"), rs.getInt("DECIMAL_DIGITS"),
                             rs.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls,
                             rs.getString("COLUMN_DEF") != null, "YES".equalsIgnoreCase(rs.getString("IS_AUTOINCREMENT")),
                             "YES".equalsIgnoreCase(rs.getString("IS_GENERATEDCOLUMN"))));
@@ -540,12 +549,58 @@ public class OpsDatabaseService {
     }
 
     /** MySQL DDL may commit before failing; observe metadata before returning the stable error. */
-    private void rereadAfterDdlFailure(String schema, String table) {
+    private TableInfo rereadAfterDdlFailure(String schema, String table) {
         try {
-            tableInfoOrNull(schema, table);
+            return tableInfoOrNull(schema, table);
         } catch (RuntimeException ignored) {
             // Preserve the stable DDL error even when the follow-up metadata read is unavailable.
+            return null;
         }
+    }
+
+    private boolean createMatches(TableInfo actual, List<ColumnRequest> requested) {
+        if (actual == null || actual.view || actual.columns.size() != requested.size()) return false;
+        for (int i = 0; i < requested.size(); i++) {
+            ColumnRequest expected = requested.get(i);
+            ColumnInfo found = actual.columns.get(i);
+            String type = DatabaseValidation.type(expected.type());
+            if (!expected.name().equals(found.name) || !columnMatches(found, expected, type)
+                    || expected.primaryKey() != found.name.equals(actual.primaryKey)
+                    || expected.autoIncrement() != found.autoIncrement) return false;
+        }
+        return true;
+    }
+
+    private boolean addColumnMatches(TableInfo actual, AddColumnRequest request, String name, String type) {
+        if (actual == null) return false;
+        ColumnInfo column = actual.column(name);
+        return column != null && columnMatches(column, request, type);
+    }
+
+    private boolean columnMatches(ColumnInfo actual, ColumnRequest expected, String type) {
+        boolean nullable = expected.nullable() && !expected.primaryKey();
+        return nullable == actual.nullable && typeMatches(actual, type)
+                && (expected.defaultValue() != null) == actual.defaultValuePresent;
+    }
+
+    private boolean columnMatches(ColumnInfo actual, AddColumnRequest expected, String type) {
+        return expected.nullable() == actual.nullable && typeMatches(actual, type)
+                && (expected.defaultValue() != null) == actual.defaultValuePresent;
+    }
+
+    private static boolean typeMatches(ColumnInfo actual, String expected) {
+        String actualType = actual.typeName == null ? "" : actual.typeName.toUpperCase(Locale.ROOT);
+        String expectedBase = expected.substring(0, expected.indexOf('(') >= 0 ? expected.indexOf('(') : expected.length());
+        if (!expectedBase.equals(actualType)) return false;
+        if (expected.startsWith("VARCHAR(") || expected.startsWith("DECIMAL(")) {
+            int open = expected.indexOf('(');
+            int comma = expected.indexOf(',', open);
+            int close = expected.indexOf(')', open);
+            int expectedSize = Integer.parseInt(expected.substring(open + 1, comma >= 0 ? comma : close));
+            if (actual.size != expectedSize) return false;
+            if (comma >= 0 && actual.scale != Integer.parseInt(expected.substring(comma + 1, close))) return false;
+        }
+        return true;
     }
 
     private Map<String, Object> checkedValues(Map<String, Object> values, TableInfo info, boolean update) {
@@ -580,21 +635,29 @@ public class OpsDatabaseService {
         if (column == null || jsonBytes(value) > 65536) {
             throw invalid("字段值无效");
         }
+        if (!column.supported()) {
+            throw invalid("字段类型不受支持");
+        }
         try {
-            return switch (JDBCType.valueOf(column.jdbcType)) {
-                case TINYINT, SMALLINT, INTEGER -> integer(value, Integer.MIN_VALUE, Integer.MAX_VALUE);
+            if ("JSON".equalsIgnoreCase(column.objectType)) {
+                return json(value, column);
+            }
+            Object converted = switch (JDBCType.valueOf(column.jdbcType)) {
+                case TINYINT -> integer(value, -128, 127);
+                case SMALLINT -> integer(value, Short.MIN_VALUE, Short.MAX_VALUE);
+                case INTEGER -> integer(value, Integer.MIN_VALUE, Integer.MAX_VALUE);
                 case BIGINT -> integer(value, Long.MIN_VALUE, Long.MAX_VALUE);
-                case DECIMAL, NUMERIC -> new BigDecimal(String.valueOf(value));
+                case DECIMAL, NUMERIC -> decimal(value, column);
                 case BOOLEAN, BIT -> booleanValue(value);
                 case DATE -> LocalDate.parse(String.valueOf(value));
                 case TIMESTAMP, TIMESTAMP_WITH_TIMEZONE -> Timestamp.valueOf(localDateTime(value));
                 case TIME, TIME_WITH_TIMEZONE -> java.sql.Time.valueOf(String.valueOf(value));
-                case CHAR, VARCHAR, LONGVARCHAR, NCHAR, NVARCHAR, LONGNVARCHAR, CLOB, SQLXML -> String.valueOf(value);
-                default -> value instanceof String ? value : objectMapper.writeValueAsString(value);
+                case CHAR, VARCHAR, LONGVARCHAR, NCHAR, NVARCHAR, LONGNVARCHAR, CLOB -> text(value, column);
+                case OTHER -> json(value, column);
+                default -> throw new IllegalArgumentException();
             };
+            return converted;
         } catch (IllegalArgumentException ex) {
-            throw invalid("字段值类型无效");
-        } catch (JsonProcessingException ex) {
             throw invalid("字段值类型无效");
         }
     }
@@ -605,6 +668,37 @@ public class OpsDatabaseService {
             throw new NumberFormatException();
         }
         return parsed >= Integer.MIN_VALUE && parsed <= Integer.MAX_VALUE ? (int) parsed : parsed;
+    }
+
+    private static BigDecimal decimal(Object value, ColumnInfo column) {
+        BigDecimal decimal = new BigDecimal(String.valueOf(value));
+        if ((column.size > 0 && decimal.precision() > column.size)
+                || (column.scale >= 0 && decimal.scale() > column.scale)) {
+            throw new NumberFormatException();
+        }
+        return decimal;
+    }
+
+    private static String text(Object value, ColumnInfo column) {
+        String text = String.valueOf(value);
+        if (column.size > 0 && text.length() > column.size) {
+            throw new IllegalArgumentException();
+        }
+        return text;
+    }
+
+    private String json(Object value, ColumnInfo column) {
+        if (!"JSON".equalsIgnoreCase(column.objectType)) {
+            throw new IllegalArgumentException();
+        }
+        String text;
+        try {
+            text = value instanceof String ? (String) value : objectMapper.writeValueAsString(value);
+            objectMapper.readTree(text);
+            return text;
+        } catch (JsonProcessingException | IllegalArgumentException ex) {
+            throw new IllegalArgumentException();
+        }
     }
 
     private static Boolean booleanValue(Object value) {
@@ -684,6 +778,12 @@ public class OpsDatabaseService {
         return value != null && DatabaseValidation.IDENTIFIER.matcher(value).matches();
     }
 
+    private static void ensureSupportedColumns(TableInfo info) {
+        if (info.columns.stream().anyMatch(column -> !column.supported())) {
+            throw invalid("表包含不受支持的字段类型");
+        }
+    }
+
     private static String safe(String value) {
         return value == null ? null : value.length() > 512 ? value.substring(0, 512) : value;
     }
@@ -742,11 +842,28 @@ public class OpsDatabaseService {
     private static ServiceException ddlRejected(Throwable ignored) { return ddlRejected("DDL 执行失败"); }
     private static ServiceException upstream(Throwable ignored) { return DatabaseValidation.error(502, "OPS_DB_UPSTREAM", "数据库暂不可用"); }
 
-    private record ColumnInfo(String name, int jdbcType, String typeName, boolean nullable,
+    private record ColumnInfo(String name, int jdbcType, String typeName, String objectType,
+                              int size, int scale, boolean nullable,
                               boolean defaultValuePresent, boolean autoIncrement, boolean generated) {
         ColumnDto dto() {
             return new ColumnDto(name, jdbcType, typeName, nullable, defaultValuePresent,
-                    autoIncrement, generated, autoIncrement || generated);
+                    autoIncrement, generated, autoIncrement || generated || !supported(), size, scale, objectType);
+        }
+
+        boolean supported() {
+            if ("JSON".equalsIgnoreCase(objectType)) return true;
+            try {
+                return switch (JDBCType.valueOf(jdbcType)) {
+                    case TINYINT, SMALLINT, INTEGER, BIGINT, DECIMAL, NUMERIC,
+                            BOOLEAN, BIT, DATE, TIMESTAMP, TIMESTAMP_WITH_TIMEZONE,
+                            TIME, TIME_WITH_TIMEZONE, CHAR, VARCHAR, LONGVARCHAR,
+                            NCHAR, NVARCHAR, LONGNVARCHAR, CLOB -> true;
+                    case OTHER -> "JSON".equalsIgnoreCase(objectType);
+                    default -> false;
+                };
+            } catch (IllegalArgumentException ex) {
+                return false;
+            }
         }
     }
 

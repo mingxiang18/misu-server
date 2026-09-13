@@ -94,7 +94,7 @@ public class OpsProperties {
     @Setter
     public static class DatabaseProperties {
         private boolean enabled;
-        private String url = "";
+        private String url = "jdbc:mysql://mysql-inner.mysql.svc.cluster.local:3316/?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowMultiQueries=false";
         private String username = "";
         private String password = "";
         private List<String> allowedSchemas = new ArrayList<>();

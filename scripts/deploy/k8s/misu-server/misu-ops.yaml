@@ -94,12 +94,6 @@ spec:
                   name: misu-ops-database
                   key: enabled
                   optional: true
-            - name: OPS_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: misu-ops-database
-                  key: url
-                  optional: true
             - name: OPS_DATABASE_USERNAME
               valueFrom:
                 secretKeyRef:

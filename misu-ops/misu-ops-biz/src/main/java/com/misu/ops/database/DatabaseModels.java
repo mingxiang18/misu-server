@@ -21,11 +21,19 @@ public final class DatabaseModels {
 
     public record ColumnDto(String name, int jdbcType, String typeName, boolean nullable,
                             boolean defaultValuePresent, boolean autoIncrement,
-                            boolean generated, boolean readOnly) {
+                            boolean generated, boolean readOnly, int size, int scale,
+                            String objectType) {
         public ColumnDto(String name, int jdbcType, String typeName, boolean nullable,
                          boolean defaultValuePresent, boolean autoIncrement) {
             this(name, jdbcType, typeName, nullable, defaultValuePresent, autoIncrement,
-                    false, autoIncrement);
+                    false, autoIncrement, 0, 0, typeName);
+        }
+
+        public ColumnDto(String name, int jdbcType, String typeName, boolean nullable,
+                         boolean defaultValuePresent, boolean autoIncrement,
+                         boolean generated, boolean readOnly) {
+            this(name, jdbcType, typeName, nullable, defaultValuePresent, autoIncrement,
+                    generated, readOnly, 0, 0, typeName);
         }
     }
 

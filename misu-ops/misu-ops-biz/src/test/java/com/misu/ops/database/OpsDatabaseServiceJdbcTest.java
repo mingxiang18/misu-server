@@ -1,6 +1,7 @@
 package com.misu.ops.database;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -20,6 +21,7 @@ import java.util.function.Supplier;
 
 import static com.misu.ops.database.DatabaseModels.DeleteRowRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class OpsDatabaseServiceJdbcTest {
 
@@ -75,6 +77,42 @@ class OpsDatabaseServiceJdbcTest {
         assertEquals(2, bound.size());
         assertEquals(7, ((Number) bound.get(0)).intValue());
         assertEquals("v1", String.valueOf(bound.get(1)));
+    }
+
+    @Test
+    void unsupportedBlobIsRejectedAsBadRequestBeforeQuery() {
+        ResultSet tables = resultSet(List.of(row("TABLE_NAME", "files", "TABLE_TYPE", "TABLE")));
+        ResultSet columns = resultSet(List.of(
+                row("COLUMN_NAME", "payload", "DATA_TYPE", Types.BLOB, "TYPE_NAME", "BLOB",
+                        "COLUMN_SIZE", 1024, "DECIMAL_DIGITS", 0,
+                        "NULLABLE", DatabaseMetaData.columnNullable, "COLUMN_DEF", null,
+                        "IS_AUTOINCREMENT", "NO", "IS_GENERATEDCOLUMN", "NO")));
+        ResultSet empty = resultSet(List.of());
+        DatabaseMetaData metadata = proxy(DatabaseMetaData.class, (ignored, method, args) -> switch (method.getName()) {
+            case "getTables" -> tables;
+            case "getColumns" -> columns;
+            case "getPrimaryKeys", "getIndexInfo" -> empty;
+            default -> defaultValue(method.getReturnType());
+        });
+        Connection connection = proxy(Connection.class, (ignored, method, args) -> {
+            if ("getMetaData".equals(method.getName())) return metadata;
+            if ("prepareStatement".equals(method.getName())) throw new AssertionError("query must not execute");
+            return defaultValue(method.getReturnType());
+        });
+        DataSource dataSource = proxy(DataSource.class, (ignored, method, args) ->
+                "getConnection".equals(method.getName()) ? connection : defaultValue(method.getReturnType()));
+
+        ServiceException exception = assertThrows(ServiceException.class,
+                () -> service(dataSource).rows("misu_test", "files", 1, 10, null, "asc", null));
+
+        assertEquals(400, exception.getCode());
+    }
+
+    private static OpsDatabaseService service(DataSource dataSource) {
+        OpsProperties properties = new OpsProperties();
+        properties.getDatabase().setEnabled(true);
+        properties.getDatabase().setAllowedSchemas(List.of("misu_test"));
+        return new OpsDatabaseService(new SingleDataSourceProvider(dataSource), properties, new ObjectMapper());
     }
 
     private static ResultSet resultSet(List<Map<String, Object>> rows) {

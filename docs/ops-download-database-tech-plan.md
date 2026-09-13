@@ -38,7 +38,7 @@ GET /ops/api/database/{database}/tables/{table}/rows
 DatabaseCatalogDto { name, displayName }
 DatabaseTableDto   { name, comment, rowCountEstimate, primaryKeyMode, tableType }
 TableMetadataDto   { database, table, columns[], indexes[], writable, primaryKey, tableType }
-ColumnDto          { name, jdbcType, typeName, nullable, defaultValuePresent, autoIncrement }
+ColumnDto          { name, jdbcType, typeName, objectType, size, scale, nullable, defaultValuePresent, autoIncrement, generated, readOnly }
 IndexDto           { name, unique, columns[] }
 PageDto<T>         { items[], page, pageSize, total, hasNext }
 RowDto             { values: Map<String, JsonValue>, rowVersion: String? }
@@ -113,7 +113,7 @@ misu-ops 使用 `JdbcTemplate` 配合独立的小型 Hikari 数据源，不复�
 
 值全部使用 `?` 参数和 `PreparedStatement`。筛选、主键、默认字面量、更新值不得通过字符串拼接；LIKE 通配符、NULL 和空字符串分别按 DTO 语义绑定。每次 DML 执行使用显式写事务，查询使用受限连接，禁止多语句和任意 SQL 文本。数据库 API 的写请求体在 HTTP 入口由 bounded wrapper 限制为 64 KiB；Content-Length 和 chunked 请求都受限。
 
-类型转换由 `JdbcTemplate` 的 `PreparedStatementSetter` 集中处理：整数使用有界 `Long/Integer`，小数使用 `BigDecimal`，日期时间使用 ISO-8601 到 JDBC 时间类型，布尔只接受 JSON boolean/规定的 0/1，二进制与超大文本首期拒绝或受限读取。结果统一转换为 JSON 安全值；驱动异常只映射为稳定错误码。
+类型转换由集中校验和 `PreparedStatement` 绑定处理：整数按 JDBC 类型范围检查，小数按 metadata 的 precision/scale 检查，字符串按 metadata 的 size 检查，日期时间使用 ISO-8601 到 JDBC 时间类型，JSON 必须先解析，布尔只接受 JSON boolean/规定的 0/1。binary/blob/SQLXML/数组/结构体等对象类型明确拒绝并返回 400。结果统一转换为 JSON 安全值；驱动异常只映射为稳定错误码。
 
 审计记录 actor、ADMIN user id、动作、database/table/column 名、请求 ID、结果码和影响行数，不记录任何值、筛选内容、SQL 文本、连接 URL、Cookie、票据、密码或上游响应。日志中的路径只保留固定模板和脱敏 query。
 
@@ -145,11 +145,11 @@ Nginx 只允许固定 upstream，保留必要的 redirect、长轮询和 WebSock
 只提交 Secret 名称、key 和模板，不提交真实值。建议字段：
 
 ```text
-misu-ops-database: url, username, password
+misu-ops-database: username, password, allowed-schemas
 misu-ops-qbittorrent: url, username, password
 ```
 
-Secret 通过 Pod `secretKeyRef` 注入，缺失时对应能力安全失败；不写入 ConfigMap、前端构建产物、异常、审计或 access log。数据库 URL 必须指向固定 Service，启用远端认证时使用 TLS；qBittorrent URL 也必须通过固定目标配置，不接受环境外覆盖。
+Secret 通过 Pod `secretKeyRef` 注入，缺失时对应能力安全失败；不写入 ConfigMap、前端构建产物、异常、审计或 access log。数据库连接使用应用内固定的 `jdbc:mysql://mysql-inner.mysql.svc.cluster.local:3316/` 目标，Secret 不提供 URL 覆盖；本地测试如需 loopback URL 只能在明确的 `test` profile 下使用。启用远端认证时使用 TLS；qBittorrent URL 也必须通过固定目标配置，不接受环境外覆盖。
 
 ## 7. 测试和发布变更
 

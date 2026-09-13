@@ -32,7 +32,7 @@ ops:
   console-web-socket-connect-timeout-millis: ${OPS_CONSOLE_WS_CONNECT_TIMEOUT_MILLIS:5000}
   database:
     enabled: ${OPS_DATABASE_ENABLED:false}
-    url: ${OPS_DATABASE_URL:}
+    url: jdbc:mysql://mysql-inner.mysql.svc.cluster.local:3316/?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowMultiQueries=false
     username: ${OPS_DATABASE_USERNAME:}
     password: ${OPS_DATABASE_PASSWORD:}
     allowed-schemas: ${OPS_DATABASE_ALLOWED_SCHEMAS:}
