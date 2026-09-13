@@ -6,11 +6,14 @@ import { Terminal } from 'xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import 'xterm/css/xterm.css'
 import { createSshSession, getWebSocketUrl, issueConsoleTicket, revokeSshSession } from '@/api/ops/ops'
+import DatabaseManagement from './DatabaseManagement.vue'
 
 const tabs = [
-  { key: 'nacos', label: 'Nacos 控制台', hint: '配置与服务管理' },
-  { key: 'headlamp', label: 'Kubernetes', hint: 'Headlamp 集群控制台' },
-  { key: 'ssh', label: 'SSH 终端', hint: '节点交互式终端' }
+  { key: 'nacos', target: 'NACOS', label: 'Nacos 控制台', hint: '配置与服务管理' },
+  { key: 'headlamp', target: 'HEADLAMP', label: 'Kubernetes', hint: 'Headlamp 集群控制台' },
+  { key: 'ssh', label: 'SSH 终端', hint: '节点交互式终端' },
+  { key: 'qbittorrent', target: 'QBITTORRENT', label: '下载任务', hint: '文件与转码任务' },
+  { key: 'database', label: '数据库', hint: '表数据与结构' }
 ]
 
 const nodes = [
@@ -85,7 +88,8 @@ async function loadConsole(target) {
   await nextTick()
   if (generation !== consoleGeneration || activeTab.value !== target) return
   try {
-    const data = await issueConsoleTicket(target)
+    const consoleTarget = tabs.find((tab) => tab.key === target)?.target || target
+    const data = await issueConsoleTicket(consoleTarget)
     if (generation !== consoleGeneration || activeTab.value !== target) return
     const entryUrl = data.entryUrl
     if (!entryUrl) {
@@ -283,7 +287,7 @@ function openActiveTab() {
       if (!terminal.value) createTerminal()
       resizeTerminal()
     })
-  } else {
+  } else if (activeTab.value !== 'database') {
     loadConsole(activeTab.value)
   }
 }
@@ -308,7 +312,7 @@ function createTerminal() {
 
 watch(activeTab, (tab, previous) => {
   if (previous === 'ssh' && tab !== 'ssh') disconnectSsh()
-  if (tab === 'ssh') cancelConsoleLoad()
+  if (tab === 'ssh' || tab === 'database') cancelConsoleLoad()
   openActiveTab()
 })
 
@@ -353,7 +357,14 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div v-if="activeTab !== 'ssh'" class="ops-console-panel">
+    <div v-if="activeTab === 'database'" class="ops-database-panel">
+      <div class="ops-panel-bar">
+        <div class="ops-panel-status"><Connection /> 数据库</div>
+      </div>
+      <DatabaseManagement />
+    </div>
+
+    <div v-else-if="activeTab !== 'ssh'" class="ops-console-panel">
       <div class="ops-panel-bar">
         <div class="ops-panel-status"><Connection /> {{ activeTabInfo.label }}</div>
         <div class="ops-panel-actions">
@@ -460,12 +471,15 @@ onBeforeUnmount(() => {
 .ops-tab.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .ops-tab.active small { color: var(--accent-strong); }
 .ops-console-panel,
+.ops-database-panel,
 .ops-terminal-panel {
   display: flex; flex-direction: column; min-height: 420px; flex: 1 1 0;
   overflow: hidden; background: var(--color-bg-surface);
   border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
 }
+.ops-database-panel { min-height: 560px; }
+.ops-database-panel :deep(.database-workspace) { border: 0; border-radius: 0; box-shadow: none; }
 .ops-panel-bar { min-height: 52px; padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border-subtle); flex-shrink: 0; }
 .ops-panel-status { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .ops-panel-status :deep(svg) { width: 16px; color: var(--accent); }
@@ -503,7 +517,7 @@ onBeforeUnmount(() => {
   .ops-heading-icon { width: 36px; height: 36px; }
   .ops-tabs { margin-right: calc(-1 * var(--space-3)); padding-right: var(--space-3); }
   .ops-tab { min-width: 132px; padding: var(--space-2) var(--space-3); }
-  .ops-console-panel, .ops-terminal-panel {
+  .ops-console-panel, .ops-database-panel, .ops-terminal-panel {
     flex: 0 0 auto;
     height: calc(100dvh - var(--layout-tab-bar-height) - 210px);
     min-height: 420px;
@@ -512,6 +526,7 @@ onBeforeUnmount(() => {
   .ops-panel-bar { min-height: 48px; padding: 0 var(--space-3); }
   .ops-panel-actions :deep(.el-button) { padding-left: 5px; padding-right: 5px; }
   .ops-console-frame { min-width: 900px; min-height: 460px; }
+  .ops-database-panel { min-height: 650px; }
   .ops-frame-wrap { overflow: auto; }
   .ops-terminal-bar { align-items: flex-start; flex-direction: column; padding: var(--space-2) var(--space-3); }
   .ops-terminal-actions { width: 100%; justify-content: space-between; }
