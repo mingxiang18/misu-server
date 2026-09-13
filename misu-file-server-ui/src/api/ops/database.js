@@ -62,9 +62,10 @@ export function updateTableRow(database, table, primaryKey, values, expectedRowV
   }).then(unwrap)
 }
 
-export function deleteTableRow(database, table, primaryKey) {
+export function deleteTableRow(database, table, primaryKey, expectedRowVersion) {
   return request({
     url: `/ops/api/database/${pathPart(database)}/tables/${pathPart(table)}/rows/${pathPart(primaryKey)}`,
-    method: 'delete'
+    method: 'delete',
+    data: { expectedRowVersion }
   }).then(unwrap)
 }

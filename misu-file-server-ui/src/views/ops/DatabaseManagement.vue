@@ -13,6 +13,7 @@ import {
   listTableRows,
   updateTableRow
 } from '@/api/ops/database'
+import { parseDefaultValue } from '@/api/ops/databaseDefaultValue'
 
 const pageSize = 50
 const catalogs = ref([])
@@ -44,6 +45,7 @@ const newTableVisible = ref(false)
 const fieldVisible = ref(false)
 const newTableForm = ref({ name: '', comment: '' })
 const fieldForm = ref({ name: '', type: 'VARCHAR(255)', nullable: true, defaultValue: '' })
+const requestGeneration = { catalogs: 0, tables: 0, metadata: 0, rows: 0 }
 
 const primaryKeyMode = computed(() => String(metadata.value.primaryKeyMode || '').toUpperCase())
 const primaryKey = computed(() => {
@@ -146,10 +148,12 @@ function notifyError(error, fallback) {
 }
 
 async function loadCatalogs() {
+  const generation = ++requestGeneration.catalogs
   databasesLoading.value = true
   errorMessage.value = ''
   try {
     const data = await listDatabaseCatalogs()
+    if (generation !== requestGeneration.catalogs) return
     catalogs.value = unwrapList(data, ['catalogs', 'items']).map((catalog) => ({
       ...catalog,
       name: catalog.name || catalog.database,
@@ -157,60 +161,84 @@ async function loadCatalogs() {
     }))
     if (!selectedDatabase.value && catalogs.value.length) selectedDatabase.value = catalogs.value[0].name
   } catch (error) {
-    notifyError(error, '数据库列表加载失败')
+    if (generation === requestGeneration.catalogs) notifyError(error, '数据库列表加载失败')
   } finally {
-    databasesLoading.value = false
+    if (generation === requestGeneration.catalogs) databasesLoading.value = false
   }
 }
 
 async function loadTables() {
   if (!selectedDatabase.value) return
+  const database = selectedDatabase.value
+  const generation = ++requestGeneration.tables
   tablesLoading.value = true
   try {
-    const data = await listDatabaseTables(selectedDatabase.value)
+    const data = await listDatabaseTables(database)
+    if (generation !== requestGeneration.tables || selectedDatabase.value !== database) return
     tables.value = unwrapList(data, ['tables', 'items']).map(normalizeTable)
     const nextTable = tables.value.some((table) => table.name === selectedTable.value) ? selectedTable.value : tables.value[0]?.name || ''
     selectedTable.value = nextTable
   } catch (error) {
-    tables.value = []
-    selectedTable.value = ''
-    notifyError(error, '数据表列表加载失败')
+    if (generation === requestGeneration.tables && selectedDatabase.value === database) {
+      tables.value = []
+      selectedTable.value = ''
+      notifyError(error, '数据表列表加载失败')
+    }
   } finally {
-    tablesLoading.value = false
+    if (generation === requestGeneration.tables) tablesLoading.value = false
   }
 }
 
 async function loadTable() {
   if (!selectedDatabase.value || !selectedTable.value) return
+  const database = selectedDatabase.value
+  const table = selectedTable.value
+  const generation = ++requestGeneration.metadata
   metadataLoading.value = true
-  rowsLoading.value = true
   errorMessage.value = ''
   try {
-    const metadataData = await getTableMetadata(selectedDatabase.value, selectedTable.value)
+    const metadataData = await getTableMetadata(database, table)
+    if (generation !== requestGeneration.metadata || selectedDatabase.value !== database || selectedTable.value !== table) return
     metadata.value = {
       ...metadataData,
       columns: (metadataData?.columns || []).map(normalizeColumn),
       primaryKeyMode: String(metadataData?.primaryKeyMode || currentTableInfo.value.primaryKeyMode || 'NONE').toUpperCase()
     }
     if (!sortColumn.value) sortColumn.value = primaryKey.value || metadata.value.columns[0]?.name || ''
-    await loadRows()
+    await loadRows(database, table)
   } catch (error) {
-    metadata.value = { columns: [], indexes: [], primaryKey: [], primaryKeyMode: 'NONE', writable: false }
-    notifyError(error, '数据表结构加载失败')
+    if (generation === requestGeneration.metadata && selectedDatabase.value === database && selectedTable.value === table) {
+      metadata.value = { columns: [], indexes: [], primaryKey: [], primaryKeyMode: 'NONE', writable: false }
+      notifyError(error, '数据表结构加载失败')
+    }
   } finally {
-    metadataLoading.value = false
-    rowsLoading.value = false
+    if (generation === requestGeneration.metadata) metadataLoading.value = false
   }
 }
 
-async function loadRows() {
-  if (!selectedDatabase.value || !selectedTable.value) return
-  const params = { page: currentPage.value, pageSize, sort: sortColumn.value || undefined, order: sortOrder.value }
-  if (rowFilter.value.length) params.filter = JSON.stringify(rowFilter.value)
-  const data = await listTableRows(selectedDatabase.value, selectedTable.value, params)
-  rows.value = (data?.items || data?.rows || []).map(normalizeRow)
-  total.value = data?.total ?? null
-  hasNext.value = data?.hasNext === true || (total.value !== null && currentPage.value * pageSize < Number(total.value))
+async function loadRows(database = selectedDatabase.value, table = selectedTable.value) {
+  if (!database || !table) return
+  const generation = ++requestGeneration.rows
+  const page = currentPage.value
+  const sort = sortColumn.value || ''
+  const order = sortOrder.value
+  const filter = rowFilter.value
+  const filterKey = JSON.stringify(filter)
+  const filterJson = filter.length ? filterKey : ''
+  rowsLoading.value = true
+  const params = { page, pageSize, sort: sort || undefined, order }
+  if (filterJson) params.filter = filterJson
+  try {
+    const data = await listTableRows(database, table, params)
+    if (generation !== requestGeneration.rows || selectedDatabase.value !== database || selectedTable.value !== table || currentPage.value !== page || sortColumn.value !== sort || sortOrder.value !== order || JSON.stringify(rowFilter.value) !== filterKey) return
+    rows.value = (data?.items || data?.rows || []).map(normalizeRow)
+    total.value = data?.total ?? null
+    hasNext.value = data?.hasNext === true || (total.value !== null && currentPage.value * pageSize < Number(total.value))
+  } catch (error) {
+    if (generation === requestGeneration.rows && selectedDatabase.value === database && selectedTable.value === table) notifyError(error, '数据行加载失败')
+  } finally {
+    if (generation === requestGeneration.rows) rowsLoading.value = false
+  }
 }
 
 async function refresh() {
@@ -315,7 +343,7 @@ async function confirmDelete(row) {
       confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning'
     })
     saving.value = true
-    await deleteTableRow(selectedDatabase.value, selectedTable.value, keyValue)
+    await deleteTableRow(selectedDatabase.value, selectedTable.value, keyValue, row.rowVersion)
     ElMessage.success('已删除记录')
     await loadRows()
   } catch (error) {
@@ -352,9 +380,10 @@ async function submitNewTable() {
 async function submitField() {
   saving.value = true
   try {
+    const defaultValue = parseDefaultValue(fieldForm.value.type, fieldForm.value.defaultValue)
     await addTableColumn(selectedDatabase.value, selectedTable.value, {
       name: fieldForm.value.name.trim(), type: fieldForm.value.type,
-      nullable: fieldForm.value.nullable, defaultValue: fieldForm.value.defaultValue.trim() || undefined
+      nullable: fieldForm.value.nullable, defaultValue
     })
     fieldVisible.value = false
     fieldForm.value = { name: '', type: 'VARCHAR(255)', nullable: true, defaultValue: '' }
@@ -368,11 +397,30 @@ async function submitField() {
 }
 
 watch(selectedDatabase, async () => {
+  requestGeneration.tables += 1
+  requestGeneration.metadata += 1
+  requestGeneration.rows += 1
   selectedTable.value = ''
+  tablesLoading.value = false
+  metadataLoading.value = false
+  rowsLoading.value = false
+  tables.value = []
+  rows.value = []
+  metadata.value = { columns: [], indexes: [], primaryKey: [], primaryKeyMode: 'NONE', writable: false }
   currentPage.value = 1
   await loadTables()
 })
-watch(selectedTable, () => loadTable())
+watch(selectedTable, () => {
+  requestGeneration.metadata += 1
+  requestGeneration.rows += 1
+  metadataLoading.value = false
+  rowsLoading.value = false
+  rows.value = []
+  total.value = null
+  hasNext.value = false
+  metadata.value = { columns: [], indexes: [], primaryKey: [], primaryKeyMode: 'NONE', writable: false }
+  if (selectedTable.value) loadTable()
+})
 watch([rowQuery, statusQuery], () => {
   currentPage.value = 1
   if (selectedTable.value) loadRows().catch((error) => notifyError(error, '筛选查询失败'))
