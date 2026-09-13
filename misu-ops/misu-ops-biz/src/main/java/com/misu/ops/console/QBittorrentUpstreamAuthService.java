@@ -17,6 +17,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.Clock;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
@@ -40,16 +41,26 @@ public class QBittorrentUpstreamAuthService {
 
     private final OpsProperties properties;
     private final RestClient restClient;
+    private final Clock clock;
     private final Map<String, CachedSession> sessions = new ConcurrentHashMap<>();
 
     public QBittorrentUpstreamAuthService(OpsProperties properties) {
+        this(properties, buildRestClient(properties), Clock.systemUTC());
+    }
+
+    QBittorrentUpstreamAuthService(OpsProperties properties, RestClient restClient, Clock clock) {
         this.properties = properties;
+        this.restClient = restClient;
+        this.clock = clock;
+    }
+
+    private static RestClient buildRestClient(OpsProperties properties) {
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(properties.getAccountConnectTimeoutMillis()))
                 .build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(Duration.ofMillis(properties.getAccountReadTimeoutMillis()));
-        this.restClient = RestClient.builder().requestFactory(requestFactory).build();
+        return RestClient.builder().requestFactory(requestFactory).build();
     }
 
     public UpstreamSession session(String opsSessionId) {
@@ -61,9 +72,16 @@ public class QBittorrentUpstreamAuthService {
             sessions.clear();
             throw new ServiceException(HttpStatus.ERROR, "qBittorrent 上游认证未配置");
         }
-        CachedSession cached = sessions.compute(opsSessionId, (key, current) ->
-                current != null && current.expiresAt().isAfter(Instant.now())
-                        ? current : login());
+        CachedSession current = sessions.get(opsSessionId);
+        if (current != null && current.expiresAt().isAfter(Instant.now(clock))) {
+            return new UpstreamSession(current.cookie(), current.csrfToken());
+        }
+        if (current != null && sessions.remove(opsSessionId, current)) {
+            // The old SID is no longer usable locally before best-effort logout.
+            // A logout failure must never prevent replacement or restore the SID.
+            logout(current);
+        }
+        CachedSession cached = sessions.computeIfAbsent(opsSessionId, key -> login());
         return new UpstreamSession(cached.cookie(), cached.csrfToken());
     }
 
@@ -117,7 +135,7 @@ public class QBittorrentUpstreamAuthService {
             // qBittorrent has no standard token TTL. Keep a short server-side
             // lease so stale SIDs are eventually replaced without exposing one.
             long ttl = Math.max(60, Math.min(900, properties.getSessionIdleSeconds()));
-            return new CachedSession(cookie, csrf, Instant.now().plusSeconds(ttl));
+            return new CachedSession(cookie, csrf, Instant.now(clock).plusSeconds(ttl));
         } catch (ServiceException ex) {
             throw ex;
         } catch (RuntimeException ex) {

@@ -12,7 +12,7 @@ ops:
   account-base-url: ${OPS_ACCOUNT_BASE_URL:http://localhost:30261/account}
   nacos-url: ${OPS_NACOS_URL:}
   headlamp-url: ${OPS_HEADLAMP_URL:}
-  nacos-upstream-url: ${OPS_NACOS_UPSTREAM_URL:}
+  nacos-upstream-url: ${OPS_NACOS_UPSTREAM_URL:http://nacos.misu-server.svc.cluster.local:8848/nacos/}
   headlamp-upstream-url: ${OPS_HEADLAMP_UPSTREAM_URL:}
   qbittorrent-url: ${OPS_QBITTORRENT_URL:https://server.misu.chat/ops/qbittorrent/}
   qbittorrent-username: ${OPS_QBITTORRENT_USERNAME:}

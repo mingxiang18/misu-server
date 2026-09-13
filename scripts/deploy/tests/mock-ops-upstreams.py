@@ -184,9 +184,16 @@ class Handler(BaseHTTPRequestHandler):
                    ("Forwarded", "X-Forwarded-For", "X-Real-IP", "X-Forwarded-Port")):
                 self.write(403, "proxy-remote-address-rewritten")
             elif "ticket=valid" in body:
+                target = self.headers.get("X-Ops-Target", "")
+                if target == "qbittorrent":
+                    location = "/ops/qbittorrent/"
+                    cookie = "MISU_OPS_SESSION=qbittorrent-session; Path=/ops/qbittorrent/; HttpOnly; Secure; SameSite=None"
+                else:
+                    location = "/nacos/"
+                    cookie = "MISU_OPS_SESSION=nacos-session; Path=/nacos/; HttpOnly; Secure; SameSite=None"
                 self.write(303, headers={
-                    "Location": "/nacos/",
-                    "Set-Cookie": "MISU_OPS_SESSION=nacos-session; Path=/nacos/; HttpOnly; Secure; SameSite=None",
+                    "Location": location,
+                    "Set-Cookie": cookie,
                     "X-Frame-Options": "DENY",
                     "Content-Security-Policy": "frame-ancestors https://evil.example",
                 })

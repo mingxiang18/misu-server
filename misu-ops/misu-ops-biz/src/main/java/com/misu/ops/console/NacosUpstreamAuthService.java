@@ -26,6 +26,10 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class NacosUpstreamAuthService {
 
+    /** Nacos is deliberately pinned to the existing in-cluster Service. */
+    public static final String FIXED_UPSTREAM_URL =
+            "http://nacos.misu-server.svc.cluster.local:8848/nacos/";
+
     private final OpsProperties properties;
     private final RestClient restClient;
     private final Map<String, CachedToken> tokens = new ConcurrentHashMap<>();
@@ -54,12 +58,8 @@ public class NacosUpstreamAuthService {
             tokens.clear();
             throw new ServiceException(HttpStatus.ERROR, "Nacos 上游认证配置不完整");
         }
-        URI authUri = loginUri();
-        URI upstreamUri = upstreamUri();
-        if (!isSecureOrLiteralLoopback(authUri) || !isSecureOrLiteralLoopback(upstreamUri)) {
-            tokens.clear();
-            throw new ServiceException(HttpStatus.ERROR, "Nacos 上游认证必须使用 HTTPS");
-        }
+        loginUri();
+        upstreamUri();
         CachedToken token = tokens.compute(sessionId, (key, current) ->
                 current != null && current.expiresAt().isAfter(Instant.now())
                         ? current : login());
@@ -110,13 +110,25 @@ public class NacosUpstreamAuthService {
     }
 
     private URI loginUri() {
-        String configured = StringUtils.hasText(properties.getNacosAuthUrl())
-                ? properties.getNacosAuthUrl() : properties.getNacosUpstreamUrl();
-        return parseBaseUri(configured).resolve("v1/auth/users/login");
+        return authBaseUri().resolve("v1/auth/users/login");
     }
 
     private URI upstreamUri() {
         return parseBaseUri(properties.getNacosUpstreamUrl());
+    }
+
+    private URI authBaseUri() {
+        String configured = StringUtils.hasText(properties.getNacosAuthUrl())
+                ? properties.getNacosAuthUrl() : properties.getNacosUpstreamUrl();
+        return parseBaseUri(configured);
+    }
+
+    URI validatedUpstreamUri() {
+        return upstreamUri();
+    }
+
+    URI validatedAuthBaseUri() {
+        return authBaseUri();
     }
 
     private URI parseBaseUri(String configured) {
@@ -125,9 +137,7 @@ public class NacosUpstreamAuthService {
         }
         try {
             URI base = URI.create(configured.endsWith("/") ? configured : configured + "/");
-            if (!("http".equalsIgnoreCase(base.getScheme()) || "https".equalsIgnoreCase(base.getScheme()))
-                    || base.getHost() == null || base.getUserInfo() != null
-                    || base.getQuery() != null || base.getFragment() != null) {
+            if (!isFixedNacosBase(base)) {
                 throw new IllegalArgumentException("invalid Nacos URL");
             }
             return base;
@@ -136,13 +146,14 @@ public class NacosUpstreamAuthService {
         }
     }
 
-    private boolean isSecureOrLiteralLoopback(URI uri) {
-        return "https".equalsIgnoreCase(uri.getScheme()) || isLiteralLoopback(uri.getHost());
-    }
-
-    /** Literal hosts avoid DNS/hosts resolution TOCTOU for the HTTP exception. */
-    private boolean isLiteralLoopback(String host) {
-        return "127.0.0.1".equals(host) || "::1".equals(host) || "[::1]".equals(host);
+    private boolean isFixedNacosBase(URI uri) {
+        return "http".equals(uri.getScheme())
+                && "nacos.misu-server.svc.cluster.local".equals(uri.getHost())
+                && uri.getPort() == 8848
+                && "/nacos/".equals(uri.getPath())
+                && uri.getUserInfo() == null
+                && uri.getQuery() == null
+                && uri.getFragment() == null;
     }
 
     private record CachedToken(String accessToken, Instant expiresAt) {

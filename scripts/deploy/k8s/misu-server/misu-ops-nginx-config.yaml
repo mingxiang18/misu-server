@@ -259,7 +259,43 @@ data:
           proxy_hide_header Content-Security-Policy;
         }
 
-        location = /ops/qbittorrent/_ops/exchange { return 404; }
+        location = /ops/qbittorrent/_ops/exchange {
+          proxy_pass http://misu_ops_backend/ops/api/console-sessions/exchange;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target qbittorrent;
+          proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_set_header Cookie "";
+          proxy_set_header Authorization "";
+          add_header Set-Cookie "MISU_OPS_SESSION=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None" always;
+          add_header Content-Security-Policy "frame-ancestors https://server.misu.chat" always;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
+        }
 
         location = /nacos { return 308 /nacos/; }
         location = /ops/headlamp { return 308 /ops/headlamp/; }

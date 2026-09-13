@@ -210,6 +210,20 @@ if rg -q 'EXCHANGE headers=.*203\.0\.113\.9' "${MOCK_LOG}"; then
   exit 1
 fi
 rg -q 'EXCHANGE headers=,,,' "${MOCK_LOG}"
+code=$(curl -sS -D "${TMP_DIR}/qb-exchange-headers" -o "${TMP_DIR}/qb-exchange" -w '%{http_code}' -X POST -H 'Host: api.misu.chat' \
+  -H 'Origin: https://server.misu.chat' -H 'Forwarded: for=203.0.113.9' \
+  -H 'X-Forwarded-For: 203.0.113.9' -H 'X-Real-IP: 203.0.113.9' \
+  -d 'ticket=valid' "http://127.0.0.1:${NGINX_PORT}/ops/qbittorrent/_ops/exchange")
+[[ "${code}" == 303 ]]
+tr -d '\r' < "${TMP_DIR}/qb-exchange-headers" | rg -qi '^Location: /ops/qbittorrent/$'
+rg -qi '^Set-Cookie: MISU_OPS_SESSION=qbittorrent-session; Path=/ops/qbittorrent/;' "${TMP_DIR}/qb-exchange-headers"
+qb_session="$(tr -d '\r' < "${TMP_DIR}/qb-exchange-headers" | rg -i '^Set-Cookie: MISU_OPS_SESSION=' | sed -E 's/^Set-Cookie: MISU_OPS_SESSION=([^;]+).*/\1/' | head -1)"
+[[ "${qb_session}" == "qbittorrent-session" ]]
+code=$(curl -sS -o "${TMP_DIR}/qbittorrent-after-exchange" -w '%{http_code}' -H 'Host: api.misu.chat' \
+  -H "Cookie: MISU_OPS_SESSION=${qb_session}" \
+  "http://127.0.0.1:${NGINX_PORT}/ops/qbittorrent/api/v2/app/version")
+[[ "${code}" == 200 ]]
+rg -q 'QBITTORRENT_UPSTREAM path=/api/v2/app/version' "${TMP_DIR}/qbittorrent-after-exchange"
 code=$(curl -sS -o "${TMP_DIR}/nacos-after-exchange" -w '%{http_code}' -H 'Host: api.misu.chat' \
   -H 'Cookie: MISU_OPS_SESSION=nacos-session' \
   "http://127.0.0.1:${NGINX_PORT}/nacos/v1/console/server/state?format=json")

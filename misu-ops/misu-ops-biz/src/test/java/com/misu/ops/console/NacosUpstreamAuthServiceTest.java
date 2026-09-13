@@ -30,15 +30,15 @@ class NacosUpstreamAuthServiceTest {
     }
 
     @Test
-    void configuredCredentialsRejectNonLoopbackHttp() {
+    void productionFixedClusterHttpIsAccepted() {
         OpsProperties properties = new OpsProperties();
         properties.setNacosUsername("nacos-ops");
         properties.setNacosPassword("secret");
-        properties.setNacosUpstreamUrl("http://nacos.misu-server.svc.cluster.local:8848/nacos/");
+        properties.setNacosUpstreamUrl(NacosUpstreamAuthService.FIXED_UPSTREAM_URL);
         NacosUpstreamAuthService service = new NacosUpstreamAuthService(properties);
 
-        assertThrows(ServiceException.class, () -> service.authorization("ops-session"));
-        assertEquals(0, service.cachedSessionCount());
+        assertEquals(NacosUpstreamAuthService.FIXED_UPSTREAM_URL, service.validatedUpstreamUri().toString());
+        assertEquals(NacosUpstreamAuthService.FIXED_UPSTREAM_URL, service.validatedAuthBaseUri().toString());
     }
 
     @Test
@@ -51,6 +51,18 @@ class NacosUpstreamAuthServiceTest {
         NacosUpstreamAuthService service = new NacosUpstreamAuthService(properties);
 
         assertThrows(ServiceException.class, () -> service.authorization("ops-session"));
+        assertEquals(0, service.cachedSessionCount());
+    }
+
+    @Test
+    void configuredCredentialsRejectLookalikeFixedService() {
+        OpsProperties properties = new OpsProperties();
+        properties.setNacosUsername("nacos-ops");
+        properties.setNacosPassword("secret");
+        properties.setNacosUpstreamUrl("http://nacos.misu-server.svc.cluster.local.evil:8848/nacos/");
+        NacosUpstreamAuthService service = new NacosUpstreamAuthService(properties);
+
+        assertThrows(ServiceException.class, service::validatedUpstreamUri);
         assertEquals(0, service.cachedSessionCount());
     }
 
