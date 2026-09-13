@@ -103,6 +103,8 @@ function normalizeColumn(column) {
     nullable: column.nullable !== false,
     primaryKey: column.primaryKey === true || column.key === 'PRI',
     autoIncrement: column.autoIncrement === true,
+    generated: column.generated === true || column.generatedColumn === true || column.isGenerated === true,
+    readOnly: column.readOnly === true || column.writable === false,
     defaultValue: column.defaultValue ?? (column.defaultValuePresent ? '有默认值' : '')
   }
 }
@@ -283,7 +285,9 @@ async function saveRow() {
   try {
     const values = {}
     rowColumns.value.forEach((column) => {
-      if (rowMode.value === 'create' && column.autoIncrement) return
+      const protectedForCreate = column.autoIncrement || column.generated || column.readOnly
+      const protectedForUpdate = column.primaryKey || column.name === primaryKey.value || column.autoIncrement || column.generated || column.readOnly
+      if (rowMode.value === 'create' ? protectedForCreate : protectedForUpdate) return
       const value = rowForm.value[column.name]
       if (value !== '' || !column.nullable) values[column.name] = value === '' && column.nullable ? null : value
     })
@@ -329,7 +333,7 @@ async function submitNewTable() {
       name: createdName,
       comment: newTableForm.value.comment.trim() || undefined,
       columns: [
-        { name: 'id', type: 'BIGINT', nullable: false, primaryKey: true },
+        { name: 'id', type: 'BIGINT', nullable: false, primaryKey: true, autoIncrement: true },
         { name: 'created_at', type: 'DATETIME', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }
       ]
     })
@@ -442,9 +446,9 @@ onMounted(loadCatalogs)
         </div>
 
         <div v-else class="database-schema-view">
-          <div class="schema-intro"><p>字段定义 · 类型和默认值由服务端安全校验</p><el-button class="add-field-button" :icon="Plus" :disabled="!writable" @click="fieldVisible = true">添加字段</el-button></div>
+          <div class="schema-intro"><p>字段定义 · 类型和默认值由服务端安全校验</p><el-button class="add-field-button" :icon="Plus" :disabled="!selectedTable || tablesLoading || metadataLoading || !rowColumns.length" @click="fieldVisible = true">添加字段</el-button></div>
           <el-table v-loading="metadataLoading" :data="rowColumns" class="schema-table">
-            <el-table-column prop="name" label="字段" min-width="170"><template #default="scope"><code>{{ scope.row.name }}</code><el-tag v-if="scope.row.name === primaryKey" size="small" effect="plain"><Key /> 主键</el-tag></template></el-table-column>
+            <el-table-column prop="name" label="字段" min-width="190"><template #default="scope"><code>{{ scope.row.name }}</code><el-tag v-if="scope.row.name === primaryKey" size="small" effect="plain"><Key /> 主键</el-tag><el-tag v-if="scope.row.generated || scope.row.readOnly" size="small" type="info" effect="plain">只读</el-tag></template></el-table-column>
             <el-table-column label="类型" min-width="140"><template #default="scope"><code>{{ scope.row.typeName }}</code></template></el-table-column>
             <el-table-column label="允许空值" width="110"><template #default="scope">{{ scope.row.nullable ? '是' : '否' }}</template></el-table-column>
             <el-table-column label="默认值" min-width="150"><template #default="scope">{{ scope.row.autoIncrement ? '自增' : (scope.row.defaultValue || '—') }}</template></el-table-column>
@@ -458,9 +462,9 @@ onMounted(loadCatalogs)
     <el-drawer v-model="rowDrawerVisible" class="database-row-drawer" :title="rowMode === 'create' ? '新增行' : '编辑行'" size="420px" :before-close="closeRowDrawer">
       <p class="drawer-intro">填写字段值，空值和默认值会按表定义处理。</p>
       <el-form label-position="top" @submit.prevent="saveRow">
-        <el-form-item v-for="column in rowColumns" :key="column.name" :label="column.name" :required="!column.nullable && !(rowMode === 'create' && column.autoIncrement)">
-          <el-input v-model="rowForm[column.name]" :disabled="column.autoIncrement || (rowMode === 'edit' && column.name === primaryKey)" :placeholder="column.autoIncrement ? '自增，保存时生成' : (column.defaultValue || (column.nullable ? '可留空' : '请输入值'))" />
-          <div class="field-hint">{{ column.nullable ? '允许空值' : '必填' }} · {{ column.autoIncrement ? '系统自动生成' : `默认值：${column.defaultValue || '无'}` }}</div>
+        <el-form-item v-for="column in rowColumns" :key="column.name" :label="column.name" :required="!column.nullable && !(rowMode === 'create' && (column.autoIncrement || column.generated || column.readOnly))">
+          <el-input v-model="rowForm[column.name]" :disabled="column.autoIncrement || column.generated || column.readOnly || (rowMode === 'edit' && column.name === primaryKey)" :placeholder="column.autoIncrement ? '自增，保存时生成' : (column.generated || column.readOnly ? '只读字段' : (column.defaultValue || (column.nullable ? '可留空' : '请输入值')))" />
+          <div class="field-hint">{{ column.generated || column.readOnly ? '只读字段' : (column.nullable ? '允许空值' : '必填') }} · {{ column.autoIncrement ? '系统自动生成' : `默认值：${column.defaultValue || '无'}` }}</div>
         </el-form-item>
         <div class="drawer-actions"><el-button @click="rowDrawerVisible = false">取消</el-button><el-button type="primary" native-type="submit" :loading="saving">保存</el-button></div>
       </el-form>
