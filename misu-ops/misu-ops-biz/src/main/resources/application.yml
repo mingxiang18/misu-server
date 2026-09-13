@@ -15,7 +15,6 @@ ops:
   nacos-upstream-url: ${OPS_NACOS_UPSTREAM_URL:}
   headlamp-upstream-url: ${OPS_HEADLAMP_UPSTREAM_URL:}
   qbittorrent-url: ${OPS_QBITTORRENT_URL:https://server.misu.chat/ops/qbittorrent/}
-  qbittorrent-upstream-url: ${OPS_QBITTORRENT_UPSTREAM_URL:}
   qbittorrent-username: ${OPS_QBITTORRENT_USERNAME:}
   qbittorrent-password: ${OPS_QBITTORRENT_PASSWORD:}
   public-base-url: ${OPS_PUBLIC_BASE_URL:}

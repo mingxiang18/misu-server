@@ -30,6 +30,10 @@ import java.util.regex.Pattern;
 @Component
 public class QBittorrentUpstreamAuthService {
 
+    /** qBittorrent is deliberately pinned to the existing in-cluster Service. */
+    public static final String FIXED_UPSTREAM_URL =
+            "http://q-bit-torrent-pi.misu-server.svc.cluster.local:30120/";
+
     private static final Pattern SID_COOKIE = Pattern.compile(
             "((?:QBT_)?SID(?:_\\d+)?=[^;\\s]+)", Pattern.CASE_INSENSITIVE);
     private static final String CSRF_HEADER = "X-Ops-Upstream-Csrf";
@@ -52,8 +56,7 @@ public class QBittorrentUpstreamAuthService {
         if (!StringUtils.hasText(opsSessionId)) {
             throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维会话无效或已过期");
         }
-        if (!StringUtils.hasText(properties.getQbittorrentUpstreamUrl())
-                || !StringUtils.hasText(properties.getQbittorrentUsername())
+        if (!StringUtils.hasText(properties.getQbittorrentUsername())
                 || !StringUtils.hasText(properties.getQbittorrentPassword())) {
             sessions.clear();
             throw new ServiceException(HttpStatus.ERROR, "qBittorrent 上游认证未配置");
@@ -138,18 +141,7 @@ public class QBittorrentUpstreamAuthService {
     }
 
     private URI loginUri() {
-        try {
-            URI base = URI.create(properties.getQbittorrentUpstreamUrl().endsWith("/")
-                    ? properties.getQbittorrentUpstreamUrl() : properties.getQbittorrentUpstreamUrl() + "/");
-            if (!("http".equalsIgnoreCase(base.getScheme()) || "https".equalsIgnoreCase(base.getScheme()))
-                    || base.getHost() == null || base.getUserInfo() != null
-                    || base.getQuery() != null || base.getFragment() != null) {
-                throw new IllegalArgumentException("invalid qBittorrent URL");
-            }
-            return base.resolve("api/v2/auth/login");
-        } catch (IllegalArgumentException ex) {
-            throw new ServiceException(HttpStatus.ERROR, "qBittorrent 上游地址无效");
-        }
+        return URI.create(FIXED_UPSTREAM_URL).resolve("api/v2/auth/login");
     }
 
     private URI logoutUri() {
@@ -157,7 +149,7 @@ public class QBittorrentUpstreamAuthService {
     }
 
     private String origin() {
-        URI uri = URI.create(properties.getQbittorrentUpstreamUrl());
+        URI uri = URI.create(FIXED_UPSTREAM_URL);
         return uri.getScheme() + "://" + uri.getRawAuthority();
     }
 

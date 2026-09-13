@@ -3,6 +3,7 @@ package com.misu.ops.session;
 import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
+import com.misu.ops.console.QBittorrentUpstreamAuthService;
 
 public enum ConsoleTarget {
     NACOS("nacos"),
@@ -44,7 +45,7 @@ public enum ConsoleTarget {
         String url = switch (this) {
             case NACOS -> properties.getNacosUpstreamUrl();
             case HEADLAMP -> properties.getHeadlampUpstreamUrl();
-            case QBITTORRENT -> properties.getQbittorrentUpstreamUrl();
+            case QBITTORRENT -> QBittorrentUpstreamAuthService.FIXED_UPSTREAM_URL;
         };
         if (url == null || url.isBlank()) {
             throw new ServiceException(HttpStatus.ERROR, "控制台 WS 上游尚未配置");

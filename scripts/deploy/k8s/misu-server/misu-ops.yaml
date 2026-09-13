@@ -68,15 +68,10 @@ spec:
                   key: password
                   optional: true
             - { name: OPS_HEADLAMP_UPSTREAM_URL, value: "http://headlamp.kuboard.svc.cluster.local:80/" }
-            # qBittorrent credentials are server-only. The URL must point to
-            # the existing q-bit-torrent-pi Service; the workload, NodePort
-            # 30120, download config, and data volumes remain untouched.
-            - name: OPS_QBITTORRENT_UPSTREAM_URL
-              valueFrom:
-                secretKeyRef:
-                  name: misu-ops-qbittorrent
-                  key: url
-                  optional: true
+            # qBittorrent credentials are server-only. The application pins
+            # the upstream to the existing q-bit-torrent-pi Service; the
+            # workload, NodePort 30120, download config, and data volumes
+            # remain untouched.
             - name: OPS_QBITTORRENT_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -90,6 +85,39 @@ spec:
                   key: password
                   optional: true
             - { name: OPS_QBITTORRENT_URL, value: "https://server.misu.chat/ops/qbittorrent/" }
+            # Database capability is explicitly enabled only when the optional
+            # Secret supplies the enabled key. If the Secret is absent, the
+            # env var is absent and application.yml safely defaults to false.
+            - name: OPS_DATABASE_ENABLED
+              valueFrom:
+                secretKeyRef:
+                  name: misu-ops-database
+                  key: enabled
+                  optional: true
+            - name: OPS_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: misu-ops-database
+                  key: url
+                  optional: true
+            - name: OPS_DATABASE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: misu-ops-database
+                  key: username
+                  optional: true
+            - name: OPS_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: misu-ops-database
+                  key: password
+                  optional: true
+            - name: OPS_DATABASE_ALLOWED_SCHEMAS
+              valueFrom:
+                secretKeyRef:
+                  name: misu-ops-database
+                  key: allowed-schemas
+                  optional: true
             - { name: OPS_PUBLIC_BASE_URL, value: "https://server.misu.chat" }
             # Must be the same HMAC secret used by misu-account to sign User-Token.
             - name: OPS_TOKEN_SECRET
