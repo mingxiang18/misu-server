@@ -3,6 +3,7 @@ package com.misu.ops.console;
 import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -44,6 +45,7 @@ public class QBittorrentUpstreamAuthService {
     private final Clock clock;
     private final Map<String, CachedSession> sessions = new ConcurrentHashMap<>();
 
+    @Autowired
     public QBittorrentUpstreamAuthService(OpsProperties properties) {
         this(properties, buildRestClient(properties), Clock.systemUTC());
     }
