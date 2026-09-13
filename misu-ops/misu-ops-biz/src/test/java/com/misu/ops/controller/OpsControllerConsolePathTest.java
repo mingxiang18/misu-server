@@ -31,6 +31,7 @@ class OpsControllerConsolePathTest {
         properties.setProxySharedSecret("proxy-secret");
         properties.setNacosUrl("https://api.misu.chat/nacos/");
         properties.setHeadlampUrl("https://api.misu.chat/ops/headlamp/");
+        properties.setQbittorrentUrl("https://api.misu.chat/ops/qbittorrent/");
         CurrentAccountVerifier verifier = adminVerifier();
         OpsSessionStore store = new OpsSessionStore(properties, verifier);
         OpsController controller = new OpsController(properties, null,
@@ -39,6 +40,8 @@ class OpsControllerConsolePathTest {
         assertEquals("https://api.misu.chat/nacos/_ops/exchange", controller.exchangeUrl(ConsoleTarget.NACOS));
         assertEquals("https://api.misu.chat/ops/headlamp/_ops/exchange",
                 controller.exchangeUrl(ConsoleTarget.HEADLAMP));
+        assertEquals("https://api.misu.chat/ops/qbittorrent/_ops/exchange",
+                controller.exchangeUrl(ConsoleTarget.QBITTORRENT));
 
         Set<String> cookiePaths = new HashSet<>();
         for (ConsoleTarget target : ConsoleTarget.values()) {
@@ -62,7 +65,7 @@ class OpsControllerConsolePathTest {
             assertEquals("https://api.misu.chat/" + target.cookiePath().substring(1),
                     response.getHeader("Location"));
         }
-        assertEquals(Set.of("/nacos/", "/ops/headlamp/"), cookiePaths);
+        assertEquals(Set.of("/nacos/", "/ops/headlamp/", "/ops/qbittorrent/"), cookiePaths);
     }
 
     @Test
@@ -101,7 +104,7 @@ class OpsControllerConsolePathTest {
                 }
             }
         }
-        assertEquals(Set.of("/nacos/", "/ops/headlamp/"), deletedPaths);
+        assertEquals(Set.of("/nacos/", "/ops/headlamp/", "/ops/qbittorrent/"), deletedPaths);
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
 import com.misu.ops.console.NacosUpstreamAuthService;
+import com.misu.ops.console.QBittorrentUpstreamAuthService;
 import com.misu.ops.security.CurrentAccountVerifier;
 import com.misu.security.dto.LoginUser;
 import org.springframework.stereotype.Component;
@@ -26,6 +27,7 @@ public class OpsSessionStore {
     private final OpsProperties properties;
     private final CurrentAccountVerifier accountVerifier;
     private final NacosUpstreamAuthService nacosAuth;
+    private final QBittorrentUpstreamAuthService qbittorrentAuth;
     private final SecureRandom secureRandom = new SecureRandom();
     private final Object lifecycleLock = new Object();
     private final Map<String, Ticket> tickets = new ConcurrentHashMap<>();
@@ -33,15 +35,22 @@ public class OpsSessionStore {
     private final Map<String, SshSession> sshSessions = new ConcurrentHashMap<>();
 
     public OpsSessionStore(OpsProperties properties, CurrentAccountVerifier accountVerifier) {
-        this(properties, accountVerifier, null);
+        this(properties, accountVerifier, null, null);
+    }
+
+    public OpsSessionStore(OpsProperties properties, CurrentAccountVerifier accountVerifier,
+                           NacosUpstreamAuthService nacosAuth) {
+        this(properties, accountVerifier, nacosAuth, null);
     }
 
     @Autowired
     public OpsSessionStore(OpsProperties properties, CurrentAccountVerifier accountVerifier,
-                           NacosUpstreamAuthService nacosAuth) {
+                           NacosUpstreamAuthService nacosAuth,
+                           QBittorrentUpstreamAuthService qbittorrentAuth) {
         this.properties = properties;
         this.accountVerifier = accountVerifier;
         this.nacosAuth = nacosAuth;
+        this.qbittorrentAuth = qbittorrentAuth;
     }
 
     public Ticket issueTicket(LoginUser currentUser, ConsoleTarget target) {
@@ -116,6 +125,7 @@ public class OpsSessionStore {
                 .toList();
         expiredSessionIds.forEach(id -> consoleSessions.remove(id));
         expiredSessionIds.forEach(this::removeNacosAuth);
+        expiredSessionIds.forEach(this::removeQbittorrentAuth);
         // A browser refresh exchanges a new ticket for the same console. Keep
         // one live session per user and target so refreshes cannot consume the
         // per-user quota or leave an older cookie usable.
@@ -126,6 +136,7 @@ public class OpsSessionStore {
                 .toList();
         replacedSessionIds.forEach(id -> consoleSessions.remove(id));
         replacedSessionIds.forEach(this::removeNacosAuth);
+        replacedSessionIds.forEach(this::removeQbittorrentAuth);
         long userSessions = consoleSessions.values().stream()
                 .filter(session -> session.userId().equals(ticket.userId()))
                 .count();
@@ -185,6 +196,7 @@ public class OpsSessionStore {
                 consoleSessions.remove(sessionId);
             }
             removeNacosAuth(sessionId);
+            removeQbittorrentAuth(sessionId);
         }
     }
 
@@ -265,6 +277,7 @@ public class OpsSessionStore {
             consoleSessions.values().removeIf(session -> session.userId().equals(userId));
             sshSessions.values().removeIf(session -> session.userId().equals(userId));
             revokedConsoleSessions.forEach(this::removeNacosAuth);
+            revokedConsoleSessions.forEach(this::removeQbittorrentAuth);
         }
     }
 
@@ -278,9 +291,13 @@ public class OpsSessionStore {
                 .toList();
         consoleSessions.values().removeIf(this::expired);
         expiredConsoleSessions.forEach(this::removeNacosAuth);
+        expiredConsoleSessions.forEach(this::removeQbittorrentAuth);
         sshSessions.values().removeIf(session -> !session.claimed() && expired(session));
         if (nacosAuth != null) {
             nacosAuth.removeSessionsExcept(consoleSessions.keySet());
+        }
+        if (qbittorrentAuth != null) {
+            qbittorrentAuth.removeSessionsExcept(consoleSessions.keySet());
         }
     }
 
@@ -295,6 +312,7 @@ public class OpsSessionStore {
             sessions.remove(session.id(), session);
             if (session instanceof ConsoleSession) {
                 removeNacosAuth(session.id());
+                removeQbittorrentAuth(session.id());
             }
             throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维会话无效或已过期");
         }
@@ -306,6 +324,7 @@ public class OpsSessionStore {
                 sessions.remove(session.id(), session);
                 if (session instanceof ConsoleSession) {
                     removeNacosAuth(session.id());
+                    removeQbittorrentAuth(session.id());
                 }
                 throw ex;
             }
@@ -315,6 +334,12 @@ public class OpsSessionStore {
     private void removeNacosAuth(String sessionId) {
         if (nacosAuth != null) {
             nacosAuth.removeSession(sessionId);
+        }
+    }
+
+    private void removeQbittorrentAuth(String sessionId) {
+        if (qbittorrentAuth != null) {
+            qbittorrentAuth.removeSession(sessionId);
         }
     }
 

@@ -109,4 +109,38 @@ class ProxyAuthControllerTest {
 
         assertEquals(204, controller.authorizeProxy(request).getStatusCode().value());
     }
+
+    @Test
+    void qBittorrentProxyFailsClosedWhenServerCredentialsAreMissing() {
+        OpsProperties properties = new OpsProperties();
+        properties.setProxySharedSecret("test-secret");
+        properties.setQbittorrentUrl("https://api.misu.chat/ops/qbittorrent/");
+        CurrentAccountVerifier verifier = new CurrentAccountVerifier() {
+            @Override
+            public LoginUser requireAdmin(LoginUser tokenUser) {
+                return tokenUser;
+            }
+
+            @Override
+            public LoginUser requireAdmin(Long userId, String userName) {
+                return new LoginUser(userId, userName, java.util.List.of("ADMIN"));
+            }
+        };
+        OpsSessionStore store = new OpsSessionStore(properties, verifier);
+        OpsSessionStore.Ticket ticket = store.issueTicket(
+                new LoginUser(1L, "admin", java.util.List.of("ADMIN")), ConsoleTarget.QBITTORRENT);
+        OpsSessionStore.ConsoleSession session = store.createConsoleSession(ticket);
+        ProxyAuthController controller = new ProxyAuthController(properties, store,
+                new OpsOriginPolicy(properties), null,
+                new com.misu.ops.console.QBittorrentUpstreamAuthService(properties));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("127.0.0.1");
+        request.addHeader("X-Ops-Proxy-Key", "test-secret");
+        request.addHeader("X-Ops-Target", "qbittorrent");
+        request.addHeader("Cookie", properties.getCookieName() + "=" + session.id());
+        ServiceException exception = assertThrows(ServiceException.class,
+                () -> controller.authorizeProxy(request));
+        assertEquals(HttpStatus.ERROR, exception.getCode());
+    }
 }

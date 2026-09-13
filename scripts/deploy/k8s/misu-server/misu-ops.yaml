@@ -68,6 +68,28 @@ spec:
                   key: password
                   optional: true
             - { name: OPS_HEADLAMP_UPSTREAM_URL, value: "http://headlamp.kuboard.svc.cluster.local:80/" }
+            # qBittorrent credentials are server-only. The URL must point to
+            # the existing q-bit-torrent-pi Service; the workload, NodePort
+            # 30120, download config, and data volumes remain untouched.
+            - name: OPS_QBITTORRENT_UPSTREAM_URL
+              valueFrom:
+                secretKeyRef:
+                  name: misu-ops-qbittorrent
+                  key: url
+                  optional: true
+            - name: OPS_QBITTORRENT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: misu-ops-qbittorrent
+                  key: username
+                  optional: true
+            - name: OPS_QBITTORRENT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: misu-ops-qbittorrent
+                  key: password
+                  optional: true
+            - { name: OPS_QBITTORRENT_URL, value: "https://server.misu.chat/ops/qbittorrent/" }
             - { name: OPS_PUBLIC_BASE_URL, value: "https://server.misu.chat" }
             # Must be the same HMAC secret used by misu-account to sign User-Token.
             - name: OPS_TOKEN_SECRET

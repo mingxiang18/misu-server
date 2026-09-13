@@ -62,20 +62,28 @@ public class ConsoleWebSocketBridgeService {
     private final OpsProperties properties;
     private final OpsSessionStore sessions;
     private final NacosUpstreamAuthService nacosAuth;
+    private final QBittorrentUpstreamAuthService qbittorrentAuth;
     private final HttpClient httpClient;
     private final Map<String, Bridge> bridges = new ConcurrentHashMap<>();
     private final AtomicInteger activeCount = new AtomicInteger();
 
     public ConsoleWebSocketBridgeService(OpsProperties properties, OpsSessionStore sessions) {
-        this(properties, sessions, null);
+        this(properties, sessions, null, null);
+    }
+
+    public ConsoleWebSocketBridgeService(OpsProperties properties, OpsSessionStore sessions,
+                                         NacosUpstreamAuthService nacosAuth) {
+        this(properties, sessions, nacosAuth, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     public ConsoleWebSocketBridgeService(OpsProperties properties, OpsSessionStore sessions,
-                                         NacosUpstreamAuthService nacosAuth) {
+                                         NacosUpstreamAuthService nacosAuth,
+                                         QBittorrentUpstreamAuthService qbittorrentAuth) {
         this.properties = properties;
         this.sessions = sessions;
         this.nacosAuth = nacosAuth;
+        this.qbittorrentAuth = qbittorrentAuth;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(properties.getConsoleWebSocketConnectTimeoutMillis()))
                 .build();
@@ -176,22 +184,36 @@ public class ConsoleWebSocketBridgeService {
     private void addUpstreamHeaders(WebSocket.Builder builder, HttpHeaders headers,
                                     ConsoleTarget target, String sessionId, String sessionUserName) {
         String browserCookies = joinHeaderValues(headers, HttpHeaders.COOKIE);
-        String cookie = target == ConsoleTarget.NACOS ? null : headers.getFirst(UPSTREAM_COOKIE_HEADER);
-        if (cookie == null && target != ConsoleTarget.NACOS) {
-            cookie = CookieSupport.filterUpstreamCookies(browserCookies,
+        String cookie;
+        switch (target) {
+            case NACOS -> cookie = null;
+            case HEADLAMP -> cookie = CookieSupport.filterUpstreamCookies(
+                    headers.getFirst(UPSTREAM_COOKIE_HEADER) == null
+                            ? browserCookies : headers.getFirst(UPSTREAM_COOKIE_HEADER),
                     blockedCookieNames());
-        } else {
-            // Keep the proxy contract defense-in-depth: even a trusted proxy
-            // response must never re-introduce a main-site credential.
-            cookie = CookieSupport.filterUpstreamCookies(cookie, blockedCookieNames());
+            case QBITTORRENT -> {
+                String upstreamCookie = headers.getFirst(UPSTREAM_COOKIE_HEADER);
+                if (upstreamCookie == null && qbittorrentAuth != null) {
+                    upstreamCookie = qbittorrentAuth.session(sessionId).cookie();
+                }
+                cookie = CookieSupport.filterUpstreamCookies(upstreamCookie, blockedCookieNames());
+                String csrf = headers.getFirst("X-Ops-Upstream-Csrf");
+                if (safeHeaderValue(csrf)) {
+                    builder.header("X-CSRF-Token", csrf);
+                    builder.header("X-QBittorrent-Session", csrf);
+                }
+            }
+            default -> throw new ServiceException(HttpStatus.BAD_REQUEST, "控制台目标无效");
         }
         if (safeHeaderValue(cookie)) {
             builder.header(HttpHeaders.COOKIE, cookie);
         }
         // Never forward browser Authorization to either console. Nacos uses
         // only its server-side session token; Headlamp uses in-cluster auth.
-        String authorization = target == ConsoleTarget.NACOS && nacosAuth != null
-                ? nacosAuth.authorization(sessionId) : null;
+        String authorization = null;
+        if (target == ConsoleTarget.NACOS && nacosAuth != null) {
+            authorization = nacosAuth.authorization(sessionId);
+        }
         if (safeHeaderValue(authorization)) {
             builder.header(HttpHeaders.AUTHORIZATION, authorization);
         }
@@ -246,9 +268,16 @@ public class ConsoleWebSocketBridgeService {
                     || !request.getRawPath().startsWith("/")) {
                 throw new IllegalArgumentException("invalid request URI");
             }
+            String path = request.getRawPath();
+            if (target == ConsoleTarget.QBITTORRENT) {
+                if (!path.startsWith("/ops/qbittorrent/")) {
+                    throw new IllegalArgumentException("invalid qBittorrent request path");
+                }
+                path = path.substring("/ops/qbittorrent".length());
+            }
             String scheme = "https".equalsIgnoreCase(base.getScheme()) ? "wss" : "ws";
             String query = request.getRawQuery() == null ? "" : "?" + request.getRawQuery();
-            return URI.create(scheme + "://" + base.getRawAuthority() + request.getRawPath() + query);
+            return URI.create(scheme + "://" + base.getRawAuthority() + path + query);
         } catch (IllegalArgumentException ex) {
             throw new ServiceException(HttpStatus.ERROR, "控制台 WS 上游地址无效");
         }

@@ -56,8 +56,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/ops/internal/proxy-auth":
                 original_uri = self.headers.get("X-Original-URI", "")
                 target = self.headers.get("X-Ops-Target", "")
-                original_uri_valid = original_uri.startswith(("/nacos/", "/ops/headlamp/"))
-                target_valid = target in ("nacos", "headlamp")
+                original_uri_valid = original_uri.startswith(("/nacos/", "/ops/headlamp/", "/ops/qbittorrent/"))
+                target_valid = target in ("nacos", "headlamp", "qbittorrent")
                 forwarding_headers_cleared = not any(
                     self.headers.get(header, "") for header in
                     ("Forwarded", "X-Forwarded-For", "X-Real-IP", "X-Forwarded-Port")
@@ -84,6 +84,9 @@ class Handler(BaseHTTPRequestHandler):
                     # in-cluster identity-aware mode and must see none.
                     if target == "nacos":
                         response_headers["X-Ops-Upstream-Authorization"] = "Bearer upstream"
+                    if target == "qbittorrent":
+                        response_headers["X-Ops-Upstream-Cookie"] = "QBT_SID_30120=server-only"
+                        response_headers["X-Ops-Upstream-Csrf"] = "csrf-server-only"
                     self.write(204, headers=response_headers)
                 return
             if self.path.startswith("/ops/ws/console/") and self.headers.get("Upgrade", "").lower() == "websocket":
@@ -213,7 +216,7 @@ def serve(port, role):
 
 
 disabled = {role.strip() for role in os.environ.get("OPS_MOCK_DISABLE", "").split(",") if role.strip()}
-for port, role in ((30264, "backend"), (18848, "nacos"), (18080, "headlamp")):
+for port, role in ((30264, "backend"), (18848, "nacos"), (18080, "headlamp"), (18120, "qbittorrent")):
     if role in disabled:
         continue
     threading.Thread(target=serve, args=(port, role), daemon=True).start()

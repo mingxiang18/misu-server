@@ -5,6 +5,7 @@ import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
 import com.misu.ops.console.ConsoleWebSocketBridgeService;
 import com.misu.ops.console.NacosUpstreamAuthService;
+import com.misu.ops.console.QBittorrentUpstreamAuthService;
 import com.misu.ops.security.OpsOriginPolicy;
 import com.misu.ops.session.ConsoleTarget;
 import com.misu.ops.session.OpsSessionStore;
@@ -29,18 +30,26 @@ public class ProxyAuthController {
     private final OpsSessionStore sessions;
     private final OpsOriginPolicy originPolicy;
     private final NacosUpstreamAuthService nacosAuth;
+    private final QBittorrentUpstreamAuthService qbittorrentAuth;
 
     public ProxyAuthController(OpsProperties properties, OpsSessionStore sessions, OpsOriginPolicy originPolicy) {
-        this(properties, sessions, originPolicy, null);
+        this(properties, sessions, originPolicy, null, null);
+    }
+
+    public ProxyAuthController(OpsProperties properties, OpsSessionStore sessions,
+                               OpsOriginPolicy originPolicy, NacosUpstreamAuthService nacosAuth) {
+        this(properties, sessions, originPolicy, nacosAuth, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     public ProxyAuthController(OpsProperties properties, OpsSessionStore sessions,
-                               OpsOriginPolicy originPolicy, NacosUpstreamAuthService nacosAuth) {
+                               OpsOriginPolicy originPolicy, NacosUpstreamAuthService nacosAuth,
+                               QBittorrentUpstreamAuthService qbittorrentAuth) {
         this.properties = properties;
         this.sessions = sessions;
         this.originPolicy = originPolicy;
         this.nacosAuth = nacosAuth;
+        this.qbittorrentAuth = qbittorrentAuth;
     }
 
     @GetMapping("/proxy-auth")
@@ -61,29 +70,40 @@ public class ProxyAuthController {
             originPolicy.requireSameConsoleOrigin(request, consoleTarget.url(properties));
         }
         HttpHeaders responseHeaders = new HttpHeaders();
-        if (consoleTarget == ConsoleTarget.HEADLAMP) {
-            String userName = session.userName();
-            if (!StringUtils.hasText(userName) || containsHeaderControl(userName)) {
-                throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维用户身份无效");
+        switch (consoleTarget) {
+            case NACOS -> {
+                if (nacosAuth != null) {
+                    String authorization = nacosAuth.authorization(session.id());
+                    if (authorization != null) {
+                        responseHeaders.set(ConsoleWebSocketBridgeService.UPSTREAM_AUTH_HEADER, authorization);
+                    }
+                }
             }
-            // Headlamp's identity-aware proxy mode consumes this internal
-            // result and skips its browser token screen. Nginx overwrites the
-            // public X-Forwarded-User header with this value after auth_request.
-            responseHeaders.set("X-Ops-User", userName);
-        }
-        String cookieHeader = CookieSupport.header(request);
-        String cookie = consoleTarget == ConsoleTarget.NACOS ? null
-                : CookieSupport.filterUpstreamCookies(cookieHeader, blockedCookieNames());
-        if (cookie != null) {
-            responseHeaders.set(ConsoleWebSocketBridgeService.UPSTREAM_COOKIE_HEADER, cookie);
-        }
-        // Browser Authorization is never an upstream credential. Nacos may use
-        // only its server-side session token; Headlamp uses its in-cluster
-        // ServiceAccount and the verified X-Forwarded-User identity.
-        String authorization = consoleTarget == ConsoleTarget.NACOS && nacosAuth != null
-                ? nacosAuth.authorization(session.id()) : null;
-        if (authorization != null) {
-            responseHeaders.set(ConsoleWebSocketBridgeService.UPSTREAM_AUTH_HEADER, authorization);
+            case HEADLAMP -> {
+                String userName = session.userName();
+                if (!StringUtils.hasText(userName) || containsHeaderControl(userName)) {
+                    throw new ServiceException(HttpStatus.UNAUTHORIZED, "运维用户身份无效");
+                }
+                // Headlamp's identity-aware proxy mode consumes this internal
+                // result and skips its browser token screen. Nginx overwrites
+                // the public X-Forwarded-User header with this value.
+                responseHeaders.set("X-Ops-User", userName);
+                String cookie = CookieSupport.filterUpstreamCookies(
+                        CookieSupport.header(request), blockedCookieNames());
+                if (cookie != null) {
+                    responseHeaders.set(ConsoleWebSocketBridgeService.UPSTREAM_COOKIE_HEADER, cookie);
+                }
+            }
+            case QBITTORRENT -> {
+                if (qbittorrentAuth == null) {
+                    throw new ServiceException(HttpStatus.ERROR, "qBittorrent 上游认证未配置");
+                }
+                QBittorrentUpstreamAuthService.UpstreamSession upstream = qbittorrentAuth.session(session.id());
+                responseHeaders.set(ConsoleWebSocketBridgeService.UPSTREAM_COOKIE_HEADER, upstream.cookie());
+                if (StringUtils.hasText(upstream.csrfToken())) {
+                    responseHeaders.set("X-Ops-Upstream-Csrf", upstream.csrfToken());
+                }
+            }
         }
         return ResponseEntity.noContent().headers(responseHeaders).build();
     }
@@ -109,11 +129,16 @@ public class ProxyAuthController {
     }
 
     private String targetFromOriginalUri(String originalUri) {
-        if (originalUri != null && originalUri.startsWith("/nacos/")) {
-            return ConsoleTarget.NACOS.id();
-        }
-        if (originalUri != null && originalUri.startsWith("/ops/headlamp/")) {
-            return ConsoleTarget.HEADLAMP.id();
+        if (originalUri != null) {
+            if (originalUri.startsWith("/nacos/")) {
+                return ConsoleTarget.NACOS.id();
+            }
+            if (originalUri.startsWith("/ops/headlamp/")) {
+                return ConsoleTarget.HEADLAMP.id();
+            }
+            if (originalUri.startsWith("/ops/qbittorrent/")) {
+                return ConsoleTarget.QBITTORRENT.id();
+            }
         }
         throw new ServiceException(HttpStatus.BAD_REQUEST, "控制台目标缺失");
     }

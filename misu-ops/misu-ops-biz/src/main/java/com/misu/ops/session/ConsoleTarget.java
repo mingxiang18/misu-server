@@ -6,7 +6,8 @@ import com.misu.ops.OpsProperties;
 
 public enum ConsoleTarget {
     NACOS("nacos"),
-    HEADLAMP("headlamp");
+    HEADLAMP("headlamp"),
+    QBITTORRENT("qbittorrent");
 
     private final String id;
 
@@ -20,11 +21,19 @@ public enum ConsoleTarget {
 
     /** Cookie scope is deliberately target-specific so both consoles coexist on api.misu.chat. */
     public String cookiePath() {
-        return this == NACOS ? "/nacos/" : "/ops/headlamp/";
+        return switch (this) {
+            case NACOS -> "/nacos/";
+            case HEADLAMP -> "/ops/headlamp/";
+            case QBITTORRENT -> "/ops/qbittorrent/";
+        };
     }
 
     public String url(OpsProperties properties) {
-        String url = this == NACOS ? properties.getNacosUrl() : properties.getHeadlampUrl();
+        String url = switch (this) {
+            case NACOS -> properties.getNacosUrl();
+            case HEADLAMP -> properties.getHeadlampUrl();
+            case QBITTORRENT -> properties.getQbittorrentUrl();
+        };
         if (url == null || url.isBlank()) {
             throw new ServiceException(HttpStatus.ERROR, "运维控制台尚未配置");
         }
@@ -32,7 +41,11 @@ public enum ConsoleTarget {
     }
 
     public String upstreamUrl(OpsProperties properties) {
-        String url = this == NACOS ? properties.getNacosUpstreamUrl() : properties.getHeadlampUpstreamUrl();
+        String url = switch (this) {
+            case NACOS -> properties.getNacosUpstreamUrl();
+            case HEADLAMP -> properties.getHeadlampUpstreamUrl();
+            case QBITTORRENT -> properties.getQbittorrentUpstreamUrl();
+        };
         if (url == null || url.isBlank()) {
             throw new ServiceException(HttpStatus.ERROR, "控制台 WS 上游尚未配置");
         }

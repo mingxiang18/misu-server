@@ -51,6 +51,7 @@ data:
         default "";
         ~^/nacos/ nacos;
         ~^/ops/headlamp/ headlamp;
+        ~^/ops/qbittorrent/ qbittorrent;
       }
 
       map $http_upgrade $ops_is_websocket {
@@ -62,6 +63,7 @@ data:
         default "";
         ~^/nacos/ http://misu_ops_nacos;
         ~^/ops/headlamp/ http://misu_ops_headlamp;
+        ~^/ops/qbittorrent/ http://misu_ops_qbittorrent;
       }
 
       # Only Headlamp receives the identity returned by Java auth_request.
@@ -84,6 +86,9 @@ data:
       }
       upstream misu_ops_headlamp {
         server headlamp.kuboard.svc.cluster.local:80;
+      }
+      upstream misu_ops_qbittorrent {
+        server q-bit-torrent-pi.misu-server.svc.cluster.local:30120;
       }
 
       # 未知 Host 不得成为开放代理。
@@ -125,6 +130,7 @@ data:
           proxy_set_header X-Ops-Proxy-Key "";
           proxy_set_header X-Ops-Upstream-Cookie "";
           proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
           proxy_set_header X-Original-URI "";
           proxy_set_header X-Original-Method "";
           proxy_set_header X-Original-Host "";
@@ -156,6 +162,7 @@ data:
           proxy_set_header X-Ops-Original-Host "";
           proxy_set_header X-Ops-Upstream-Cookie "";
           proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
           # The Java loopback trust check must see the sidecar peer, never an
           # edge-provided client address forwarded into this subrequest.
           proxy_set_header Forwarded "";
@@ -198,6 +205,7 @@ data:
           proxy_set_header X-Ops-Original-Host "";
           proxy_set_header X-Ops-Upstream-Cookie "";
           proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
           proxy_set_header X-Original-URI "";
           proxy_set_header X-Original-Method "";
           proxy_set_header X-Original-Host "";
@@ -236,6 +244,7 @@ data:
           proxy_set_header X-Ops-Original-Host "";
           proxy_set_header X-Ops-Upstream-Cookie "";
           proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
           proxy_set_header X-Original-URI "";
           proxy_set_header X-Original-Method "";
           proxy_set_header X-Original-Host "";
@@ -250,13 +259,73 @@ data:
           proxy_hide_header Content-Security-Policy;
         }
 
+        location = /ops/qbittorrent/_ops/exchange { return 404; }
+
         location = /nacos { return 308 /nacos/; }
         location = /ops/headlamp { return 308 /ops/headlamp/; }
+        location = /ops/qbittorrent { return 308 /ops/qbittorrent/; }
 
         # Exchange is the only public _ops location.
         location ^~ /nacos/_ops/ { return 404; }
         location ^~ /ops/headlamp/_ops/ { return 404; }
+        location ^~ /ops/qbittorrent/_ops/ { return 404; }
         location ^~ /ops/internal/ { return 404; }
+
+        # qBittorrent is served below a fixed public prefix while its existing
+        # Web UI remains rooted at the upstream service. auth_request obtains
+        # the server-side SID; no browser cookie or credential is forwarded.
+        location ^~ /ops/qbittorrent/ {
+          auth_request /_ops/auth;
+          auth_request_set $ops_upstream_cookie $upstream_http_x_ops_upstream_cookie;
+          auth_request_set $ops_upstream_csrf $upstream_http_x_ops_upstream_csrf;
+          proxy_pass http://misu_ops_qbittorrent/;
+          proxy_http_version 1.1;
+          proxy_set_header Host q-bit-torrent-pi.misu-server.svc.cluster.local;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header Origin http://q-bit-torrent-pi.misu-server.svc.cluster.local:30120;
+          proxy_set_header Referer http://q-bit-torrent-pi.misu-server.svc.cluster.local:30120/;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_set_header Authorization "";
+          proxy_set_header Cookie $ops_upstream_cookie;
+          proxy_set_header X-CSRF-Token $ops_upstream_csrf;
+          proxy_set_header X-QBittorrent-Session $ops_upstream_csrf;
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_hide_header Set-Cookie;
+          proxy_hide_header Authorization;
+          proxy_hide_header X-CSRF-Token;
+          proxy_hide_header X-QBittorrent-Session;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
+          proxy_redirect / /ops/qbittorrent/;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
+        }
 
         location / {
           if ($ops_console_target = "") { return 404; }
@@ -289,6 +358,7 @@ data:
           proxy_set_header X-Ops-Proxy-Key "";
           proxy_set_header X-Ops-Upstream-Cookie "";
           proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
           proxy_set_header X-Original-URI "";
           proxy_set_header X-Original-Method "";
           proxy_set_header X-Original-Host "";

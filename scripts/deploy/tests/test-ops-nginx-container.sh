@@ -26,6 +26,7 @@ template = template.gsub('${OPS_PROXY_SHARED_SECRET}', 'test-secret')
   .gsub('127.0.0.1:30264', 'host.docker.internal:30264')
   .gsub('nacos.misu-server.svc.cluster.local:8848', 'host.docker.internal:18848')
   .gsub('headlamp.kuboard.svc.cluster.local:80', 'host.docker.internal:18080')
+  .gsub('q-bit-torrent-pi.misu-server.svc.cluster.local:30120', 'host.docker.internal:18120')
 File.write(destination, template)
 RB
 
@@ -109,6 +110,23 @@ code=$(curl -sS -o "${TMP_DIR}/headlamp" -w '%{http_code}' -H 'Host: api.misu.ch
 rg -q 'HEADLAMP_UPSTREAM path=/ops/headlamp/c/main/pods' "${TMP_DIR}/headlamp"
 rg -q 'HEADLAMP_UPSTREAM.*user=admin groups= group= email= id_token= ops_user= ops_target= ops_key= original_uri= original_host=' "${TMP_DIR}/headlamp"
 rg -q 'HEADLAMP_UPSTREAM.*cookie=UPSTREAM_TOKEN=clean auth= user=admin' "${TMP_DIR}/headlamp"
+code=$(curl -sS -D "${TMP_DIR}/qbittorrent-headers" -o "${TMP_DIR}/qbittorrent" -w '%{http_code}' \
+  -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=qbittorrent-session' \
+  -H 'Authorization: Bearer browser-token' -H 'X-Forwarded-User: attacker' \
+  -H 'X-Ops-Target: headlamp' -H 'X-Original-URI: /evil' \
+  "http://127.0.0.1:${NGINX_PORT}/ops/qbittorrent/api/v2/app/version")
+[[ "${code}" == 200 ]]
+rg -q 'QBITTORRENT_UPSTREAM path=/api/v2/app/version' "${TMP_DIR}/qbittorrent"
+rg -q 'QBITTORRENT_UPSTREAM.*cookie=QBT_SID_30120=server-only auth= user= groups= group= email= id_token= ops_user= ops_target= ops_key= original_uri= original_host=' "${TMP_DIR}/qbittorrent"
+if rg -q 'csrf-server-only|Set-Cookie|server-only' "${TMP_DIR}/qbittorrent-headers"; then
+  echo 'qBittorrent upstream credential leaked to browser' >&2
+  exit 1
+fi
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: api.misu.chat' \
+  -H 'Cookie: MISU_OPS_SESSION=qbittorrent-session' \
+  "http://127.0.0.1:${NGINX_PORT}/ops/qbittorrent")
+[[ "${code}" == 308 ]]
+rg -q 'QBITTORRENT_UPSTREAM path=/api/v2/app/version' "${TMP_DIR}/qbittorrent"
 code=$(curl -sS -o "${TMP_DIR}/headlamp-token" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=headlamp-session' "http://127.0.0.1:${NGINX_PORT}/ops/headlamp/c/main/token")
 [[ "${code}" == 200 ]]
 rg -q 'HEADLAMP_UPSTREAM path=/ops/headlamp/c/main/token.*user=admin' "${TMP_DIR}/headlamp-token"

@@ -24,6 +24,11 @@ public class OpsProperties {
     /** Optional override for the Nacos auth endpoint, useful for isolated tests. */
     private String nacosAuthUrl = "";
     private String headlampUpstreamUrl = "";
+    /** Public fixed qBittorrent entry and the server-only fixed upstream. */
+    private String qbittorrentUrl = "https://server.misu.chat/ops/qbittorrent/";
+    private String qbittorrentUpstreamUrl = "";
+    private String qbittorrentUsername = "";
+    private String qbittorrentPassword = "";
     private String publicBaseUrl = "";
     private String proxySharedSecret = "";
     private String knownHostsPath = "";
