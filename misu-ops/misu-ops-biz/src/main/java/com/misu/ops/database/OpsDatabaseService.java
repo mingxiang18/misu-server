@@ -54,6 +54,7 @@ import static com.misu.ops.database.DatabaseModels.*;
 @Slf4j
 @Service
 public class OpsDatabaseService {
+    private static final int MAX_PAGE = 1_000;
     private static final int MAX_FILTERS = 10;
     private static final int MAX_VALUE_BYTES = 512;
     private static final Set<String> OPERATORS = Set.of("eq", "ne", "like", "prefix", "gt", "gte", "lt", "lte", "isNull");
@@ -105,7 +106,8 @@ public class OpsDatabaseService {
                             continue;
                         }
                         TableInfo table = readTableInfo(metadata, schema, name);
-                        result.add(new DatabaseTableDto(name, safe(rs.getString("REMARKS")), null, table.primaryKeyMode()));
+                        result.add(new DatabaseTableDto(name, safe(rs.getString("REMARKS")), null,
+                                table.primaryKeyMode(), table.tableType()));
                     }
                 }
                 return result;
@@ -119,12 +121,12 @@ public class OpsDatabaseService {
         TableInfo info = tableInfo(database, table);
         return new TableMetadataDto(info.database, info.table,
                 info.columns.stream().map(ColumnInfo::dto).toList(),
-                info.indexes.stream().map(IndexInfo::dto).toList(), info.writable(), info.primaryKey());
+                info.indexes.stream().map(IndexInfo::dto).toList(), info.writable(), info.primaryKey(), info.tableType());
     }
 
     public PageDto<RowDto> rows(String database, String table, int page, int pageSize,
                                 String sort, String order, String filterJson) {
-        if (page < 1 || page > 100_000 || pageSize < 1 || pageSize > Math.min(100, properties.getMaxPageSize())) {
+        if (page < 1 || page > MAX_PAGE || pageSize < 1 || pageSize > Math.min(100, properties.getMaxPageSize())) {
             throw invalid("分页参数超出范围");
         }
         TableInfo info = tableInfo(database, table);
@@ -251,14 +253,28 @@ public class OpsDatabaseService {
 
     @Transactional(transactionManager = "opsDatabaseTransactionManager")
     public void delete(String database, String table, String primaryKey) {
+        delete(database, table, primaryKey, null);
+    }
+
+    @Transactional(transactionManager = "opsDatabaseTransactionManager")
+    public void delete(String database, String table, String primaryKey, DeleteRowRequest request) {
         TableInfo info = writableTable(database, table);
         Object key = convertPrimaryKey(primaryKey, info);
-        int affected = update("DELETE FROM " + qualified(info) + " WHERE " + DatabaseValidation.quote(info.primaryKey) + " = ?", List.of(key));
+        StringBuilder sql = new StringBuilder("DELETE FROM ").append(qualified(info)).append(" WHERE ")
+                .append(DatabaseValidation.quote(info.primaryKey)).append(" = ?");
+        List<Object> params = new ArrayList<>(List.of(key));
+        if (request != null && request.expectedRowVersion() != null) {
+            if (info.versionColumn == null) {
+                throw invalid("该表不支持版本校验");
+            }
+            sql.append(" AND ").append(DatabaseValidation.quote(info.versionColumn.name)).append(" = ?");
+            params.add(convertValue(request.expectedRowVersion(), info.versionColumn));
+        }
+        int affected = update(sql.toString(), params);
         requireOneAffected(affected);
         audit("delete", info, List.of(info.primaryKey), affected);
     }
 
-    @Transactional(transactionManager = "opsDatabaseTransactionManager")
     public TableMetadataDto createTable(String database, CreateTableRequest request) {
         String schema = validateSchema(database);
         if (request == null || request.name() == null || request.columns() == null || request.columns().isEmpty()
@@ -266,6 +282,9 @@ public class OpsDatabaseService {
             throw ddlRejected("表结构无效");
         }
         String table = DatabaseValidation.identifier(request.name(), "表名");
+        if (tableInfoOrNull(schema, table) != null) {
+            throw ddlRejected("表已存在");
+        }
         DatabaseValidation.comment(request.comment());
         Set<String> names = new LinkedHashSet<>();
         int primaryKeys = 0;
@@ -297,16 +316,25 @@ public class OpsDatabaseService {
         if (request.comment() != null) {
             sql.append(" COMMENT ").append(stringLiteral(request.comment()));
         }
-        executeDdl(sql.toString());
+        try {
+            executeDdl(sql.toString());
+        } catch (ServiceException ex) {
+            rereadAfterDdlFailure(schema, table);
+            throw ex;
+        }
+        TableInfo created = tableInfoOrNull(schema, table);
+        if (created == null || created.view || created.columns.size() != request.columns().size()
+                || !created.columns.stream().map(c -> c.name).toList().equals(new ArrayList<>(names))) {
+            throw ddlRejected("建表结果与元数据不一致");
+        }
         return metadata(schema, table);
     }
 
-    @Transactional(transactionManager = "opsDatabaseTransactionManager")
     public TableMetadataDto addColumn(String database, String table, AddColumnRequest request) {
         String schema = validateSchema(database);
         String existing = DatabaseValidation.identifier(table, "表名");
         TableInfo info = tableInfo(schema, existing);
-        if (request == null) {
+        if (info.view || request == null) {
             throw ddlRejected("字段定义无效");
         }
         String column = DatabaseValidation.identifier(request.name(), "字段名");
@@ -327,13 +355,22 @@ public class OpsDatabaseService {
                 sql.append(" AFTER ").append(DatabaseValidation.quote(after.name));
             }
         }
-        executeDdl(sql.toString());
+        try {
+            executeDdl(sql.toString());
+        } catch (ServiceException ex) {
+            rereadAfterDdlFailure(schema, existing);
+            throw ex;
+        }
+        TableInfo changed = tableInfoOrNull(schema, existing);
+        if (changed == null || changed.column(column) == null) {
+            throw ddlRejected("加字段结果与元数据不一致");
+        }
         return metadata(schema, existing);
     }
 
     private TableInfo writableTable(String database, String table) {
         TableInfo info = tableInfo(database, table);
-        if (!"SINGLE".equals(info.primaryKeyMode()) || info.primaryKey == null) {
+        if (info.view || !"SINGLE".equals(info.primaryKeyMode()) || info.primaryKey == null) {
             throw DatabaseValidation.error(HttpStatus.FORBIDDEN, "OPS_DB_TABLE_READ_ONLY", "该表只读");
         }
         return info;
@@ -342,12 +379,17 @@ public class OpsDatabaseService {
     private TableInfo tableInfo(String database, String table) {
         String schema = validateSchema(database);
         DatabaseValidation.identifier(table, "表名");
+        TableInfo info = tableInfoOrNull(schema, table);
+        if (info == null) {
+            throw notAllowed("表不在允许范围内");
+        }
+        return info;
+    }
+
+    private TableInfo tableInfoOrNull(String schema, String table) {
         return withConnection(connection -> {
             try {
                 TableInfo info = readTableInfo(connection.getMetaData(), schema, table);
-                if (info == null) {
-                    throw notAllowed("表不在允许范围内");
-                }
                 return info;
             } catch (SQLException ex) {
                 throw upstream(ex);
@@ -357,12 +399,16 @@ public class OpsDatabaseService {
 
     private TableInfo readTableInfo(DatabaseMetaData metadata, String database, String table) throws SQLException {
         boolean exists = false;
+        boolean view = false;
+        String tableType = "TABLE";
         String comment = null;
         try (ResultSet rs = metadata.getTables(database, null, table, new String[]{"TABLE", "VIEW"})) {
             while (rs.next()) {
                 if (table.equals(rs.getString("TABLE_NAME"))) {
                     exists = true;
                     comment = rs.getString("REMARKS");
+                    tableType = rs.getString("TABLE_TYPE");
+                    view = "VIEW".equalsIgnoreCase(tableType);
                     break;
                 }
             }
@@ -406,7 +452,7 @@ public class OpsDatabaseService {
         ColumnInfo version = columns.stream().filter(c -> c.name.equalsIgnoreCase("updated_at")).findFirst().orElse(null);
         return new TableInfo(database, table, comment, columns, indexInfo,
                 primaryKey.size() == 1 ? primaryKey.get(0) : null,
-                primaryKey.size(), version);
+                primaryKey.size(), version, view, view ? "VIEW" : "TABLE");
     }
 
     private List<RowDto> executeQuery(String sql, List<Object> parameters, TableInfo info, int maxRows) {
@@ -490,6 +536,15 @@ public class OpsDatabaseService {
             throw ex;
         } catch (RuntimeException ex) {
             throw ddlRejected(ex);
+        }
+    }
+
+    /** MySQL DDL may commit before failing; observe metadata before returning the stable error. */
+    private void rereadAfterDdlFailure(String schema, String table) {
+        try {
+            tableInfoOrNull(schema, table);
+        } catch (RuntimeException ignored) {
+            // Preserve the stable DDL error even when the follow-up metadata read is unavailable.
         }
     }
 
@@ -665,7 +720,7 @@ public class OpsDatabaseService {
     }
 
     private static String stringLiteral(String value) {
-        return "'" + value.replace("'", "''") + "'";
+        return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'";
     }
 
     private void requireOneAffected(int affected) {
@@ -701,10 +756,10 @@ public class OpsDatabaseService {
 
     private record TableInfo(String database, String table, String comment, List<ColumnInfo> columns,
                              List<IndexInfo> indexes, String primaryKey, int primaryKeyCount,
-                             ColumnInfo versionColumn) {
+                             ColumnInfo versionColumn, boolean view, String tableType) {
         ColumnInfo column(String name) { return columns.stream().filter(c -> c.name.equals(name)).findFirst().orElse(null); }
         String primaryKeyMode() { return primaryKeyCount == 1 ? "SINGLE" : primaryKeyCount > 1 ? "COMPOSITE" : "NONE"; }
-        boolean writable() { return primaryKeyCount == 1; }
+        boolean writable() { return !view && primaryKeyCount == 1; }
     }
 
     private static final class IndexBuilder {

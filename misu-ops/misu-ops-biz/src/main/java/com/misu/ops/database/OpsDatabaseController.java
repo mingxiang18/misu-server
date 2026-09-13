@@ -77,9 +77,10 @@ public class OpsDatabaseController {
 
     @DeleteMapping("/{database}/tables/{table}/rows/{primaryKey}")
     public AjaxResult delete(HttpServletRequest request, @PathVariable("database") String databaseName,
-                             @PathVariable("table") String table, @PathVariable("primaryKey") String primaryKey) {
+                             @PathVariable("table") String table, @PathVariable("primaryKey") String primaryKey,
+                             @RequestBody(required = false) DeleteRowRequest body) {
         authorization.requireCurrentAdmin();
-        database.delete(databaseName, table, primaryKey);
+        database.delete(databaseName, table, primaryKey, body);
         return AjaxResult.success();
     }
 

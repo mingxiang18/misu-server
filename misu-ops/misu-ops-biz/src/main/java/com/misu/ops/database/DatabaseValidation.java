@@ -135,7 +135,7 @@ final class DatabaseValidation {
                     || text.contains(";") || text.contains("--") || text.contains("/*") || text.contains("*/")) {
                 throw error(500, "OPS_DB_DDL_REJECTED", "默认值不受支持");
             }
-            return "'" + text.replace("'", "''") + "'";
+            return "'" + text.replace("\\", "\\\\").replace("'", "''") + "'";
         }
         throw error(500, "OPS_DB_DDL_REJECTED", "默认值不受支持");
     }

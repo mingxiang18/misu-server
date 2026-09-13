@@ -34,6 +34,7 @@ class DatabaseValidationTest {
     @Test
     void ddlDefaultsAllowOnlySafeLiterals() {
         assertEquals("'O''Reilly'", DatabaseValidation.defaultLiteral("O'Reilly", "VARCHAR(120)"));
+        assertEquals("'C:\\\\tmp''x'", DatabaseValidation.defaultLiteral("C:\\tmp'x", "VARCHAR(120)"));
         assertEquals("CURRENT_TIMESTAMP", DatabaseValidation.defaultLiteral("CURRENT_TIMESTAMP", "DATETIME"));
         assertThrows(ServiceException.class,
                 () -> DatabaseValidation.defaultLiteral("1); DROP TABLE users; --", "VARCHAR(120)"));

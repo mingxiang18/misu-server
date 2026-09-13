@@ -13,7 +13,10 @@ public final class DatabaseModels {
     }
 
     public record DatabaseTableDto(String name, String comment, Long rowCountEstimate,
-                                   String primaryKeyMode) {
+                                   String primaryKeyMode, String tableType) {
+        public DatabaseTableDto(String name, String comment, Long rowCountEstimate, String primaryKeyMode) {
+            this(name, comment, rowCountEstimate, primaryKeyMode, "TABLE");
+        }
     }
 
     public record ColumnDto(String name, int jdbcType, String typeName, boolean nullable,
@@ -30,7 +33,12 @@ public final class DatabaseModels {
     }
 
     public record TableMetadataDto(String database, String table, List<ColumnDto> columns,
-                                   List<IndexDto> indexes, boolean writable, String primaryKey) {
+                                   List<IndexDto> indexes, boolean writable, String primaryKey,
+                                   String tableType) {
+        public TableMetadataDto(String database, String table, List<ColumnDto> columns,
+                                List<IndexDto> indexes, boolean writable, String primaryKey) {
+            this(database, table, columns, indexes, writable, primaryKey, "TABLE");
+        }
     }
 
     public record PageDto<T>(List<T> items, int page, int pageSize, Long total, boolean hasNext) {
@@ -48,6 +56,10 @@ public final class DatabaseModels {
 
     @JsonIgnoreProperties(ignoreUnknown = false)
     public record UpdateRowRequest(Map<String, Object> values, String expectedRowVersion) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = false)
+    public record DeleteRowRequest(String expectedRowVersion) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = false)

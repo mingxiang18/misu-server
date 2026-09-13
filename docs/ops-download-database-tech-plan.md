@@ -36,20 +36,20 @@ GET /ops/api/database/{database}/tables/{table}/rows
 
 ```text
 DatabaseCatalogDto { name, displayName }
-DatabaseTableDto   { name, comment, rowCountEstimate, primaryKeyMode }
-TableMetadataDto   { database, table, columns[], indexes[], writable, primaryKey }
+DatabaseTableDto   { name, comment, rowCountEstimate, primaryKeyMode, tableType }
+TableMetadataDto   { database, table, columns[], indexes[], writable, primaryKey, tableType }
 ColumnDto          { name, jdbcType, typeName, nullable, defaultValuePresent, autoIncrement }
 IndexDto           { name, unique, columns[] }
 PageDto<T>         { items[], page, pageSize, total, hasNext }
 RowDto             { values: Map<String, JsonValue>, rowVersion: String? }
 ```
 
-`primaryKeyMode` 为 `SINGLE`、`COMPOSITE` 或 `NONE`。元数据 API 不返回数据库账号、连接 URL、密码或隐藏 schema。
+`primaryKeyMode` 为 `SINGLE`、`COMPOSITE` 或 `NONE`；元数据同时返回 `tableType`，VIEW 始终只读，即使驱动暴露了主键。元数据 API 不返回数据库账号、连接 URL、密码或隐藏 schema。
 
 `rows` 查询参数只有：
 
 ```text
-page        1..100000，默认 1
+page        1..1000，默认 1；超过上限拒绝，避免大 OFFSET 扫描
 pageSize    1..100，默认 50
 sort        一个已知字段，默认主键或 metadata 顺序第一列
 order       asc|desc，默认 asc
@@ -71,11 +71,12 @@ DELETE /ops/api/database/{database}/tables/{table}/rows/{primaryKey}
 ```text
 CreateRowRequest { values: Map<String, JsonValue> }
 UpdateRowRequest { values: Map<String, JsonValue>, expectedRowVersion: String? }
+DeleteRowRequest { expectedRowVersion: String? }
 ```
 
 `primaryKey` 先按 metadata 转成主键 JDBC 类型；路径值不能拼入 SQL。只允许 `SINGLE` 主键且主键列、可写列均通过当前 metadata 校验的表写入。`NONE` 和 `COMPOSITE` 表的 POST/PATCH/DELETE 统一返回 `OPS_DB_TABLE_READ_ONLY`。禁止修改自增主键；服务端忽略或拒绝未知列、生成列、只读列和超长值。
 
-更新/删除在事务内按主键执行，影响行数必须为 1；为 0 返回 `OPS_DB_CONFLICT`，大于 1 返回 `OPS_DB_METADATA_CHANGED` 并回滚。若表有受支持的单调版本列（优先 `updated_at` 或明确配置的版本列），`expectedRowVersion` 作为 WHERE 条件进行乐观并发校验；没有版本列时仍使用影响行数检查，并在 DTO 中不伪造版本值。
+更新/删除在事务内按主键执行，影响行数必须为 1；为 0 返回 `OPS_DB_CONFLICT`，大于 1 返回 `OPS_DB_METADATA_CHANGED` 并回滚。若表有受支持的单调版本列（优先 `updated_at` 或明确配置的版本列），`expectedRowVersion` 作为 WHERE 条件进行乐观并发校验；没有版本列时仍使用影响行数检查，并在 DTO 中不伪造版本值。DELETE 的 `expectedRowVersion` 放在 JSON 请求体中。
 
 ### 2.3 受限 DDL API
 
@@ -88,7 +89,7 @@ POST /ops/api/database/{database}/tables/{table}/columns
 
 ```text
 CreateTableRequest {
-  name, comment?, columns: [{name, type, nullable, defaultValue?, primaryKey?}]
+  name, comment?, columns: [{name, type, nullable, defaultValue?, primaryKey?, autoIncrement?}]
 }
 AddColumnRequest {
   name, type, nullable, defaultValue?, position?
@@ -97,7 +98,7 @@ AddColumnRequest {
 
 只允许新建表和添加字段。类型 allowlist 为 `TINYINT`、`INT`、`BIGINT`、`DECIMAL(p,s)`（p/s 有界）、`VARCHAR(n)`（n 有界）、`TEXT`、`DATE`、`DATETIME`、`TIMESTAMP`、`JSON`；长度、精度、默认表达式和 comment 长度均有限制。新表最多 64 列，最多一个主键且必须单列；添加字段不能创建第二个主键、外键、索引、触发器或权限语句。默认值只允许安全字面量或明确的 `CURRENT_TIMESTAMP`，不接受表达式、分号、注释或多语句。
 
-表名和字段名先与配置 schema allowlist、`DatabaseMetaData` 当前结果和 ASCII 标识符规则逐项比较，再以 MySQL 标识符引用函数生成 SQL；不能把用户字符串直接当作 SQL 片段。DDL 在单独事务中执行，执行前后重新读取 metadata；冲突、超时或校验失败回滚并返回错误码。
+表名和字段名先与配置 schema allowlist、`DatabaseMetaData` 当前结果和 ASCII 标识符规则逐项比较，再以 MySQL 标识符引用函数生成 SQL；不能把用户字符串直接当作 SQL 片段。MySQL 的 CREATE/ALTER DDL 会隐式提交，不能依赖事务回滚；每次 DDL 必须是单条原子语句，执行前做完整 metadata preflight，执行后重新读取并精确校验 metadata。执行失败时再次读取 metadata 以确认实际状态，再返回稳定错误码；不得声称 DDL 已回滚。
 
 ## 3. JDBC 实现和 SQL 安全
 
@@ -110,7 +111,7 @@ misu-ops 使用 `JdbcTemplate` 配合独立的小型 Hikari 数据源，不复�
 3. 固定 ASCII 标识符和保留字检查；
 4. MySQL identifier quote（反引号）生成。
 
-值全部使用 `?` 参数和 `PreparedStatement`。筛选、主键、默认字面量、更新值不得通过字符串拼接；LIKE 通配符、NULL 和空字符串分别按 DTO 语义绑定。每次执行使用只读连接事务或显式写事务，禁止多语句和任意 SQL 文本。
+值全部使用 `?` 参数和 `PreparedStatement`。筛选、主键、默认字面量、更新值不得通过字符串拼接；LIKE 通配符、NULL 和空字符串分别按 DTO 语义绑定。每次 DML 执行使用显式写事务，查询使用受限连接，禁止多语句和任意 SQL 文本。数据库 API 的写请求体在 HTTP 入口由 bounded wrapper 限制为 64 KiB；Content-Length 和 chunked 请求都受限。
 
 类型转换由 `JdbcTemplate` 的 `PreparedStatementSetter` 集中处理：整数使用有界 `Long/Integer`，小数使用 `BigDecimal`，日期时间使用 ISO-8601 到 JDBC 时间类型，布尔只接受 JSON boolean/规定的 0/1，二进制与超大文本首期拒绝或受限读取。结果统一转换为 JSON 安全值；驱动异常只映射为稳定错误码。
 
@@ -129,7 +130,7 @@ misu-ops 使用 `JdbcTemplate` 配合独立的小型 Hikari 数据源，不复�
 | 403 | `OPS_DB_TABLE_READ_ONLY` | 无主键或复合主键表写入 |
 | 429 | `OPS_DB_LIMIT` | 并发、连接、扫描或请求大小超过上限 |
 | 502 | `OPS_DB_UPSTREAM` | MySQL 不可用或驱动错误已安全映射 |
-| 500 | `OPS_DB_DDL_REJECTED` | DDL 未通过 allowlist 或事务失败 |
+| 500 | `OPS_DB_DDL_REJECTED` | DDL 未通过 allowlist 或执行失败 |
 
 响应 message 只给用户可行动的短说明；不能透传 MySQL 错误、SQL、值或连接信息。
 
@@ -152,10 +153,10 @@ Secret 通过 Pod `secretKeyRef` 注入，缺失时对应能力安全失败；�
 
 ## 7. 测试和发布变更
 
-后端单测覆盖 DTO 边界、ADMIN/会话、schema/table/column allowlist、保留字、参数绑定、类型转换、单列 PK 写入、无 PK/复合 PK 只读、影响行数冲突、版本冲突、DDL allowlist、事务回滚、连接/分页/筛选上限和审计脱敏。使用隔离 MySQL schema 做 JdbcTemplate 集成测试，断言日志没有值和 Secret。
+后端单测覆盖 DTO 边界、ADMIN/会话、schema/table/column allowlist、保留字、参数绑定、类型转换、单列 PK 写入、无 PK/复合 PK 只读、影响行数冲突、版本冲突、DDL allowlist、DDL 执行后的 metadata 校验、连接/分页/筛选上限和审计脱敏。使用隔离 MySQL schema 做 JdbcTemplate 集成测试，断言日志没有值和 Secret；由于 MySQL DDL 可能隐式提交，测试验证失败后重新读取 metadata，而不声称事务回滚。
 
 前端测试覆盖数据库/表切换、分页排序筛选、字段类型显示、只读提示、编辑/删除确认、新建表/添加字段错误反馈、429/409 映射；qBittorrent harness 覆盖固定路径、登录 Cookie 不泄露、CSRF、redirect、长轮询、Upgrade、logout 和撤权。
 
 Nginx/Gateway harness 覆盖未登录 401、非 ADMIN 403、未知 Host/路径拒绝、伪造身份头清洗、两个目标 Cookie Path、浏览器 Authorization 不到上游、数据库 API 固定路由和 qBittorrent 代理。发布前执行 `git diff --check`、后端测试、前端 build、YAML/NGINX 语法和离线 release harness。
 
-发布顺序为：先应用代码和 ConfigMap，再创建最小权限 Secret，确认连接/审计/回滚指标，最后由 ADMIN 在网站中验收专用 qBittorrent 任务和独立 MySQL 测试 schema。不得在验收中使用现有下载任务、NFS、生产表值或生产 DDL；失败时先撤销新增路由和 Secret 引用，再按备份恢复配置。
+发布顺序为：先应用代码和 ConfigMap，再创建最小权限 Secret，确认连接和审计指标，最后由 ADMIN 在网站中验收专用 qBittorrent 任务和独立 MySQL 测试 schema。不得在验收中使用现有下载任务、NFS、生产表值或生产 DDL；DDL 失败时重新读取 metadata 判断实际状态，再按备份恢复配置。
