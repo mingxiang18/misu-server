@@ -79,6 +79,49 @@ class OpsSessionStoreTest {
         assertEquals(HttpStatus.UNAUTHORIZED, exception.getCode());
     }
 
+    @Test
+    void ticketAndConsoleSessionLimitsAreGlobalAndPerUser() {
+        properties.setMaxConsoleTickets(4);
+        properties.setMaxConsoleTicketsPerUser(1);
+        properties.setMaxConsoleSessions(2);
+        properties.setMaxConsoleSessionsPerUser(1);
+        OpsSessionStore store = new OpsSessionStore(properties, verifier);
+
+        OpsSessionStore.Ticket adminTicket = store.issueTicket(admin, ConsoleTarget.NACOS);
+        assertThrows(ServiceException.class,
+                () -> store.issueTicket(admin, ConsoleTarget.HEADLAMP));
+        LoginUser otherAdmin = new LoginUser(8L, "other-admin", java.util.List.of("ADMIN"));
+        OpsSessionStore.Ticket otherTicket = store.issueTicket(otherAdmin, ConsoleTarget.HEADLAMP);
+        assertThrows(ServiceException.class,
+                () -> store.issueTicket(otherAdmin, ConsoleTarget.NACOS));
+
+        store.createConsoleSession(adminTicket);
+        store.createConsoleSession(otherTicket);
+        LoginUser thirdAdmin = new LoginUser(9L, "third-admin", java.util.List.of("ADMIN"));
+        OpsSessionStore.Ticket thirdTicket = store.issueTicket(thirdAdmin, ConsoleTarget.NACOS);
+        assertThrows(ServiceException.class, () -> store.createConsoleSession(thirdTicket));
+        store.issueTicket(new LoginUser(10L, "fourth-admin", java.util.List.of("ADMIN")), ConsoleTarget.NACOS);
+        assertThrows(ServiceException.class,
+                () -> store.issueTicket(new LoginUser(11L, "fifth-admin", java.util.List.of("ADMIN")),
+                        ConsoleTarget.NACOS));
+        assertEquals(2, store.activeConsoleSessionCount());
+    }
+
+    @Test
+    void expiredConsoleSessionIsReclaimedBeforeApplyingLimit() throws InterruptedException {
+        properties.setMaxConsoleSessions(1);
+        properties.setMaxConsoleSessionsPerUser(1);
+        OpsSessionStore store = new OpsSessionStore(properties, verifier);
+        store.createConsoleSession(store.issueTicket(admin, ConsoleTarget.NACOS));
+        properties.setSessionMaxSeconds(0);
+        Thread.sleep(2);
+
+        OpsSessionStore.ConsoleSession replacement = store.createConsoleSession(
+                store.issueTicket(admin, ConsoleTarget.NACOS));
+        properties.setSessionMaxSeconds(900);
+        assertSame(replacement, store.requireConsoleSession(replacement.id(), ConsoleTarget.NACOS.id()));
+    }
+
     private static final class TestVerifier implements CurrentAccountVerifier {
         private boolean revoked;
 

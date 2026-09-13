@@ -62,9 +62,11 @@ class ProxyAuthControllerTest {
         headlampRequest.setRemoteAddr("127.0.0.1");
         headlampRequest.addHeader("X-Ops-Proxy-Key", "test-secret");
         headlampRequest.addHeader("X-Ops-Target", "headlamp");
+        headlampRequest.addHeader("Authorization", "Bearer browser-main-token");
         headlampRequest.addHeader("Cookie", properties.getCookieName() + "=" + headlampSession.id());
-        assertEquals("admin", controller.authorizeProxy(headlampRequest)
-                .getHeaders().getFirst("X-Ops-User"));
+        var headlampResponse = controller.authorizeProxy(headlampRequest);
+        assertEquals("admin", headlampResponse.getHeaders().getFirst("X-Ops-User"));
+        assertNull(headlampResponse.getHeaders().getFirst("X-Ops-Upstream-Authorization"));
 
         MockHttpServletRequest wrongSecret = new MockHttpServletRequest();
         wrongSecret.setRemoteAddr("127.0.0.1");

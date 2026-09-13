@@ -45,11 +45,22 @@ public class OpsSessionStore {
     }
 
     public Ticket issueTicket(LoginUser currentUser, ConsoleTarget target) {
-        String token = randomToken();
-        Ticket ticket = new Ticket(token, target, currentUser.getUserId(), currentUser.getUserName(),
-                Instant.now().plusSeconds(properties.getTicketTtlSeconds()));
-        tickets.put(token, ticket);
-        return ticket;
+        synchronized (lifecycleLock) {
+            Instant now = Instant.now();
+            tickets.values().removeIf(ticket -> ticket.expiresAt().isBefore(now));
+            long userTickets = tickets.values().stream()
+                    .filter(ticket -> ticket.userId().equals(currentUser.getUserId()))
+                    .count();
+            if (tickets.size() >= max(properties.getMaxConsoleTickets())
+                    || userTickets >= max(properties.getMaxConsoleTicketsPerUser())) {
+                throw new ServiceException(HttpStatus.CONFLICT, "控制台票据数量已达上限");
+            }
+            String token = randomToken();
+            Ticket ticket = new Ticket(token, target, currentUser.getUserId(), currentUser.getUserName(),
+                    now.plusSeconds(properties.getTicketTtlSeconds()));
+            tickets.put(token, ticket);
+            return ticket;
+        }
     }
 
     public Ticket consumeTicket(String token) {
@@ -98,6 +109,20 @@ public class OpsSessionStore {
     }
 
     private ConsoleSession createConsoleSessionLocked(Ticket ticket) {
+        Instant now = Instant.now();
+        List<String> expiredSessionIds = consoleSessions.values().stream()
+                .filter(session -> expired(session, now))
+                .map(ConsoleSession::id)
+                .toList();
+        expiredSessionIds.forEach(id -> consoleSessions.remove(id));
+        expiredSessionIds.forEach(this::removeNacosAuth);
+        long userSessions = consoleSessions.values().stream()
+                .filter(session -> session.userId().equals(ticket.userId()))
+                .count();
+        if (consoleSessions.size() >= max(properties.getMaxConsoleSessions())
+                || userSessions >= max(properties.getMaxConsoleSessionsPerUser())) {
+            throw new ServiceException(HttpStatus.CONFLICT, "控制台会话数量已达上限");
+        }
         ConsoleSession session = new ConsoleSession(randomToken(), ticket.target(), ticket.userId(), ticket.userName());
         consoleSessions.put(session.id(), session);
         return session;
@@ -284,11 +309,18 @@ public class OpsSessionStore {
     }
 
     private boolean expired(ExpiringSession session) {
-        Instant now = Instant.now();
+        return expired(session, Instant.now());
+    }
+
+    private boolean expired(ExpiringSession session, Instant now) {
         return session.createdAt().plusSeconds(properties.getSessionMaxSeconds()).isBefore(now)
                 || (session instanceof SshSession ssh && !ssh.claimed()
                 && ssh.pendingExpiresAt().isBefore(now))
                 || session.lastAccess().plusSeconds(properties.getSessionIdleSeconds()).isBefore(now);
+    }
+
+    private int max(int configured) {
+        return Math.max(1, configured);
     }
 
     private int normalizeDimension(int value, int fallback) {

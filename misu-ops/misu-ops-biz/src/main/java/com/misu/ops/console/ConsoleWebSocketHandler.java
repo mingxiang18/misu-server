@@ -6,6 +6,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 import org.springframework.stereotype.Component;
+import com.misu.ops.config.OpsWebSocketLimitsConfig;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -30,7 +31,10 @@ public class ConsoleWebSocketHandler extends AbstractWebSocketHandler {
     }
 
     @Override
-    protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+    protected void handleTextMessage(WebSocketSession session, TextMessage message) throws IOException {
+        if (message.getPayloadLength() * 2L > OpsWebSocketLimitsConfig.MAX_TEXT_MESSAGE_BYTES) {
+            throw new IOException("console message too large");
+        }
         ConsoleWebSocketBridgeService.Bridge bridge = bridge(session);
         if (bridge != null) {
             bridge.forwardText(message.getPayload());
@@ -38,10 +42,13 @@ public class ConsoleWebSocketHandler extends AbstractWebSocketHandler {
     }
 
     @Override
-    protected void handleBinaryMessage(WebSocketSession session, BinaryMessage message) {
+    protected void handleBinaryMessage(WebSocketSession session, BinaryMessage message) throws IOException {
+        ByteBuffer payload = message.getPayload();
+        if (payload.remaining() > OpsWebSocketLimitsConfig.MAX_BINARY_MESSAGE_BYTES) {
+            throw new IOException("console message too large");
+        }
         ConsoleWebSocketBridgeService.Bridge bridge = bridge(session);
         if (bridge != null) {
-            ByteBuffer payload = message.getPayload();
             byte[] bytes = new byte[payload.remaining()];
             payload.get(bytes);
             bridge.forwardBinary(bytes);

@@ -126,6 +126,11 @@ rg -q 'https://server\.misu\.chat/ops/headlamp/' "${TMP_DIR}/normal-misu-ops.yam
 rg -q 'location \^~ /nacos/' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
 rg -q 'location \^~ /ops/headlamp/' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
 rg -q 'proxy_read_timeout 3600s' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
+rg -q 'log_format main .*\$request_method \$uri' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
+if rg -q 'log_format main .*\"\$request\"' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"; then
+  echo 'main nginx access log must not include query-bearing $request' >&2
+  exit 1
+fi
 rg -q 'location \^~ /ops/ws/ssh/' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
 rg -q 'proxy_set_header Host server\.misu\.chat' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml"
 rg -q 'server_name api\.misu\.chat server\.misu\.chat' "${TMP_DIR}/normal-nginx.yaml"

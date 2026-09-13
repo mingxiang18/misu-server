@@ -21,6 +21,10 @@ ops:
   cookie-secure: ${OPS_COOKIE_SECURE:true}
   ssh-handshake-ttl-seconds: ${OPS_SSH_HANDSHAKE_TTL_SECONDS:30}
   max-ssh-sessions: ${OPS_MAX_SSH_SESSIONS:4}
+  max-console-tickets: ${OPS_MAX_CONSOLE_TICKETS:128}
+  max-console-tickets-per-user: ${OPS_MAX_CONSOLE_TICKETS_PER_USER:8}
+  max-console-sessions: ${OPS_MAX_CONSOLE_SESSIONS:32}
+  max-console-sessions-per-user: ${OPS_MAX_CONSOLE_SESSIONS_PER_USER:4}
   max-console-web-sockets: ${OPS_MAX_CONSOLE_WEBSOCKETS:8}
   console-web-socket-connect-timeout-millis: ${OPS_CONSOLE_WS_CONNECT_TIMEOUT_MILLIS:5000}
   main-cookie-names: ${OPS_MAIN_COOKIE_NAMES:User-Token,User-Refresh-Token,User-Info}

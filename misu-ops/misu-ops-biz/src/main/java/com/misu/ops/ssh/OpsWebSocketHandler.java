@@ -3,6 +3,7 @@ package com.misu.ops.ssh;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.misu.ops.session.OpsSessionStore;
+import com.misu.ops.config.OpsWebSocketLimitsConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -43,7 +44,7 @@ public class OpsWebSocketHandler extends AbstractWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession webSocket, TextMessage message) throws Exception {
         String text = message.getPayload();
-        if (text.length() > 1_000_000) {
+        if (text.length() * 2L > OpsWebSocketLimitsConfig.MAX_TEXT_MESSAGE_BYTES) {
             throw new IOException("terminal input too large");
         }
         if (!text.startsWith("{")) {
@@ -68,6 +69,9 @@ public class OpsWebSocketHandler extends AbstractWebSocketHandler {
     @Override
     protected void handleBinaryMessage(WebSocketSession webSocket, BinaryMessage message) throws Exception {
         java.nio.ByteBuffer payload = message.getPayload();
+        if (payload.remaining() > OpsWebSocketLimitsConfig.MAX_BINARY_MESSAGE_BYTES) {
+            throw new IOException("terminal input too large");
+        }
         byte[] data = new byte[payload.remaining()];
         payload.get(data);
         ssh.write(sessionId(webSocket), data);

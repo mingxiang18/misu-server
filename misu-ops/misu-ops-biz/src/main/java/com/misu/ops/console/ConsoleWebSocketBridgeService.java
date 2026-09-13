@@ -4,6 +4,7 @@ import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
 import com.misu.ops.controller.CookieSupport;
+import com.misu.ops.config.OpsWebSocketLimitsConfig;
 import com.misu.ops.session.ConsoleTarget;
 import com.misu.ops.session.OpsSessionStore;
 import lombok.extern.slf4j.Slf4j;
@@ -54,8 +55,8 @@ public class ConsoleWebSocketBridgeService {
     private static final int MAX_ORIGINAL_URI_LENGTH = 8192;
     private static final int MAX_PENDING_MESSAGES = 64;
     private static final int MAX_PENDING_BYTES = 8_000_000;
-    private static final int MAX_TEXT_MESSAGE_BYTES = 1_000_000;
-    private static final int MAX_BINARY_MESSAGE_BYTES = 8_000_000;
+    private static final int MAX_TEXT_MESSAGE_BYTES = OpsWebSocketLimitsConfig.MAX_TEXT_MESSAGE_BYTES;
+    private static final int MAX_BINARY_MESSAGE_BYTES = OpsWebSocketLimitsConfig.MAX_BINARY_MESSAGE_BYTES;
     private static final int BAD_GATEWAY = 502;
 
     private final OpsProperties properties;
@@ -187,10 +188,10 @@ public class ConsoleWebSocketBridgeService {
         if (safeHeaderValue(cookie)) {
             builder.header(HttpHeaders.COOKIE, cookie);
         }
+        // Never forward browser Authorization to either console. Nacos uses
+        // only its server-side session token; Headlamp uses in-cluster auth.
         String authorization = target == ConsoleTarget.NACOS && nacosAuth != null
-                ? nacosAuth.authorization(sessionId) : headers.getFirst(UPSTREAM_AUTH_HEADER);
-        authorization = CookieSupport.filterUpstreamAuthorization(authorization, browserCookies,
-                blockedCookieNames());
+                ? nacosAuth.authorization(sessionId) : null;
         if (safeHeaderValue(authorization)) {
             builder.header(HttpHeaders.AUTHORIZATION, authorization);
         }
@@ -584,6 +585,9 @@ public class ConsoleWebSocketBridgeService {
             }
             WebSocketSession downstreamSession = downstream;
             closeWebSocket(downstreamSession, status);
+            if (nacosAuth != null) {
+                nacosAuth.removeSession(session.id());
+            }
             log.info("控制台 WS 结束: userId={} target={} result={}",
                     session.userId(), target.id(), status.getCode());
         }

@@ -24,9 +24,13 @@ import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Exercises the actual Spring MVC/Tomcat WebSocket handshake and close path. */
@@ -137,6 +141,38 @@ class ConsoleWebSocketTomcatIntegrationTest {
         }
     }
 
+    @Test
+    void duplicateWebSocketKeyIsRejectedWhileTheFirstHandshakeIsPending() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try (ControlledWebSocketServer upstream = new ControlledWebSocketServer(true);
+             NacosLoginServer auth = new NacosLoginServer()) {
+            properties.setSessionIdleSeconds(900);
+            properties.setRoleCheckSeconds(60);
+            properties.setNacosUrl("http://localhost:" + port + "/nacos/");
+            properties.setNacosUpstreamUrl("http://127.0.0.1:" + upstream.port() + "/nacos/");
+            properties.setNacosAuthUrl("http://127.0.0.1:" + auth.port() + "/nacos/");
+            OpsSessionStore.Ticket ticket = sessions.issueTicket(
+                    new LoginUser(7L, "admin", List.of("ADMIN")), ConsoleTarget.NACOS);
+            OpsSessionStore.ConsoleSession session = sessions.createConsoleSession(ticket);
+            String key = Base64.getEncoder().encodeToString("duplicate-key-16".getBytes(StandardCharsets.US_ASCII));
+
+            var first = executor.submit(() -> RawWebSocketClient.connect(
+                    port, session.id(), properties.getCookieName(), "nacos", "/nacos/socket", key));
+            assertTrue(upstream.requestReceived.get(2, TimeUnit.SECONDS));
+
+            IOException duplicate = assertThrows(IOException.class, () -> RawWebSocketClient.connect(
+                    port, session.id(), properties.getCookieName(), "nacos", "/nacos/socket", key));
+            assertTrue(duplicate.getMessage().contains("409"), duplicate.getMessage());
+
+            upstream.releaseHandshake.countDown();
+            try (RawWebSocketClient client = first.get(3, TimeUnit.SECONDS)) {
+                assertEquals("console.v1", client.protocol);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     private TestConnection connect(ControlledWebSocketServer upstream, NacosLoginServer auth) throws Exception {
         properties.setSessionIdleSeconds(900);
         properties.setRoleCheckSeconds(60);
@@ -180,9 +216,14 @@ class ConsoleWebSocketTomcatIntegrationTest {
 
         static RawWebSocketClient connect(int port, String sessionId, String cookieName,
                                           String target, String originalUri) throws Exception {
+            String key = Base64.getEncoder().encodeToString("tomcat-test-key!".getBytes(StandardCharsets.US_ASCII));
+            return connect(port, sessionId, cookieName, target, originalUri, key);
+        }
+
+        static RawWebSocketClient connect(int port, String sessionId, String cookieName,
+                                          String target, String originalUri, String key) throws Exception {
             Socket socket = new Socket("localhost", port);
             socket.setSoTimeout(5000);
-            String key = Base64.getEncoder().encodeToString("tomcat-test-key!".getBytes(StandardCharsets.US_ASCII));
             String request = "GET /ops/ws/console/" + target + " HTTP/1.1\r\n"
                     + "Host: localhost:" + port + "\r\n"
                     + "Upgrade: websocket\r\nConnection: Upgrade\r\n"
@@ -262,7 +303,9 @@ class ConsoleWebSocketTomcatIntegrationTest {
         private final ServerSocket server;
         private final Thread thread;
         private final CompletableFuture<Boolean> handshake = new CompletableFuture<>();
+        private final CompletableFuture<Boolean> requestReceived = new CompletableFuture<>();
         private final CompletableFuture<Boolean> closed = new CompletableFuture<>();
+        private final CountDownLatch releaseHandshake;
         private volatile String requestLine;
         private volatile String requestedProtocol;
         private volatile String authorization;
@@ -273,7 +316,12 @@ class ConsoleWebSocketTomcatIntegrationTest {
         private volatile String forwardedIdToken;
 
         private ControlledWebSocketServer() throws IOException {
+            this(false);
+        }
+
+        private ControlledWebSocketServer(boolean delayedHandshake) throws IOException {
             server = new ServerSocket(0);
+            releaseHandshake = delayedHandshake ? new CountDownLatch(1) : null;
             thread = new Thread(this::serve, "ops-tomcat-upstream-test");
             thread.start();
         }
@@ -294,6 +342,10 @@ class ConsoleWebSocketTomcatIntegrationTest {
                 forwardedGroup = header(request, "X-Forwarded-Group");
                 forwardedEmail = header(request, "X-Forwarded-Email");
                 forwardedIdToken = header(request, "X-Forwarded-Id-Token");
+                requestReceived.complete(true);
+                if (releaseHandshake != null) {
+                    releaseHandshake.await(3, TimeUnit.SECONDS);
+                }
                 String accept = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-1")
                         .digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
                                 .getBytes(StandardCharsets.US_ASCII)));

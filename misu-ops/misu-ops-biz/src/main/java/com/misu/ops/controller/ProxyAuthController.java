@@ -77,10 +77,11 @@ public class ProxyAuthController {
         if (cookie != null) {
             responseHeaders.set(ConsoleWebSocketBridgeService.UPSTREAM_COOKIE_HEADER, cookie);
         }
+        // Browser Authorization is never an upstream credential. Nacos may use
+        // only its server-side session token; Headlamp uses its in-cluster
+        // ServiceAccount and the verified X-Forwarded-User identity.
         String authorization = consoleTarget == ConsoleTarget.NACOS && nacosAuth != null
-                ? nacosAuth.authorization(session.id())
-                : CookieSupport.filterUpstreamAuthorization(request.getHeader(HttpHeaders.AUTHORIZATION),
-                cookieHeader, blockedCookieNames());
+                ? nacosAuth.authorization(session.id()) : null;
         if (authorization != null) {
             responseHeaders.set(ConsoleWebSocketBridgeService.UPSTREAM_AUTH_HEADER, authorization);
         }

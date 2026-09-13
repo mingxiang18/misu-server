@@ -36,6 +36,10 @@ public class OpsProperties {
     private long roleCheckSeconds = 30;
     private long sshHandshakeTtlSeconds = 30;
     private int maxSshSessions = 4;
+    private int maxConsoleTickets = 128;
+    private int maxConsoleTicketsPerUser = 8;
+    private int maxConsoleSessions = 32;
+    private int maxConsoleSessionsPerUser = 4;
     private int maxConsoleWebSockets = 8;
     private long consoleWebSocketConnectTimeoutMillis = 5000;
     private long accountConnectTimeoutMillis = 3000;

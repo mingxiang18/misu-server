@@ -28,4 +28,16 @@ class NacosUpstreamAuthServiceTest {
         assertThrows(ServiceException.class, () -> service.authorization("ops-session"));
         assertEquals(0, service.cachedSessionCount());
     }
+
+    @Test
+    void configuredCredentialsRejectNonLoopbackHttp() {
+        OpsProperties properties = new OpsProperties();
+        properties.setNacosUsername("nacos-ops");
+        properties.setNacosPassword("secret");
+        properties.setNacosUpstreamUrl("http://nacos.misu-server.svc.cluster.local:8848/nacos/");
+        NacosUpstreamAuthService service = new NacosUpstreamAuthService(properties);
+
+        assertThrows(ServiceException.class, () -> service.authorization("ops-session"));
+        assertEquals(0, service.cachedSessionCount());
+    }
 }

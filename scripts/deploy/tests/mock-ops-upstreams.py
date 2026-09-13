@@ -112,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.headers.get("Cookie", ""),
                 ))
                 return
-        self.append("%s_UPSTREAM path=%s host=%s cookie=%s auth=%s user=%s groups=%s group=%s email=%s id_token=%s" % (
+        self.append("%s_UPSTREAM path=%s host=%s cookie=%s auth=%s user=%s groups=%s group=%s email=%s id_token=%s ops_user=%s ops_target=%s ops_key=%s original_uri=%s original_host=%s" % (
             role.upper(),
             self.path,
             self.headers.get("Host", ""),
@@ -123,8 +123,13 @@ class Handler(BaseHTTPRequestHandler):
             self.headers.get("X-Forwarded-Group", ""),
             self.headers.get("X-Forwarded-Email", ""),
             self.headers.get("X-Forwarded-Id-Token", ""),
+            self.headers.get("X-Ops-User", ""),
+            self.headers.get("X-Ops-Console-Target", ""),
+            self.headers.get("X-Ops-Proxy-Key", ""),
+            self.headers.get("X-Original-URI", ""),
+            self.headers.get("X-Original-Host", ""),
         ))
-        self.write(200, "%s_UPSTREAM path=%s cookie=%s auth=%s user=%s groups=%s group=%s email=%s id_token=%s" % (
+        self.write(200, "%s_UPSTREAM path=%s cookie=%s auth=%s user=%s groups=%s group=%s email=%s id_token=%s ops_user=%s ops_target=%s ops_key=%s original_uri=%s original_host=%s" % (
             role.upper(),
             self.path,
             self.headers.get("Cookie", ""),
@@ -134,6 +139,11 @@ class Handler(BaseHTTPRequestHandler):
             self.headers.get("X-Forwarded-Group", ""),
             self.headers.get("X-Forwarded-Email", ""),
             self.headers.get("X-Forwarded-Id-Token", ""),
+            self.headers.get("X-Ops-User", ""),
+            self.headers.get("X-Ops-Console-Target", ""),
+            self.headers.get("X-Ops-Proxy-Key", ""),
+            self.headers.get("X-Original-URI", ""),
+            self.headers.get("X-Original-Host", ""),
         ))
 
     def do_POST(self):

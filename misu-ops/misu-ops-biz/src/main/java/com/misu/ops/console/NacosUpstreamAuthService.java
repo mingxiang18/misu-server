@@ -54,6 +54,11 @@ public class NacosUpstreamAuthService {
             tokens.clear();
             throw new ServiceException(HttpStatus.ERROR, "Nacos 上游认证配置不完整");
         }
+        URI authUri = loginUri();
+        if (!"https".equalsIgnoreCase(authUri.getScheme()) && !isLoopback(authUri.getHost())) {
+            tokens.clear();
+            throw new ServiceException(HttpStatus.ERROR, "Nacos 上游认证必须使用 HTTPS");
+        }
         CachedToken token = tokens.compute(sessionId, (key, current) ->
                 current != null && current.expiresAt().isAfter(Instant.now())
                         ? current : login());
@@ -120,6 +125,11 @@ public class NacosUpstreamAuthService {
         } catch (IllegalArgumentException ex) {
             throw new ServiceException(HttpStatus.ERROR, "Nacos 上游地址无效");
         }
+    }
+
+    private boolean isLoopback(String host) {
+        return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)
+                || "::1".equals(host) || "[::1]".equals(host);
     }
 
     private record CachedToken(String accessToken, Instant expiresAt) {

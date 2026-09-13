@@ -79,8 +79,12 @@ public class ConsoleWebSocketConfig implements WebSocketConfigurer {
     }
 
     private final class ConsoleHandshakeInterceptor implements HandshakeInterceptor {
-        private final Map<String, ConsoleWebSocketBridgeService.Bridge> pending = new ConcurrentHashMap<>();
+        private final Map<String, PendingHandshake> pending = new ConcurrentHashMap<>();
         private final java.util.Set<String> upgraded = ConcurrentHashMap.newKeySet();
+
+        private final class PendingHandshake {
+            private volatile ConsoleWebSocketBridgeService.Bridge bridge;
+        }
 
         private void markUpgraded(String key) {
             if (key != null) {
@@ -104,24 +108,42 @@ public class ConsoleWebSocketConfig implements WebSocketConfigurer {
                 String sessionId = CookieSupport.read(request.getHeaders().getFirst(HttpHeaders.COOKIE),
                         properties.getCookieName());
                 OpsSessionStore.ConsoleSession consoleSession = sessions.requireConsoleSession(sessionId, target.id());
-                ConsoleWebSocketBridgeService.PreparedBridge prepared = bridges.prepare(
-                        request.getHeaders(), target, consoleSession);
-                attributes.put(BRIDGE_ATTRIBUTE, prepared.bridge());
-                if (prepared.selectedProtocol() != null && !prepared.selectedProtocol().isBlank()) {
-                    attributes.put(PROTOCOL_ATTRIBUTE, prepared.selectedProtocol());
-                }
                 String key = request.getHeaders().getFirst(KEY_HEADER);
-                if (key != null) {
-                    pending.put(key, prepared.bridge());
+                if (key == null || key.isBlank()) {
+                    throw new ServiceException(HttpStatus.BAD_REQUEST, "控制台 WS 握手缺少 Key");
+                }
+                PendingHandshake pendingHandshake = new PendingHandshake();
+                if (pending.putIfAbsent(key, pendingHandshake) != null) {
+                    throw new ServiceException(HttpStatus.CONFLICT, "控制台 WS 握手重复");
+                }
+                ConsoleWebSocketBridgeService.PreparedBridge prepared = null;
+                try {
+                    prepared = bridges.prepare(request.getHeaders(), target, consoleSession);
+                    pendingHandshake.bridge = prepared.bridge();
+                    attributes.put(BRIDGE_ATTRIBUTE, prepared.bridge());
+                    if (prepared.selectedProtocol() != null && !prepared.selectedProtocol().isBlank()) {
+                        attributes.put(PROTOCOL_ATTRIBUTE, prepared.selectedProtocol());
+                    }
                     // The upstream may close between prepare() and the
                     // container's handshake callback. Do not leave a closed
                     // bridge waiting for an attach that can never arrive.
-                    if (prepared.bridge().isClosed() && pending.remove(key, prepared.bridge())) {
-                        prepared.bridge().close(org.springframework.web.socket.CloseStatus.SERVER_ERROR);
+                    if (prepared.bridge().isClosed()) {
                         throw new ServiceException(HttpStatus.ERROR, "控制台 WS 上游已关闭");
                     }
+                    return true;
+                } catch (ServiceException ex) {
+                    pending.remove(key, pendingHandshake);
+                    if (prepared != null) {
+                        prepared.bridge().close(org.springframework.web.socket.CloseStatus.SERVER_ERROR);
+                    }
+                    throw ex;
+                } catch (RuntimeException ex) {
+                    pending.remove(key, pendingHandshake);
+                    if (prepared != null) {
+                        prepared.bridge().close(org.springframework.web.socket.CloseStatus.SERVER_ERROR);
+                    }
+                    throw ex;
                 }
-                return true;
             } catch (ServiceException ex) {
                 response.setStatusCode(HttpStatusCode.valueOf(ex.getCode()));
                 return false;
@@ -132,7 +154,9 @@ public class ConsoleWebSocketConfig implements WebSocketConfigurer {
         public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                    WebSocketHandler wsHandler, Exception exception) {
             String key = request.getHeaders().getFirst(KEY_HEADER);
-            ConsoleWebSocketBridgeService.Bridge bridge = key == null ? null : pending.remove(key);
+            PendingHandshake pendingHandshake = key == null ? null : pending.remove(key);
+            ConsoleWebSocketBridgeService.Bridge bridge = pendingHandshake == null
+                    ? null : pendingHandshake.bridge;
             boolean handshakeSucceeded = key != null && upgraded.remove(key);
             if ((exception != null || !handshakeSucceeded) && bridge != null) {
                 bridge.close(org.springframework.web.socket.CloseStatus.SERVER_ERROR);

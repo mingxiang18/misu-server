@@ -120,9 +120,9 @@ public final class CookieSupport {
     }
 
     /**
-     * The browser may send the site's JWT in Authorization as well as in the
-     * User-Token cookie. Preserve an Authorization header only when it is not
-     * that same site token; upstream console credentials remain usable.
+     * Browser Bearer credentials are never safe to forward to a console. The
+     * server-side Nacos auth path does not use this helper, so non-Bearer
+     * credentials remain available for explicitly trusted future callers.
      */
     public static String filterUpstreamAuthorization(String authorization, String cookieHeader) {
         return filterUpstreamAuthorization(authorization, cookieHeader, DEFAULT_MAIN_COOKIE_NAMES);
@@ -135,42 +135,8 @@ public final class CookieSupport {
             return null;
         }
         if (authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
-            String bearer = authorization.substring(7).trim();
-            Set<String> names = new HashSet<>(DEFAULT_MAIN_COOKIE_NAMES);
-            if (mainCookieNames != null) {
-                for (String name : mainCookieNames) {
-                    if (name != null && !name.isBlank()) {
-                        names.add(name);
-                    }
-                }
-            }
-            if (containsCookieValue(cookieHeader, names, bearer)) {
-                return null;
-            }
+            return null;
         }
         return authorization.trim();
-    }
-
-    /** Match every occurrence: duplicate host/domain cookies must not bypass filtering. */
-    private static boolean containsCookieValue(String header, Set<String> names, String expectedValue) {
-        if (header == null || expectedValue == null) {
-            return false;
-        }
-        Set<String> normalizedNames = new HashSet<>();
-        for (String name : names) {
-            normalizedNames.add(name.toLowerCase(Locale.ROOT));
-        }
-        for (String part : header.split(";")) {
-            int separator = part.indexOf('=');
-            if (separator <= 0) {
-                continue;
-            }
-            String name = part.substring(0, separator).trim().toLowerCase(Locale.ROOT);
-            String value = part.substring(separator + 1).trim();
-            if (normalizedNames.contains(name) && expectedValue.equals(value)) {
-                return true;
-            }
-        }
-        return false;
     }
 }

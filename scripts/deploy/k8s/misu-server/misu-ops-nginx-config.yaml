@@ -124,6 +124,12 @@ data:
           proxy_set_header X-Original-Upgrade $http_upgrade;
           proxy_set_header X-Ops-Target $ops_console_target;
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
           # The Java loopback trust check must see the sidecar peer, never an
           # edge-provided client address forwarded into this subrequest.
           proxy_set_header Forwarded "";
@@ -150,6 +156,18 @@ data:
           proxy_set_header X-Forwarded-Port "";
           proxy_set_header X-Ops-Target nacos;
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
           proxy_set_header Cookie "";
           proxy_set_header Authorization "";
           # Retire the legacy root-path cookie before the target-scoped cookie
@@ -171,6 +189,18 @@ data:
           proxy_set_header X-Forwarded-Port "";
           proxy_set_header X-Ops-Target headlamp;
           proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
           proxy_set_header Cookie "";
           proxy_set_header Authorization "";
           add_header Set-Cookie "MISU_OPS_SESSION=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None" always;
@@ -210,6 +240,20 @@ data:
           proxy_set_header X-Forwarded-Group "";
           proxy_set_header X-Forwarded-Email "";
           proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
           proxy_hide_header Set-Cookie;
           proxy_hide_header Authorization;
           proxy_hide_header X-Frame-Options;
@@ -241,6 +285,7 @@ data:
           proxy_set_header X-Forwarded-Group "";
           proxy_set_header X-Forwarded-Email "";
           proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
           proxy_set_header X-Ops-User "";
           proxy_set_header X-Ops-Console-Target "";
           proxy_set_header X-Ops-Original-URI "";
@@ -248,6 +293,12 @@ data:
           proxy_set_header X-Ops-Proxy-Key "";
           proxy_set_header X-Ops-Upstream-Cookie "";
           proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
           proxy_hide_header Set-Cookie;
           proxy_hide_header Authorization;
           proxy_hide_header X-Frame-Options;
@@ -283,6 +334,7 @@ data:
           proxy_set_header Cookie $http_cookie;
           proxy_set_header Authorization "";
           proxy_set_header X-Ops-User $ops_user;
+          proxy_set_header X-Ops-Target "";
           proxy_set_header X-Ops-Console-Target $ops_console_target;
           proxy_set_header X-Ops-Original-URI $ops_original_uri;
           proxy_set_header X-Ops-Original-Host $host;
@@ -314,9 +366,21 @@ data:
           proxy_set_header X-Forwarded-Proto https;
           proxy_set_header X-Real-IP $remote_addr;
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          proxy_set_header X-Original-Upgrade $http_upgrade;
           proxy_set_header Upgrade $http_upgrade;
           proxy_set_header Connection $connection_upgrade;
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
           proxy_read_timeout 3600s;
           proxy_send_timeout 3600s;
           proxy_buffering off;
@@ -332,6 +396,19 @@ data:
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
           proxy_set_header Authorization $http_authorization;
           proxy_set_header Cookie "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
         }
 
       }

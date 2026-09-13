@@ -39,13 +39,14 @@ class CookieSupportTest {
     void stripsAuthorizationWhenItMatchesAnyConfiguredMainToken() {
         assertNull(CookieSupport.filterUpstreamAuthorization("Bearer custom-token",
                 "X-Main=custom-token", List.of("X-Main")));
-        assertEquals("Bearer upstream-token", CookieSupport.filterUpstreamAuthorization(
+        assertNull(CookieSupport.filterUpstreamAuthorization(
                 "Bearer upstream-token", "X-Main=custom-token", List.of("X-Main")));
     }
 
     @Test
-    void stripsAuthorizationWhenOneOfConflictingDuplicateTokensMatches() {
-        assertNull(CookieSupport.filterUpstreamAuthorization("Bearer custom-token",
-                "X-Main=other-token; X-Main=custom-token", List.of("X-Main")));
+    void stripsBearerAuthorizationWhenCookieIsMissingOrInconsistent() {
+        assertNull(CookieSupport.filterUpstreamAuthorization("Bearer browser-token", null));
+        assertNull(CookieSupport.filterUpstreamAuthorization("Bearer browser-token",
+                "User-Token=different-token", List.of("User-Token")));
     }
 }
