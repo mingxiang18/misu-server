@@ -42,7 +42,8 @@ class ConsoleWebSocketBridgeServiceTest {
         OpsSessionStore.Ticket ticket = sessions.issueTicket(
                 new LoginUser(1L, "admin", java.util.List.of("ADMIN")), ConsoleTarget.NACOS);
         OpsSessionStore.ConsoleSession session = sessions.createConsoleSession(ticket);
-        ConsoleWebSocketBridgeService service = new ConsoleWebSocketBridgeService(properties, sessions);
+        ConsoleWebSocketBridgeService service = new ConsoleWebSocketBridgeService(properties, sessions,
+                new NacosUpstreamAuthService(properties));
 
         HttpHeaders headers = new HttpHeaders();
         headers.set(ConsoleWebSocketBridgeService.ORIGINAL_URI_HEADER, "/nacos/v1/ns?serviceName=demo%2Fx");

@@ -257,7 +257,9 @@ public class ConsoleWebSocketBridgeService {
     /** Construct from raw request components so encoded paths are not escaped twice. */
     private URI upstreamUri(ConsoleTarget target, String originalUri) {
         try {
-            URI base = URI.create(target.upstreamUrl(properties));
+            URI base = target == ConsoleTarget.NACOS
+                    ? validatedNacosUpstreamUri()
+                    : URI.create(target.upstreamUrl(properties));
             if (!("http".equalsIgnoreCase(base.getScheme()) || "https".equalsIgnoreCase(base.getScheme()))
                     || base.getHost() == null || base.getUserInfo() != null
                     || base.getQuery() != null || base.getFragment() != null) {
@@ -281,6 +283,13 @@ public class ConsoleWebSocketBridgeService {
         } catch (IllegalArgumentException ex) {
             throw new ServiceException(HttpStatus.ERROR, "控制台 WS 上游地址无效");
         }
+    }
+
+    private URI validatedNacosUpstreamUri() {
+        if (nacosAuth == null) {
+            throw new IllegalArgumentException("Nacos auth service unavailable");
+        }
+        return nacosAuth.validatedUpstreamUri();
     }
 
     private String originOf(String configuredUrl) {
