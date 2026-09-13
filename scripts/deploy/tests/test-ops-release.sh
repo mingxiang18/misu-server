@@ -88,9 +88,8 @@ rg -q 'name: misu-ops-nacos-auth' "${TMP_DIR}/normal-misu-ops.yaml"
 rg -q 'key: username' "${TMP_DIR}/normal-misu-ops.yaml"
 rg -q 'key: password' "${TMP_DIR}/normal-misu-ops.yaml"
 rg -q 'name: misu-ops-qbittorrent' "${TMP_DIR}/normal-misu-ops.yaml"
-rg -q 'key: url' "${TMP_DIR}/normal-misu-ops.yaml"
-rg -q 'key: username' "${TMP_DIR}/normal-misu-ops.yaml"
-rg -q 'key: password' "${TMP_DIR}/normal-misu-ops.yaml"
+# The scoped YAML assertion below requires exactly username/password for the
+# qBittorrent Secret and rejects any URL override in the deployment env.
 ruby - "${TMP_DIR}/normal-misu-ops.yaml" <<'RB'
 require 'yaml'
 deployment = YAML.load_stream(File.read(ARGV.fetch(0))).first
