@@ -180,6 +180,8 @@ class Handler(BaseHTTPRequestHandler):
             forwarded = ",".join(self.headers.get(header, "") for header in
                                   ("Forwarded", "X-Forwarded-For", "X-Real-IP", "X-Forwarded-Port"))
             self.append("EXCHANGE headers=%s" % forwarded)
+            self.append("EXCHANGE_HOST host=%s target=%s" % (
+                self.headers.get("Host", ""), self.headers.get("X-Ops-Target", "")))
             if any(self.headers.get(header, "") for header in
                    ("Forwarded", "X-Forwarded-For", "X-Real-IP", "X-Forwarded-Port")):
                 self.write(403, "proxy-remote-address-rewritten")

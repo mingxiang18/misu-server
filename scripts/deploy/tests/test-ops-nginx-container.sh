@@ -221,6 +221,13 @@ tr -d '\r' < "${TMP_DIR}/qb-exchange-headers" | rg -qi '^Location: /ops/qbittorr
 rg -qi '^Set-Cookie: MISU_OPS_SESSION=qbittorrent-session; Path=/ops/qbittorrent/;' "${TMP_DIR}/qb-exchange-headers"
 qb_session="$(tr -d '\r' < "${TMP_DIR}/qb-exchange-headers" | rg -i '^Set-Cookie: MISU_OPS_SESSION=' | sed -E 's/^Set-Cookie: MISU_OPS_SESSION=([^;]+).*/\1/' | head -1)"
 [[ "${qb_session}" == "qbittorrent-session" ]]
+code=$(curl -sS -D "${TMP_DIR}/main-qb-exchange-headers" -o "${TMP_DIR}/main-qb-exchange" -w '%{http_code}' -X POST -H 'Host: server.misu.chat' \
+  -H 'Origin: https://server.misu.chat' -H 'Forwarded: for=203.0.113.9' \
+  -H 'X-Forwarded-For: 203.0.113.9' -H 'X-Real-IP: 203.0.113.9' \
+  -d 'ticket=valid' "http://127.0.0.1:${MAIN_NGINX_PORT}/ops/qbittorrent/_ops/exchange")
+[[ "${code}" == 303 ]]
+tr -d '\r' < "${TMP_DIR}/main-qb-exchange-headers" | rg -qi '^Location: /ops/qbittorrent/$'
+rg -q 'EXCHANGE_HOST host=server\.misu\.chat target=qbittorrent' "${MOCK_LOG}"
 code=$(curl -sS -o "${TMP_DIR}/qbittorrent-after-exchange" -w '%{http_code}' -H 'Host: api.misu.chat' \
   -H "Cookie: MISU_OPS_SESSION=${qb_session}" \
   "http://127.0.0.1:${NGINX_PORT}/ops/qbittorrent/api/v2/app/version")

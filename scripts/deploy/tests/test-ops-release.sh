@@ -145,6 +145,24 @@ rg -q 'location = /ops/headlamp/_ops/exchange' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'location = /ops/qbittorrent/_ops/exchange' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'location \^~ /ops/qbittorrent/' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_pass http://misu_ops_qbittorrent/' "${TMP_DIR}/normal-nginx.yaml"
+ruby - "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml" <<'RB'
+require 'yaml'
+config = YAML.load_stream(File.read(ARGV.fetch(0))).first.dig('data', 'nginx.conf')
+raise 'missing main nginx config' unless config
+routes = {
+  'nacos' => '/nacos/',
+  'headlamp' => '/ops/headlamp/',
+  'qbittorrent' => '/ops/qbittorrent/',
+  'ssh' => '/ops/ws/ssh/'
+}
+routes.each do |name, path|
+  block = config[/location \^~ #{Regexp.escape(path)} \{(.*?)^\s*\}/m, 1]
+  raise "missing #{name} route" unless block
+  raise "#{name} route must preserve server.misu.chat Host" unless block.match?(/proxy_set_header Host server\.misu\.chat/)
+  raise "#{name} route must not use api.misu.chat Host" if block.match?(/proxy_set_header Host api\.misu\.chat/)
+end
+puts 'main nginx console Host routing invariants: PASS'
+RB
 rg -q 'proxy_hide_header X-CSRF-Token' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header X-Ops-Target nacos' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header X-Ops-Target headlamp' "${TMP_DIR}/normal-nginx.yaml"
