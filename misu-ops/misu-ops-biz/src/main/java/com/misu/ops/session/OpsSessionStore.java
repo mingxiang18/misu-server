@@ -5,6 +5,7 @@ import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
 import com.misu.ops.console.NacosUpstreamAuthService;
 import com.misu.ops.console.QBittorrentUpstreamAuthService;
+import com.misu.ops.ai.AiCliTool;
 import com.misu.ops.security.CurrentAccountVerifier;
 import com.misu.security.dto.LoginUser;
 import org.springframework.stereotype.Component;
@@ -33,6 +34,7 @@ public class OpsSessionStore {
     private final Map<String, Ticket> tickets = new ConcurrentHashMap<>();
     private final Map<String, ConsoleSession> consoleSessions = new ConcurrentHashMap<>();
     private final Map<String, SshSession> sshSessions = new ConcurrentHashMap<>();
+    private final Map<String, AiSession> aiSessions = new ConcurrentHashMap<>();
 
     public OpsSessionStore(OpsProperties properties, CurrentAccountVerifier accountVerifier) {
         this(properties, accountVerifier, null, null);
@@ -246,6 +248,71 @@ public class OpsSessionStore {
         }
     }
 
+    public synchronized AiSession createAiSession(LoginUser currentUser, AiCliTool tool, int cols, int rows) {
+        if (aiSessions.size() >= max(properties.getMaxAiSessions())) {
+            throw new ServiceException(HttpStatus.CONFLICT, "AI 终端连接数已达上限");
+        }
+        long userSessions = aiSessions.values().stream()
+                .filter(session -> session.userId().equals(currentUser.getUserId()))
+                .count();
+        if (userSessions >= max(properties.getMaxAiSessionsPerUser())) {
+            throw new ServiceException(HttpStatus.CONFLICT, "当前用户的 AI 终端连接数已达上限");
+        }
+        AiSession session = new AiSession(randomToken(), tool, currentUser.getUserId(), currentUser.getUserName(),
+                normalizeDimension(cols, 80), normalizeDimension(rows, 24), properties.getSshHandshakeTtlSeconds());
+        aiSessions.put(session.id(), session);
+        return session;
+    }
+
+    public AiSession claimAiSession(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new ServiceException(HttpStatus.UNAUTHORIZED, "AI 终端会话无效或已被使用");
+        }
+        AiSession session = aiSessions.get(sessionId);
+        if (session == null || expired(session) || !session.claim()) {
+            if (session != null && expired(session)) {
+                aiSessions.remove(sessionId, session);
+            }
+            throw new ServiceException(HttpStatus.UNAUTHORIZED, "AI 终端会话无效或已被使用");
+        }
+        try {
+            accountVerifier.requireAdmin(session.userId(), session.userName());
+            session.touch();
+            return session;
+        } catch (RuntimeException ex) {
+            aiSessions.remove(sessionId, session);
+            throw ex;
+        }
+    }
+
+    public void touchAiSession(AiSession session) {
+        validateAndTouch(session, aiSessions);
+    }
+
+    public void validateAiSession(AiSession session) {
+        validateAndCheckRole(session, aiSessions);
+    }
+
+    public void revokeAiSession(String sessionId) {
+        if (sessionId != null) {
+            aiSessions.remove(sessionId);
+        }
+    }
+
+    public void requireAiOwner(String sessionId, Long userId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new ServiceException(HttpStatus.FORBIDDEN, "只能关闭自己的 AI 终端会话");
+        }
+        AiSession session = aiSessions.get(sessionId);
+        if (session == null || !userId.equals(session.userId())) {
+            throw new ServiceException(HttpStatus.FORBIDDEN, "只能关闭自己的 AI 终端会话");
+        }
+        if (expired(session)) {
+            aiSessions.remove(sessionId, session);
+            throw new ServiceException(HttpStatus.GONE, "AI 终端会话已关闭");
+        }
+    }
+
     public void requireSshOwner(String sessionId, Long userId) {
         if (sessionId == null || sessionId.isBlank()) {
             throw new ServiceException(HttpStatus.FORBIDDEN, "只能关闭自己的终端会话");
@@ -276,6 +343,7 @@ public class OpsSessionStore {
                     .toList();
             consoleSessions.values().removeIf(session -> session.userId().equals(userId));
             sshSessions.values().removeIf(session -> session.userId().equals(userId));
+            aiSessions.values().removeIf(session -> session.userId().equals(userId));
             revokedConsoleSessions.forEach(this::removeNacosAuth);
             revokedConsoleSessions.forEach(this::removeQbittorrentAuth);
         }
@@ -293,6 +361,7 @@ public class OpsSessionStore {
         expiredConsoleSessions.forEach(this::removeNacosAuth);
         expiredConsoleSessions.forEach(this::removeQbittorrentAuth);
         sshSessions.values().removeIf(session -> !session.claimed() && expired(session));
+        aiSessions.values().removeIf(session -> !session.claimed() && expired(session));
         if (nacosAuth != null) {
             nacosAuth.removeSessionsExcept(consoleSessions.keySet());
         }
@@ -349,8 +418,10 @@ public class OpsSessionStore {
 
     private boolean expired(ExpiringSession session, Instant now) {
         return session.createdAt().plusSeconds(properties.getSessionMaxSeconds()).isBefore(now)
-                || (session instanceof SshSession ssh && !ssh.claimed()
+                || ((session instanceof SshSession ssh && !ssh.claimed()
                 && ssh.pendingExpiresAt().isBefore(now))
+                || (session instanceof AiSession ai && !ai.claimed()
+                && ai.pendingExpiresAt().isBefore(now)))
                 || session.lastAccess().plusSeconds(properties.getSessionIdleSeconds()).isBefore(now);
     }
 
@@ -434,6 +505,50 @@ public class OpsSessionStore {
 
         public String id() { return id; }
         public String nodeId() { return nodeId; }
+        public Long userId() { return userId; }
+        public String userName() { return userName; }
+        public int cols() { return cols; }
+        public int rows() { return rows; }
+        public Instant pendingExpiresAt() { return pendingExpiresAt; }
+        public Instant createdAt() { return createdAt; }
+        public Instant lastAccess() { return lastAccess; }
+        public Instant lastRoleCheck() { return lastRoleCheck; }
+        public void touch() { lastAccess = Instant.now(); }
+        public void markRoleChecked(Instant time) { lastRoleCheck = time; }
+    }
+
+    public static final class AiSession implements ExpiringSession {
+        private final String id;
+        private final AiCliTool tool;
+        private final Long userId;
+        private final String userName;
+        private final int cols;
+        private final int rows;
+        private final Instant pendingExpiresAt;
+        private final Instant createdAt = Instant.now();
+        private volatile Instant lastAccess = createdAt;
+        private volatile Instant lastRoleCheck = createdAt;
+        private boolean claimed;
+
+        public AiSession(String id, AiCliTool tool, Long userId, String userName,
+                         int cols, int rows, long handshakeTtlSeconds) {
+            this.id = id;
+            this.tool = tool;
+            this.userId = userId;
+            this.userName = userName;
+            this.cols = cols;
+            this.rows = rows;
+            this.pendingExpiresAt = createdAt.plusSeconds(handshakeTtlSeconds);
+        }
+
+        public synchronized boolean claim() {
+            if (claimed) return false;
+            claimed = true;
+            return true;
+        }
+        public synchronized boolean claimed() { return claimed; }
+        public String id() { return id; }
+        public AiCliTool tool() { return tool; }
         public Long userId() { return userId; }
         public String userName() { return userName; }
         public int cols() { return cols; }

@@ -30,6 +30,25 @@ export function revokeSshSession(sessionId) {
   }).then(unwrap)
 }
 
+export function createAiSession(tool, cols, rows) {
+  return request({
+    url: '/ops/api/ai/sessions',
+    method: 'post',
+    data: { tool, cols, rows }
+  }).then(unwrap)
+}
+
+export function revokeAiSession(sessionId) {
+  if (!sessionId) return Promise.resolve()
+  return request({
+    url: `/ops/api/ai/sessions/${encodeURIComponent(sessionId)}`,
+    method: 'delete',
+    timeout: 2000,
+    silent: true,
+    headers: { skipAuthRefresh: true }
+  }).then(unwrap)
+}
+
 export function getWebSocketUrl(url) {
   if (!url) throw new Error('后端未返回终端 WebSocket 地址')
   return url.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')

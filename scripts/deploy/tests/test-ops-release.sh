@@ -12,21 +12,51 @@ CAPTURE_DIR="${TMP_DIR}/capture"
 SSH_LOG="${TMP_DIR}/ssh.log"
 mkdir -p "${FAKE_BIN}" "${CAPTURE_DIR}" "${TMP_DIR}/remote" "${TMP_DIR}/backups" "${TMP_DIR}/html" "${TMP_DIR}/key"
 touch "${TMP_DIR}/key/id_ed25519"
-trap 'rm -rf "${TMP_DIR}"' EXIT
+TEST_DIST_DIR="${ROOT_DIR}/misu-file-server-ui/dist"
+TEST_DIST_INDEX="${TEST_DIST_DIR}/index.html"
+TEST_DIST_INDEX_CREATED=0
+if [[ ! -f "${TEST_DIST_INDEX}" ]]; then
+  mkdir -p "${TEST_DIST_DIR}"
+  printf '%s\n' '<!doctype html><title>release harness</title>' >"${TEST_DIST_INDEX}"
+  chmod 644 "${TEST_DIST_INDEX}"
+  TEST_DIST_INDEX_CREATED=1
+fi
+cleanup() {
+  if [[ "${TEST_DIST_INDEX_CREATED}" == 1 ]]; then rm -f "${TEST_DIST_INDEX}"; fi
+  rm -rf "${TMP_DIR}"
+}
+trap cleanup EXIT
 
 cat >"${FAKE_BIN}/ssh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${OPS_TEST_SSH_LOG}"
 case "$*" in
+  *'get deployment/misu-server-nginx -o jsonpath='* ) printf '%s\n' 'misu-server-nginx-config-f84f6ac' ;;
+  *'cat '*misu-server-nginx-config.name* ) printf '%s\n' 'misu-server-nginx-config-f84f6ac' ;;
+  *'test -f '*misu-server-nginx-config.name* ) [[ "${FAKE_SSH_MODE:-ok}" == rollback-old ]] && exit 1 ;;
   *jsonpath=*) printf '%s\n' '10.8.0.26:30500/misuaa/misu-ops@sha256:deadbeef' ;;
   *'get deployment/misu-ops -o json'* ) [[ "${FAKE_SSH_MODE:-ok}" == export ]] && exit 1 ;;
-  *'kubectl apply -f'*'misu-ops-nginx-config.yaml'* ) [[ "${FAKE_SSH_MODE:-ok}" == normal-config-apply || "${FAKE_SSH_MODE:-ok}" == apply ]] && exit 1 ;;
-  *'kubectl apply -f'*'misu-ops.yaml'* ) [[ "${FAKE_SSH_MODE:-ok}" == normal-deployment-apply ]] && exit 1 ;;
-  *'kubectl apply -f'* ) [[ "${FAKE_SSH_MODE:-ok}" == apply ]] && exit 1 ;;
+  *'get deployment/misu-server-nginx -o yaml'* ) [[ "${FAKE_SSH_MODE:-ok}" == frontend-export ]] && exit 1 ;;
+  *'get configmap/misu-server-nginx-config-f84f6ac -o yaml'* ) [[ "${FAKE_SSH_MODE:-ok}" == frontend-export ]] && exit 1 ;;
+  *'apply -f '*misu-server-nginx-config.yaml* ) [[ "${FAKE_SSH_MODE:-ok}" == frontend-config-apply ]] && exit 1 ;;
+  *'patch deployment/misu-server-nginx'* ) [[ "${FAKE_SSH_MODE:-ok}" == frontend-patch ]] && exit 1 ;;
+  *'deployment/misu-server-nginx'*'rollout status'* ) [[ "${FAKE_SSH_MODE:-ok}" == frontend-rollout || "${FAKE_SSH_MODE:-ok}" == fail ]] && exit 1 ;;
+  *'apply -f '*misu-ops-nginx-config.yaml* ) [[ "${FAKE_SSH_MODE:-ok}" == normal-config-apply || "${FAKE_SSH_MODE:-ok}" == apply ]] && exit 1 ;;
+  *'apply -f '*misu-ops.yaml* ) [[ "${FAKE_SSH_MODE:-ok}" == normal-deployment-apply ]] && exit 1 ;;
+  *'apply -f '*) [[ "${FAKE_SSH_MODE:-ok}" == apply ]] && exit 1 ;;
   *'patch deployment/misu-ops'* ) [[ "${FAKE_SSH_MODE:-ok}" == patch ]] && exit 1 ;;
   *'rollout status'*) [[ "${FAKE_SSH_MODE:-ok}" == fail ]] && exit 1 ;;
+  *jq*) [[ "${FAKE_SSH_MODE:-ok}" == frontend-no-jq ]] && exit 1 ;;
 esac
+# The real SSH command writes live exports through redirection. Make the
+# offline fake create those paths so the harness also exercises test -s.
+redirect_re=">[[:space:]]*'([^']+)'"
+if [[ "$*" =~ ${redirect_re} ]]; then
+  export_path="${BASH_REMATCH[1]}"
+  mkdir -p "$(dirname "${export_path}")"
+  printf '%s\n' 'fake live export' >"${export_path}"
+fi
 exit 0
 SH
 cat >"${FAKE_BIN}/scp" <<'SH'
@@ -39,6 +69,22 @@ for arg in "$@"; do
 done
 SH
 chmod +x "${FAKE_BIN}/ssh" "${FAKE_BIN}/scp"
+cat >"${FAKE_BIN}/rsync" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'rsync %s\n' "$*" >>"${OPS_TEST_SSH_LOG}"
+[[ "${FAKE_SSH_MODE:-ok}" == frontend-rsync ]] && exit 1
+exit 0
+SH
+chmod +x "${FAKE_BIN}/rsync"
+cat >"${FAKE_BIN}/npm" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+# The release harness already has a checked-in/buildable dist tree; avoid
+# network access while exercising the deployment phase.
+exit 0
+SH
+chmod +x "${FAKE_BIN}/npm"
 
 cat >"${TMP_DIR}/deploy.conf" <<EOF
 SSH_KEY=${TMP_DIR}/key/id_ed25519
@@ -79,6 +125,75 @@ rg -q 'type f -exec chmod 644' "${ROOT_DIR}/scripts/deploy/release.sh"
 rg -q 'type f ! -perm -o\+r' "${ROOT_DIR}/scripts/deploy/release.sh"
 rg -q 'type d ! -perm -o\+x' "${ROOT_DIR}/scripts/deploy/release.sh"
 echo 'frontend permission normalization/preflight: PASS'
+
+# Frontend publishing also rolls the outer nginx ConfigMap independently from
+# the application workloads. The fake rsync keeps this test fully offline.
+rm -f "${CAPTURE_DIR}"/*.yaml
+FAKE_SSH_MODE=frontend-no-jq run_release --skip-build frontend
+first_tag="$(sed -n 's/.*已切换到 ConfigMap //p' "${TMP_DIR}/release.log" | tail -n 1)"
+sleep 1
+FAKE_SSH_MODE=frontend-no-jq run_release --skip-build frontend
+second_tag="$(sed -n 's/.*已切换到 ConfigMap //p' "${TMP_DIR}/release.log" | tail -n 1)"
+[[ "${first_tag}" =~ ^misu-server-nginx-config-${sha}-[0-9]{14}$ ]]
+[[ "${second_tag}" =~ ^misu-server-nginx-config-${sha}-[0-9]{14}$ ]]
+[[ "${first_tag}" != "${second_tag}" ]]
+echo "same HEAD unique release tags: ${first_tag} != ${second_tag}"
+cp "${CAPTURE_DIR}/misu-server-nginx-config.yaml" "${TMP_DIR}/normal-main-nginx.yaml"
+ruby - "${TMP_DIR}/normal-main-nginx.yaml" "${TMP_DIR}/ssh.log" "${sha}" <<'RB'
+require 'yaml'
+config = YAML.load_stream(File.read(ARGV.fetch(0))).first
+trace = File.read(ARGV.fetch(1))
+sha = ARGV.fetch(2)
+name = config.dig('metadata', 'name')
+raise "unexpected outer nginx ConfigMap name: #{name}" unless name.match?(/\Amisu-server-nginx-config-#{Regexp.escape(sha)}-[0-9]{14}\z/)
+raise 'AI websocket route missing from published ConfigMap' unless config.dig('data', 'nginx.conf').include?('location ^~ /ops/ws/ai/')
+raise 'outer nginx patch did not use the published ConfigMap' unless trace.include?(name)
+raise 'live outer nginx state was not exported' unless trace.include?('get deployment/misu-server-nginx -o jsonpath=') && trace.include?('get deployment/misu-server-nginx -o yaml') && trace.include?('get configmap/misu-server-nginx-config-f84f6ac -o yaml')
+raise 'outer nginx Deployment was not patched' unless trace.include?('patch deployment/misu-server-nginx')
+raise 'outer nginx rollout was not awaited' unless trace.match?(/rollout status .*deployment\/misu-server-nginx/)
+raise 'outer nginx ConfigMap was not applied' unless trace.match?(/kubectl .*apply -f/) && trace.include?('misu-server-nginx-config.yaml')
+puts 'frontend outer nginx versioned ConfigMap + patch + rollout: PASS'
+RB
+
+for mode in frontend-config-apply frontend-patch frontend-rollout; do
+  : >"${SSH_LOG}"
+  set +e
+  FAKE_SSH_MODE="${mode}" run_release --skip-build frontend >"${TMP_DIR}/${mode}-failure.log" 2>&1
+  frontend_failure_rc=$?
+  set -e
+  [[ "${frontend_failure_rc}" -ne 0 ]]
+  rg -q '外层 misu-server-nginx|前端发布失败并已回滚' "${TMP_DIR}/${mode}-failure.log"
+  rg -q 'misu-server-nginx-config.yaml' "${SSH_LOG}"
+  rg -q 'misu-server-nginx.yaml' "${SSH_LOG}"
+  rg -q 'patch deployment/misu-server-nginx' "${SSH_LOG}"
+  if [[ "${mode}" != frontend-patch ]]; then
+    rg -q 'rollout status.*deployment/misu-server-nginx' "${SSH_LOG}"
+  fi
+done
+: >"${SSH_LOG}"
+set +e
+FAKE_SSH_MODE=frontend-export run_release --skip-build frontend >"${TMP_DIR}/frontend-export-failure.log" 2>&1
+frontend_export_rc=$?
+set -e
+[[ "${frontend_export_rc}" -ne 0 ]]
+rg -q '无法保存当前外层 misu-server-nginx 状态' "${TMP_DIR}/frontend-export-failure.log"
+echo 'frontend outer nginx apply/patch/rollout and export failure rollback: PASS'
+
+# Manual rollback restores the outer nginx reference for new backups while
+# retaining compatibility with backups created before this mechanism existed.
+: >"${SSH_LOG}"
+run_release --rollback 20260915T000000Z
+rg -q 'test -f.*misu-server-nginx-config.name' "${SSH_LOG}"
+rg -q 'cat.*misu-server-nginx-config.name' "${SSH_LOG}"
+rg -q 'patch deployment/misu-server-nginx' "${SSH_LOG}"
+rg -q 'rollout status.*deployment/misu-server-nginx' "${SSH_LOG}"
+: >"${SSH_LOG}"
+FAKE_SSH_MODE=rollback-old run_release --rollback 20260915T000000Z
+if rg -q 'patch deployment/misu-server-nginx' "${SSH_LOG}"; then
+  echo 'legacy rollback unexpectedly touched outer nginx' >&2
+  exit 1
+fi
+echo 'manual rollback outer nginx new/legacy backup compatibility: PASS'
 
 run_release --skip-build misu-ops
 cp "${CAPTURE_DIR}/misu-ops.yaml" "${TMP_DIR}/normal-misu-ops.yaml"
@@ -264,8 +379,10 @@ deployment = YAML.load_stream(File.read(ARGV[0])).first
 config = YAML.load_stream(File.read(ARGV[1])).first
 sha = ARGV[2]
 deployment_name = deployment.dig('spec', 'template', 'spec', 'volumes').find { |v| v['name'] == 'nginx-config' }.dig('configMap', 'name')
-raise "normal ConfigMap tag mismatch: #{deployment_name}" unless deployment_name == "misu-ops-nginx-config-#{sha}"
+raise "normal ConfigMap tag mismatch: #{deployment_name}" unless deployment_name.match?(/\Amisu-ops-nginx-config-#{Regexp.escape(sha)}-[0-9]{14}\z/)
 raise 'normal ConfigMap name was not rendered' unless config.dig('metadata', 'name') == deployment_name
+image_tag = deployment.dig('spec', 'template', 'spec', 'containers').fetch(0).fetch('image').split(':').last
+raise "image and ConfigMap tags differ: #{image_tag} vs #{deployment_name}" unless deployment_name == "misu-ops-nginx-config-#{image_tag}"
 puts "normal tag=#{deployment_name}"
 RB
 
@@ -335,7 +452,7 @@ done
 {
   cp "${SSH_LOG}" "${TRACE_FILE}"
   echo "release harness: PASS"
-  echo "normal ConfigMap and Deployment tag: ${sha}"
+  echo 'normal ConfigMap and Deployment tag: short SHA + UTC numeric timestamp'
   echo 'config-only ConfigMap: lowercase cfg-* DNS name'
   echo 'live Deployment export: kubectl get -o json | jq del(server fields/status)'
   echo 'kubectl export failure injection: PASS'

@@ -24,6 +24,8 @@ ops:
   cookie-secure: ${OPS_COOKIE_SECURE:true}
   ssh-handshake-ttl-seconds: ${OPS_SSH_HANDSHAKE_TTL_SECONDS:30}
   max-ssh-sessions: ${OPS_MAX_SSH_SESSIONS:4}
+  max-ai-sessions: ${OPS_MAX_AI_SESSIONS:4}
+  max-ai-sessions-per-user: ${OPS_MAX_AI_SESSIONS_PER_USER:2}
   max-console-tickets: ${OPS_MAX_CONSOLE_TICKETS:128}
   max-console-tickets-per-user: ${OPS_MAX_CONSOLE_TICKETS_PER_USER:8}
   max-console-sessions: ${OPS_MAX_CONSOLE_SESSIONS:32}

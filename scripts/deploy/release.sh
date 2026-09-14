@@ -25,7 +25,9 @@
 #   --list-backups   # 列出可回滚的备份时间戳
 #
 # ConfigMap 与 Deployment 解耦：日常 Java 发布只覆盖 misu-<svc>.yaml（Deployment+Service），
-# 不动 ConfigMap；运维代理配置使用 --config misu-ops 单独下发。
+# 不动 Java 服务 ConfigMap；运维代理配置使用 --config misu-ops 单独下发。
+# 每次正常发布的 tag 是短 SHA 加 UTC 数字时间戳；前端发布还会同步外层
+# misu-server-nginx 的同 tag versioned ConfigMap 引用。
 #
 # 单步流程：构建镜像→推私有 registry→SSH 主节点备份+覆盖清单+apply+rollout；
 #           前端：vite build→SSH 工作节点备份+覆盖 html。任一步失败自动回滚。
@@ -332,7 +334,13 @@ deploy_frontend() {
   # --exclude .DS_Store：不推 macOS 垃圾文件；--delete-excluded：连带清掉服务器上已有的
   rsync -az --delete --delete-excluded --exclude='.DS_Store' \
     -e "ssh -i ${SSH_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
-    "${ROOT_DIR}/misu-file-server-ui/dist/" "${WORKER_SSH}:${WORKER_HTML_DIR}/"
+    "${ROOT_DIR}/misu-file-server-ui/dist/" "${WORKER_SSH}:${WORKER_HTML_DIR}/" \
+    || { err "前端静态文件发布失败 —— 回滚 html"; restore_frontend "${TS}"; die "前端发布失败并已回滚。"; }
+  if ! deploy_frontend_nginx; then
+    err "外层 misu-server-nginx 发布失败 —— 回滚 html"
+    restore_frontend "${TS}" || true
+    die "前端发布失败并已回滚。"
+  fi
 }
 
 restore_frontend() {
@@ -340,6 +348,98 @@ restore_frontend() {
   wssh "test -d '${WORKER_BACKUP_DIR}/${ts}/html' && \
     rsync -a --delete '${WORKER_BACKUP_DIR}/${ts}/html/' '${WORKER_HTML_DIR}/'" \
     || err "回滚 html 失败，请人工介入"
+}
+
+export_live_frontend_nginx() {
+  local destination="$1"
+  local deployment="${destination}/misu-server-nginx.yaml"
+  local configmap="${destination}/misu-server-nginx-config.yaml"
+  local configmap_name="${destination}/misu-server-nginx-config.name"
+  local live_config_map
+
+  live_config_map="$(mssh "kubectl -n '${NAMESPACE}' get deployment/misu-server-nginx -o jsonpath='{.spec.template.spec.volumes[?(@.name==\"nginx-config\")].configMap.name}'")" \
+    || return 1
+  [[ "${live_config_map}" =~ ^misu-server-nginx-config-[a-z0-9-]+$ ]] || return 1
+
+  # Save the live Deployment and the exact versioned ConfigMap referenced by
+  # its nginx-config volume. kubectl emits the backups directly as YAML so a
+  # jq installation on the control-plane node is not required.
+  mssh "set -eu; kubectl -n '${NAMESPACE}' get deployment/misu-server-nginx -o yaml > '${deployment}'; test -s '${deployment}'" \
+    || return 1
+  mssh "set -eu; kubectl -n '${NAMESPACE}' get configmap/${live_config_map} -o yaml > '${configmap}'; printf '%s\\n' '${live_config_map}' > '${configmap_name}'; test -s '${configmap}'; test -s '${configmap_name}'" \
+    || return 1
+}
+
+restore_frontend_nginx() {
+  local ts="$1"
+  local backup_dir="${MASTER_BACKUP_DIR}/${ts}/k8s"
+  local old_config_map
+  local status=0
+
+  old_config_map="$(mssh "cat '${backup_dir}/misu-server-nginx-config.name'")" \
+    || old_config_map=""
+  if [[ ! "${old_config_map}" =~ ^misu-server-nginx-config-[a-z0-9-]+$ ]]; then
+    err "无法读取外层 misu-server-nginx 原 ConfigMap 名称，请人工介入"
+    status=1
+  elif ! mssh "kubectl -n '${NAMESPACE}' patch deployment/misu-server-nginx --type='strategic' -p '{\"spec\":{\"template\":{\"spec\":{\"volumes\":[{\"name\":\"nginx-config\",\"configMap\":{\"name\":\"${old_config_map}\"}}]}}}}'"; then
+    err "回滚外层 misu-server-nginx Deployment ConfigMap 引用失败，请人工介入"
+    status=1
+  elif ! mssh "kubectl -n '${NAMESPACE}' rollout status 'deployment/misu-server-nginx' --timeout='${ROLLOUT_TIMEOUT}'"; then
+    err "外层 misu-server-nginx 回滚后 rollout 未就绪，请人工介入"
+    status=1
+  fi
+  return "${status}"
+}
+
+deploy_frontend_nginx() {
+  local tmp config_file
+  tmp="$(mktemp -d)"
+  config_file="${tmp}/misu-server-nginx-config.yaml"
+
+  log "主节点：备份 live misu-server-nginx ConfigMap 和 Deployment → ${MASTER_BACKUP_DIR}/${TS}/k8s"
+  if ! mssh "mkdir -p '${MASTER_BACKUP_DIR}/${TS}/k8s'" \
+    || ! export_live_frontend_nginx "${MASTER_BACKUP_DIR}/${TS}/k8s"; then
+    rm -rf "${tmp}"
+    err "无法保存当前外层 misu-server-nginx 状态，拒绝前端发布"
+    return 1
+  fi
+
+  # Keep the checked-in ConfigMap content as the source of truth while making
+  # each published ConfigMap immutable by name. TAG is unique per release.
+  sed "s/^  name: misu-server-nginx-config$/  name: misu-server-nginx-config-${TAG}/" \
+    "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml" >"${config_file}"
+  if ! grep -Fq "  name: misu-server-nginx-config-${TAG}" "${config_file}"; then
+    rm -rf "${tmp}"
+    err "外层 misu-server-nginx ConfigMap 名称渲染失败"
+    return 1
+  fi
+  if ! scp "${SSH_OPTS[@]}" "${config_file}" \
+      "${MASTER_SSH}:${MASTER_K8S_DIR}/misu-server-nginx-config.yaml"; then
+    rm -rf "${tmp}"
+    err "外层 misu-server-nginx ConfigMap 上传失败 —— 回滚"
+    restore_frontend_nginx "${TS}" || true
+    return 1
+  fi
+  if ! mssh "kubectl -n '${NAMESPACE}' apply -f '${MASTER_K8S_DIR}/misu-server-nginx-config.yaml'"; then
+    rm -rf "${tmp}"
+    err "外层 misu-server-nginx ConfigMap apply 失败 —— 回滚"
+    restore_frontend_nginx "${TS}" || true
+    return 1
+  fi
+  if ! mssh "kubectl -n '${NAMESPACE}' patch deployment/misu-server-nginx --type='strategic' -p '{\"spec\":{\"template\":{\"spec\":{\"volumes\":[{\"name\":\"nginx-config\",\"configMap\":{\"name\":\"misu-server-nginx-config-${TAG}\"}}]}}}}'"; then
+    rm -rf "${tmp}"
+    err "外层 misu-server-nginx Deployment patch 失败 —— 回滚"
+    restore_frontend_nginx "${TS}" || true
+    return 1
+  fi
+  if ! mssh "kubectl -n '${NAMESPACE}' rollout status 'deployment/misu-server-nginx' --timeout='${ROLLOUT_TIMEOUT}'"; then
+    rm -rf "${tmp}"
+    err "外层 misu-server-nginx rollout 失败 —— 回滚"
+    restore_frontend_nginx "${TS}" || true
+    return 1
+  fi
+  rm -rf "${tmp}"
+  log "外层 misu-server-nginx 已切换到 ConfigMap misu-server-nginx-config-${TAG}"
 }
 
 # ============================================================================
@@ -369,6 +469,12 @@ cmd_rollback() {
   mssh "kubectl -n '${NAMESPACE}' rollout status 'deployment/misu-ffmpeg-worker' --timeout='${ROLLOUT_TIMEOUT}'" \
     || err "misu-ffmpeg-worker 回滚后 rollout 未就绪"
   restore_frontend "${ts}"
+  # Backups created by newer frontend releases include the outer nginx
+  # ConfigMap name. Older backups remain valid and simply skip this step.
+  if mssh "test -f '${MASTER_BACKUP_DIR}/${ts}/k8s/misu-server-nginx-config.name'"; then
+    restore_frontend_nginx "${ts}" \
+      || err "回滚外层 misu-server-nginx 失败，请人工介入"
+  fi
   log "回滚完成。"
 }
 
@@ -502,10 +608,14 @@ main() {
     cmd_config; exit 0
   fi
 
-  TAG="$(git rev-parse --short HEAD)"
   TS="$(date -u +%Y%m%dT%H%M%SZ)"
+  # Keep the human-readable backup timestamp, but use only lower-case
+  # letters and digits in the image/ConfigMap tag. This prevents a repeated
+  # release of the same HEAD from reusing an IfNotPresent image tag.
+  SHORT_SHA="$(git rev-parse --short HEAD)"
+  TAG="${SHORT_SHA}-$(printf '%s' "${TS}" | tr -d 'TZ')"
   local branch; branch="$(git rev-parse --abbrev-ref HEAD)"
-  [[ "${branch}" == "master" ]] || err "当前分支是 ${branch}（非 master）—— 将按该 SHA 发布，请确认。"
+  [[ "${branch}" == "master" ]] || err "当前分支是 ${branch}（非 master）—— 将按该 HEAD 发布，请确认。"
   log "发布目标：服务=[${SEL_SVCS[*]:-无}] 前端=$([[ ${DO_FRONTEND} -eq 1 ]] && echo 是 || echo 否) worker=$([[ ${DO_WORKER} -eq 1 ]] && echo 是 || echo 否)  tag=${TAG}  ts=${TS}"
 
   # 构建

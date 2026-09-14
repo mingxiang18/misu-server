@@ -1,8 +1,11 @@
 package com.misu.ops.controller;
 
 import com.misu.common.domain.AjaxResult;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.misu.ops.OpsProperties;
 import com.misu.ops.console.ConsoleWebSocketBridgeService;
+import com.misu.ops.ai.AiCliConnectionService;
+import com.misu.ops.ai.AiCliTool;
 import com.misu.ops.security.OpsAuthorization;
 import com.misu.ops.security.OpsOriginPolicy;
 import com.misu.ops.ssh.SshConnectionService;
@@ -16,6 +19,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.http.HttpHeaders;
@@ -46,16 +50,27 @@ public class OpsController {
     private final OpsSessionStore sessions;
     private final SshConnectionService ssh;
     private final ConsoleWebSocketBridgeService consoleWebSockets;
+    private final AiCliConnectionService aiCli;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public OpsController(OpsProperties properties, OpsAuthorization authorization,
                           OpsOriginPolicy originPolicy, OpsSessionStore sessions,
-                          SshConnectionService ssh, ConsoleWebSocketBridgeService consoleWebSockets) {
+                          SshConnectionService ssh, ConsoleWebSocketBridgeService consoleWebSockets,
+                          AiCliConnectionService aiCli) {
         this.properties = properties;
         this.authorization = authorization;
         this.originPolicy = originPolicy;
         this.sessions = sessions;
         this.ssh = ssh;
         this.consoleWebSockets = consoleWebSockets;
+        this.aiCli = aiCli;
+    }
+
+    /** Compatibility constructor for focused controller tests that do not exercise AI endpoints. */
+    public OpsController(OpsProperties properties, OpsAuthorization authorization,
+                          OpsOriginPolicy originPolicy, OpsSessionStore sessions,
+                          SshConnectionService ssh, ConsoleWebSocketBridgeService consoleWebSockets) {
+        this(properties, authorization, originPolicy, sessions, ssh, consoleWebSockets, null);
     }
 
     @GetMapping("/endpoints")
@@ -120,6 +135,9 @@ public class OpsController {
         sessions.revokeAllForUser(current.getUserId());
         ssh.closeForUser(current.getUserId());
         consoleWebSockets.closeForUser(current.getUserId());
+        if (aiCli != null) {
+            aiCli.closeForUser(current.getUserId());
+        }
         for (ConsoleTarget target : ConsoleTarget.values()) {
             response.addHeader(HttpHeaders.SET_COOKIE, expiredConsoleCookie(target).toString());
         }
@@ -154,6 +172,27 @@ public class OpsController {
         LoginUser current = authorization.requireCurrentAdmin();
         sessions.requireSshOwner(sessionId, current.getUserId());
         ssh.close(sessionId);
+        return AjaxResult.success();
+    }
+
+    @PostMapping("/ai/sessions")
+    public AjaxResult createAiSession(HttpServletRequest request, @Valid @RequestBody AiSessionRequest body) {
+        originPolicy.requireAllowedMainOrigin(request);
+        LoginUser current = authorization.requireCurrentAdmin();
+        aiCli.requireConfigured();
+        OpsSessionStore.AiSession session = sessions.createAiSession(
+                current, body.getTool(), body.getCols(), body.getRows());
+        String websocketUrl = properties.getPublicBaseUrl() + "/ops/ws/ai/" + session.id();
+        return AjaxResult.success(new AiSessionResponse(session.id(), websocketUrl, session.tool().name()));
+    }
+
+    @DeleteMapping("/ai/sessions/{sessionId}")
+    public AjaxResult closeAiSession(HttpServletRequest request,
+                                     @org.springframework.web.bind.annotation.PathVariable("sessionId") String sessionId) {
+        originPolicy.requireAllowedMainOrigin(request);
+        LoginUser current = authorization.requireCurrentAdmin();
+        sessions.requireAiOwner(sessionId, current.getUserId());
+        aiCli.close(sessionId);
         return AjaxResult.success();
     }
 
@@ -207,9 +246,26 @@ public class OpsController {
         private int rows = 24;
     }
 
+    @Getter
+    @Setter
+    @JsonIgnoreProperties(ignoreUnknown = false)
+    public static class AiSessionRequest {
+        @NotNull
+        private AiCliTool tool;
+        @Min(1)
+        @Max(400)
+        private int cols = 80;
+        @Min(1)
+        @Max(400)
+        private int rows = 24;
+    }
+
     public record ConsoleTicketResponse(String ticket, String entryUrl, String exchangeUrl) {
     }
 
     public record SshSessionResponse(String sessionId, String websocketUrl) {
+    }
+
+    public record AiSessionResponse(String sessionId, String websocketUrl, String tool) {
     }
 }

@@ -122,6 +122,11 @@ spec:
             - { name: OPS_PRIVATE_KEY_PATH, value: "/etc/misu-ops/ssh/id_ed25519" }
             - { name: OPS_KNOWN_HOSTS_PATH, value: "/etc/misu-ops/ssh/known_hosts" }
             - { name: OPS_SSH_USER, value: "root" }
+            # AI CLI sessions reuse this existing worker/root SSH identity.
+            # The worker must provide /usr/local/bin/misu-ai-cli, which accepts
+            # only the fixed codex and claude profiles.
+            - { name: OPS_MAX_AI_SESSIONS, value: "4" }
+            - { name: OPS_MAX_AI_SESSIONS_PER_USER, value: "2" }
             - { name: OPS_PROXY_SHARED_SECRET, valueFrom: { secretKeyRef: { name: misu-ops-config, key: proxy-shared-secret } } }
           resources:
             requests: { cpu: 250m, memory: 256Mi }

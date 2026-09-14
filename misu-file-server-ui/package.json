@@ -11,6 +11,8 @@
     "build": "vite build",
     "test:auth-cookie-contract": "node scripts/auth-cookie-contract.test.mjs",
     "test:database-contract": "node scripts/database-contract.test.mjs",
+    "test:ai-cli-contract": "node scripts/ai-cli-contract.test.mjs",
+    "test:ai-cli-session-lifecycle": "node scripts/ai-cli-session-lifecycle.test.mjs",
     "test:qbittorrent-bridge": "node src/views/ops/qbittorrentParentBridge.test.mjs",
     "preview": "vite preview",
     "start": "electron .",

@@ -38,6 +38,20 @@ class OpsExceptionHandlerTest {
     }
 
     @Test
+    void invalidAiToolEnumUsesStableBadRequest() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setContextPath("/ops");
+        request.setRequestURI("/ops/api/ai/sessions");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        var result = handler.handleUnreadableBody(new HttpMessageNotReadableException("bad"), request, response);
+
+        assertEquals(400, response.getStatus());
+        assertEquals(400, result.get("code"));
+        assertEquals("AI_INVALID_REQUEST", result.get("msg"));
+    }
+
+    @Test
     void databaseQueryTypeMismatchUsesStableAjaxError() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setContextPath("/ops");

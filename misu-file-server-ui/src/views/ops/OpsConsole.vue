@@ -7,12 +7,14 @@ import { FitAddon } from '@xterm/addon-fit'
 import 'xterm/css/xterm.css'
 import { createSshSession, getWebSocketUrl, issueConsoleTicket, revokeSshSession } from '@/api/ops/ops'
 import DatabaseManagement from './DatabaseManagement.vue'
+import AiCliWorkspace from './AiCliWorkspace.vue'
 import { installQbittorrentParentBridge, releaseQbittorrentParentBridge } from './qbittorrentParentBridge.mjs'
 
 const tabs = [
   { key: 'nacos', target: 'NACOS', label: 'Nacos 控制台', hint: '配置与服务管理' },
   { key: 'headlamp', target: 'HEADLAMP', label: 'Kubernetes', hint: 'Headlamp 集群控制台' },
   { key: 'ssh', label: 'SSH 终端', hint: '节点交互式终端' },
+  { key: 'ai-cli', label: 'AI CLI', hint: 'Codex / Claude Code' },
   { key: 'qbittorrent', target: 'QBITTORRENT', label: 'qBittorrent', hint: '下载与做种管理' },
   { key: 'database', label: '数据库', hint: '表数据与结构' }
 ]
@@ -322,7 +324,9 @@ function openActiveTab() {
       if (!terminal.value) createTerminal()
       resizeTerminal()
     })
-  } else if (activeTab.value !== 'database') {
+  } else if (activeTab.value === 'ai-cli' || activeTab.value === 'database') {
+    cancelConsoleLoad()
+  } else {
     loadConsole(activeTab.value)
   }
 }
@@ -347,7 +351,7 @@ function createTerminal() {
 
 watch(activeTab, (tab, previous) => {
   if (previous === 'ssh' && tab !== 'ssh') disconnectSsh()
-  if (tab === 'ssh' || tab === 'database') cancelConsoleLoad()
+  if (tab === 'ssh' || tab === 'ai-cli' || tab === 'database') cancelConsoleLoad()
   openActiveTab()
 })
 
@@ -401,6 +405,13 @@ onBeforeUnmount(() => {
         <div class="ops-panel-status"><Connection /> 数据库</div>
       </div>
       <DatabaseManagement />
+    </div>
+
+    <div v-else-if="activeTab === 'ai-cli'" id="ops-panel-ai-cli" class="ops-ai-cli-panel" role="tabpanel" aria-labelledby="ops-tab-ai-cli">
+      <div class="ops-panel-bar">
+        <div class="ops-panel-status"><Connection /> AI CLI</div>
+      </div>
+      <AiCliWorkspace />
     </div>
 
     <div v-else-if="activeTab !== 'ssh'" :id="`ops-panel-${activeTab}`" class="ops-console-panel" role="tabpanel" :aria-labelledby="`ops-tab-${activeTab}`">
@@ -513,12 +524,14 @@ onBeforeUnmount(() => {
 .ops-tab.active small { color: var(--accent-strong); }
 .ops-console-panel,
 .ops-database-panel,
+.ops-ai-cli-panel,
 .ops-terminal-panel {
   display: flex; flex-direction: column; min-height: 420px; flex: 1 1 0;
   overflow: hidden; background: var(--color-bg-surface);
   border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
 }
+.ops-ai-cli-panel { min-height: 560px; }
 .ops-database-panel { min-height: 560px; }
 .ops-database-panel :deep(.database-workspace) { border: 0; border-radius: 0; box-shadow: none; }
 .ops-panel-bar { min-height: 52px; padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border-subtle); flex-shrink: 0; }
@@ -559,6 +572,12 @@ onBeforeUnmount(() => {
   .ops-tabs { margin-right: calc(-1 * var(--space-3)); padding-right: var(--space-3); }
   .ops-tab { min-width: 132px; padding: var(--space-2) var(--space-3); }
   .ops-console-panel, .ops-database-panel, .ops-terminal-panel {
+    flex: 0 0 auto;
+    height: calc(100dvh - var(--layout-tab-bar-height) - 210px);
+    min-height: 420px;
+    border-radius: var(--radius-md);
+  }
+  .ops-ai-cli-panel {
     flex: 0 0 auto;
     height: calc(100dvh - var(--layout-tab-bar-height) - 210px);
     min-height: 420px;

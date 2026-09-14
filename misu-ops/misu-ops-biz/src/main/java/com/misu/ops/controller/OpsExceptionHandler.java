@@ -23,7 +23,11 @@ public class OpsExceptionHandler {
     public AjaxResult handleUnreadableBody(HttpMessageNotReadableException exception,
                                            HttpServletRequest request, HttpServletResponse response) {
         if (!isDatabaseRequest(request)) {
-            throw exception;
+            if (!isAiSessionRequest(request)) {
+                throw exception;
+            }
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return AjaxResult.error(HttpServletResponse.SC_BAD_REQUEST, "AI_INVALID_REQUEST");
         }
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         return AjaxResult.error(HttpServletResponse.SC_BAD_REQUEST, "OPS_DB_INVALID_REQUEST");
@@ -46,5 +50,14 @@ public class OpsExceptionHandler {
             path = path.substring(contextPath.length());
         }
         return "/api/database".equals(path) || (path != null && path.startsWith("/api/database/"));
+    }
+
+    private static boolean isAiSessionRequest(HttpServletRequest request) {
+        String contextPath = request.getContextPath();
+        String path = request.getRequestURI();
+        if (contextPath != null && !contextPath.isEmpty() && path != null && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        return "/api/ai/sessions".equals(path);
     }
 }

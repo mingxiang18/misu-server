@@ -4,6 +4,7 @@ import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.ops.OpsProperties;
 import com.misu.ops.security.CurrentAccountVerifier;
+import com.misu.ops.ai.AiCliTool;
 import com.misu.security.dto.LoginUser;
 import org.junit.jupiter.api.Test;
 
@@ -134,6 +135,51 @@ class OpsSessionStoreTest {
                 store.issueTicket(admin, ConsoleTarget.NACOS));
         properties.setSessionMaxSeconds(900);
         assertSame(replacement, store.requireConsoleSession(replacement.id(), ConsoleTarget.NACOS.id()));
+    }
+
+    @Test
+    void aiCredentialIsSingleUseAndBoundToTheCreatingAdmin() {
+        OpsSessionStore store = new OpsSessionStore(properties, verifier);
+        OpsSessionStore.AiSession ai = store.createAiSession(admin, AiCliTool.CODEX, 80, 24);
+
+        assertSame(ai, store.claimAiSession(ai.id()));
+        assertThrows(ServiceException.class, () -> store.claimAiSession(ai.id()));
+
+        OpsSessionStore.AiSession other = store.createAiSession(
+                new LoginUser(8L, "other-admin", java.util.List.of("ADMIN")), AiCliTool.CLAUDE, 80, 24);
+        assertThrows(ServiceException.class, () -> store.requireAiOwner(other.id(), admin.getUserId()));
+    }
+
+    @Test
+    void expiredUnclaimedAiCredentialCannotBeClaimed() {
+        properties.setSessionMaxSeconds(0);
+        OpsSessionStore store = new OpsSessionStore(properties, verifier);
+        OpsSessionStore.AiSession ai = store.createAiSession(admin, AiCliTool.CODEX, 80, 24);
+
+        ServiceException exception = assertThrows(ServiceException.class,
+                () -> store.claimAiSession(ai.id()));
+        assertEquals(HttpStatus.UNAUTHORIZED, exception.getCode());
+    }
+
+    @Test
+    void aiSessionLimitsAreGlobalAndPerUser() {
+        properties.setMaxAiSessions(4);
+        properties.setMaxAiSessionsPerUser(2);
+        OpsSessionStore store = new OpsSessionStore(properties, verifier);
+
+        store.createAiSession(admin, AiCliTool.CODEX, 80, 24);
+        store.createAiSession(admin, AiCliTool.CLAUDE, 80, 24);
+        assertThrows(ServiceException.class,
+                () -> store.createAiSession(admin, AiCliTool.CODEX, 80, 24));
+        store.createAiSession(new LoginUser(8L, "other-admin", java.util.List.of("ADMIN")),
+                AiCliTool.CLAUDE, 80, 24);
+        store.createAiSession(new LoginUser(9L, "third-admin", java.util.List.of("ADMIN")),
+                AiCliTool.CODEX, 80, 24);
+        assertThrows(ServiceException.class,
+                () -> store.createAiSession(new LoginUser(10L, "fourth-admin", java.util.List.of("ADMIN")),
+                        AiCliTool.CLAUDE, 80, 24));
+        assertEquals(4, properties.getMaxAiSessions());
+        assertEquals(2, properties.getMaxAiSessionsPerUser());
     }
 
     private static final class TestVerifier implements CurrentAccountVerifier {

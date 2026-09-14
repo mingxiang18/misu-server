@@ -40,6 +40,8 @@ public class OpsProperties {
     private long roleCheckSeconds = 30;
     private long sshHandshakeTtlSeconds = 30;
     private int maxSshSessions = 4;
+    private int maxAiSessions = 4;
+    private int maxAiSessionsPerUser = 2;
     private int maxConsoleTickets = 128;
     private int maxConsoleTicketsPerUser = 8;
     private int maxConsoleSessions = 32;

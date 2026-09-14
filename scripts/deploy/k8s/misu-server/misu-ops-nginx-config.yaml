@@ -554,6 +554,45 @@ data:
           proxy_buffering off;
         }
 
+        location ^~ /ops/ws/ai/ {
+          access_log off;
+          proxy_pass http://misu_ops_backend;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_set_header Authorization "";
+          proxy_set_header Cookie "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
+        }
+
         location ^~ /ops/api/ {
           proxy_pass http://misu_ops_backend;
           proxy_http_version 1.1;
