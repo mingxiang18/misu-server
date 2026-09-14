@@ -117,6 +117,7 @@ database_refs = env.select { |entry| entry['valueFrom']&.dig('secretKeyRef', 'na
 raise 'expected database enabled/username/password/allowed-schemas Secret refs' unless database_refs.map { |entry| entry.dig('valueFrom', 'secretKeyRef', 'key') }.sort == %w[allowed-schemas enabled password username]
 raise 'database Secret refs must be optional' unless database_refs.all? { |entry| entry.dig('valueFrom', 'secretKeyRef', 'optional') == true }
 raise 'database capability must be Secret-controlled' unless database_refs.any? { |entry| entry['name'] == 'OPS_DATABASE_ENABLED' }
+raise 'database URL must not be configurable from the deployment environment' if env.any? { |entry| entry['name'] == 'OPS_DATABASE_URL' }
 puts 'qBittorrent fixed target credentials + optional database Secret refs: PASS'
 RB
 if rg -q 'sub_filter|ops-nacos\.misu\.chat|ops-k8s\.misu\.chat' "${TMP_DIR}/normal-nginx.yaml"; then
@@ -142,6 +143,7 @@ rg -q 'proxy_pass http://misu_ops_backend/ops/api/console-sessions/exchange;' "$
 rg -q 'FIXED_UPSTREAM_URL' "${ROOT_DIR}/misu-ops/misu-ops-biz/src/main/java/com/misu/ops/console/QBittorrentUpstreamAuthService.java"
 rg -q 'server q-bit-torrent-pi\.misu-server\.svc\.cluster\.local:30120;' "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-ops-nginx-config.yaml"
 rg -q 'enabled: \$\{OPS_DATABASE_ENABLED:false\}' "${ROOT_DIR}/misu-ops/misu-ops-biz/src/main/resources/application.yml"
+rg -q 'url: jdbc:mysql://mysql-inner\.mysql\.svc\.cluster\.local:3316/' "${ROOT_DIR}/misu-ops/misu-ops-biz/src/main/resources/application.yml"
 rg -q 'FIXED_UPSTREAM_URL' "${ROOT_DIR}/misu-ops/misu-ops-biz/src/main/java/com/misu/ops/console/NacosUpstreamAuthService.java"
 rg -q 'OPS_NACOS_UPSTREAM_URL:http://nacos\.misu-server\.svc\.cluster\.local:8848/nacos/' "${ROOT_DIR}/misu-ops/misu-ops-biz/src/main/resources/application.yml"
 if rg -q 'OPS_QBITTORRENT_UPSTREAM_URL|qbittorrent-upstream-url' "${ROOT_DIR}/misu-ops" "${ROOT_DIR}/docs/ops-qbittorrent-secret.example.yaml"; then
