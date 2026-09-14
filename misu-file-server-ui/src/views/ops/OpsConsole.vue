@@ -7,6 +7,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import 'xterm/css/xterm.css'
 import { createSshSession, getWebSocketUrl, issueConsoleTicket, revokeSshSession } from '@/api/ops/ops'
 import DatabaseManagement from './DatabaseManagement.vue'
+import { installQbittorrentParentBridge, releaseQbittorrentParentBridge } from './qbittorrentParentBridge.mjs'
 
 const tabs = [
   { key: 'nacos', target: 'NACOS', label: 'Nacos 控制台', hint: '配置与服务管理' },
@@ -29,6 +30,7 @@ const consoleUrl = ref('')
 const consoleLoading = ref(false)
 const consoleError = ref('')
 const consoleFullScreen = ref(false)
+const consoleFrameNavigationStarted = ref(false)
 
 const terminalHost = ref(null)
 const terminal = shallowRef(null)
@@ -58,9 +60,31 @@ function stopConsoleFrame() {
 
 function cancelConsoleLoad() {
   consoleGeneration += 1
+  releaseQbittorrentParentBridge()
   stopConsoleFrame()
   consoleUrl.value = ''
   consoleLoading.value = false
+  consoleFrameNavigationStarted.value = false
+}
+
+function handleConsoleFrameLoad(event) {
+  if (!consoleFrameNavigationStarted.value) return
+  // The initial about:blank can dispatch after form.submit() on slower mobile
+  // browsers. Keep the loading mask until the POST navigation leaves blank.
+  try {
+    if (event?.target?.contentWindow?.location?.href === 'about:blank') return
+  } catch {
+    // Cross-origin console documents cannot expose location; that is the real
+    // navigation, so it is safe to clear the mask.
+  }
+  consoleLoading.value = false
+}
+
+function handleConsoleFrameError() {
+  if (!consoleFrameNavigationStarted.value) return
+  releaseQbittorrentParentBridge()
+  consoleLoading.value = false
+  consoleError.value = '控制台加载失败，请重试'
 }
 
 const activeTabInfo = computed(() => tabs.find((tab) => tab.key === activeTab.value))
@@ -77,8 +101,12 @@ const statusText = computed(() => ({
 
 async function loadConsole(target) {
   const generation = ++consoleGeneration
+  // A qBittorrent shim belongs only to the previous iframe. Release it before
+  // switching to another console so the parent page cannot leak qB globals.
+  releaseQbittorrentParentBridge()
   consoleError.value = ''
   consoleLoading.value = true
+  consoleFrameNavigationStarted.value = false
   stopConsoleFrame()
   consoleUrl.value = ''
   // Wait for Vue to remove the old iframe before asking the server for a new
@@ -104,6 +132,7 @@ async function loadConsole(target) {
     await nextTick()
     if (generation !== consoleGeneration || activeTab.value !== target) return
     if (ticket && consoleFrame.value) {
+      if (consoleTarget === 'QBITTORRENT') installQbittorrentParentBridge()
       const form = document.createElement('form')
       form.method = 'post'
       form.action = exchangeUrl
@@ -115,6 +144,7 @@ async function loadConsole(target) {
       input.value = ticket
       form.appendChild(input)
       document.body.appendChild(form)
+      consoleFrameNavigationStarted.value = true
       form.submit()
       form.remove()
     }
@@ -123,7 +153,7 @@ async function loadConsole(target) {
       consoleError.value = error?.message || '控制台加载失败'
     }
   } finally {
-    if (generation === consoleGeneration) consoleLoading.value = false
+    if (generation === consoleGeneration && consoleError.value) consoleLoading.value = false
   }
 }
 
@@ -146,6 +176,11 @@ async function toggleFullScreen(element, state) {
 
 function setConsoleFullScreen() {
   toggleFullScreen(consoleFrame.value?.parentElement, consoleFullScreen)
+}
+
+function syncFullScreenState() {
+  consoleFullScreen.value = document.fullscreenElement === consoleFrame.value?.parentElement
+  terminalFullScreen.value = document.fullscreenElement === terminalHost.value
 }
 
 function writeTerminal(data) {
@@ -317,11 +352,13 @@ watch(activeTab, (tab, previous) => {
 })
 
 onMounted(() => {
+  document.addEventListener('fullscreenchange', syncFullScreenState)
   openActiveTab()
 })
 
 onBeforeUnmount(() => {
   cancelConsoleLoad()
+  document.removeEventListener('fullscreenchange', syncFullScreenState)
   resizeObserver?.disconnect()
   disconnectSsh()
   terminal.value?.dispose()
@@ -347,24 +384,26 @@ onBeforeUnmount(() => {
           v-for="tab in tabs"
           :key="tab.key"
           class="ops-tab"
+          :id="`ops-tab-${tab.key}`"
           :class="{ active: activeTab === tab.key }"
           type="button"
           role="tab"
           :aria-selected="activeTab === tab.key"
+          :aria-controls="activeTab === tab.key ? `ops-panel-${tab.key}` : undefined"
           @click="activeTab = tab.key">
         <span>{{ tab.label }}</span>
         <small>{{ tab.hint }}</small>
       </button>
     </div>
 
-    <div v-if="activeTab === 'database'" class="ops-database-panel">
+    <div v-if="activeTab === 'database'" id="ops-panel-database" class="ops-database-panel" role="tabpanel" aria-labelledby="ops-tab-database">
       <div class="ops-panel-bar">
         <div class="ops-panel-status"><Connection /> 数据库</div>
       </div>
       <DatabaseManagement />
     </div>
 
-    <div v-else-if="activeTab !== 'ssh'" class="ops-console-panel">
+    <div v-else-if="activeTab !== 'ssh'" :id="`ops-panel-${activeTab}`" class="ops-console-panel" role="tabpanel" :aria-labelledby="`ops-tab-${activeTab}`">
       <div class="ops-panel-bar">
         <div class="ops-panel-status"><Connection /> {{ activeTabInfo.label }}</div>
         <div class="ops-panel-actions">
@@ -381,7 +420,8 @@ onBeforeUnmount(() => {
             src="about:blank"
             :title="activeTabInfo.label"
             allow="clipboard-read; clipboard-write"
-            @load="consoleLoading = false" />
+            @load="handleConsoleFrameLoad"
+            @error="handleConsoleFrameError" />
         <div v-if="consoleLoading" class="ops-loading">正在建立运维控制台会话…</div>
         <div v-else-if="consoleError" class="ops-empty">
           <WarningFilled />
@@ -391,15 +431,16 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-show="activeTab === 'ssh'" class="ops-terminal-panel">
+    <div v-show="activeTab === 'ssh'" id="ops-panel-ssh" class="ops-terminal-panel" role="tabpanel" aria-labelledby="ops-tab-ssh">
       <div class="ops-panel-bar ops-terminal-bar">
-        <div class="ops-node-switcher" role="tablist" aria-label="SSH 节点">
+        <div class="ops-node-switcher" aria-label="SSH 节点">
           <button
               v-for="node in nodes"
               :key="node.id"
               type="button"
               class="ops-node-button"
               :class="{ active: activeNode === node.id }"
+              :aria-pressed="activeNode === node.id"
               @click="setActiveNode(node.id)">
             {{ node.name }} <small>{{ node.host }}</small>
           </button>
@@ -485,7 +526,7 @@ onBeforeUnmount(() => {
 .ops-panel-status :deep(svg) { width: 16px; color: var(--accent); }
 .ops-panel-actions { display: inline-flex; align-items: center; gap: var(--space-1); }
 .ops-frame-wrap { position: relative; flex: 1 1 0; min-height: 0; background: var(--color-bg-muted); overflow: auto; }
-.ops-console-frame { display: block; width: 100%; height: 100%; min-height: 520px; border: 0; background: #fff; }
+.ops-console-frame { display: block; width: 100%; height: 100%; min-height: 0; border: 0; background: #fff; }
 .ops-loading,
 .ops-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); min-height: 320px; color: var(--color-text-tertiary); }
 .ops-loading { position: absolute; inset: 0; z-index: 1; background: color-mix(in srgb, var(--color-bg-muted) 88%, transparent); }
@@ -524,14 +565,20 @@ onBeforeUnmount(() => {
     border-radius: var(--radius-md);
   }
   .ops-panel-bar { min-height: 48px; padding: 0 var(--space-3); }
-  .ops-panel-actions :deep(.el-button) { padding-left: 5px; padding-right: 5px; }
-  .ops-console-frame { min-width: 900px; min-height: 460px; }
+  .ops-panel-actions :deep(.el-button), .ops-terminal-actions :deep(.el-button) {
+    min-height: 44px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .ops-console-frame { min-width: 900px; min-height: 0; }
   .ops-database-panel { min-height: 650px; }
   .ops-frame-wrap { overflow: auto; }
   .ops-terminal-bar { align-items: flex-start; flex-direction: column; padding: var(--space-2) var(--space-3); }
   .ops-terminal-actions { width: 100%; justify-content: space-between; }
+  .ops-node-button { min-height: 44px; }
   .ops-terminal-host { min-height: 300px; padding: var(--space-2); }
   .ops-terminal-footer { flex-direction: column; padding: var(--space-2) var(--space-3); }
   .ops-terminal-help { text-align: left; }
+  .ops-assist-keys button { min-width: 44px; min-height: 44px; padding: 8px 10px; }
 }
 </style>

@@ -43,6 +43,9 @@ data:
 
       server {
         listen 30110;
+        # Keep edge redirects relative so the internal listener and port are
+        # never exposed in a browser Location header.
+        absolute_redirect off;
 
         location = /nacos {
           return 308 /nacos/;
@@ -76,6 +79,11 @@ data:
 
         location = /ops/qbittorrent {
           return 308 /ops/qbittorrent/;
+        }
+
+        # Sidecar-only endpoints must never fall through to the SPA fallback.
+        location ^~ /ops/internal/ {
+          return 404;
         }
 
         location ^~ /ops/qbittorrent/ {

@@ -132,6 +132,9 @@ public class OpsDatabaseService {
         }
         TableInfo info = tableInfo(database, table);
         ensureSupportedColumns(info);
+        if (info.columns.isEmpty()) {
+            throw invalid("表不包含可读取字段");
+        }
         String sortColumn = sort;
         if (sortColumn == null || sortColumn.isBlank()) {
             sortColumn = info.primaryKey != null ? info.primaryKey : info.columns.get(0).name;
@@ -196,8 +199,13 @@ public class OpsDatabaseService {
         }
         int fetch = pageSize + 1;
         int offset = (page - 1) * pageSize;
-        sql.append(" ORDER BY ").append(DatabaseValidation.quote(sortInfo.name)).append(" ").append(direction)
-                .append(" LIMIT ? OFFSET ?");
+        sql.append(" ORDER BY ").append(DatabaseValidation.quote(sortInfo.name)).append(" ").append(direction);
+        for (String primaryKey : info.primaryKeyColumns) {
+            if (!primaryKey.equals(sortInfo.name)) {
+                sql.append(", ").append(DatabaseValidation.quote(primaryKey)).append(" ").append(direction);
+            }
+        }
+        sql.append(" LIMIT ? OFFSET ?");
         parameters.add(fetch);
         parameters.add(offset);
         List<RowDto> result = executeQuery(sql.toString(), parameters, info, fetch);
@@ -391,6 +399,9 @@ public class OpsDatabaseService {
         if (info == null) {
             throw notAllowed("表不在允许范围内");
         }
+        if (info.invalidMetadataIdentifier) {
+            throw invalid("表元数据包含不受支持的标识符");
+        }
         return info;
     }
 
@@ -425,6 +436,7 @@ public class OpsDatabaseService {
             return null;
         }
         List<ColumnInfo> columns = new ArrayList<>();
+        boolean invalidMetadataIdentifier = false;
         try (ResultSet rs = metadata.getColumns(database, null, table, "%")) {
             while (rs.next()) {
                 String name = rs.getString("COLUMN_NAME");
@@ -436,16 +448,26 @@ public class OpsDatabaseService {
                             rs.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls, defaultValue,
                             defaultValue != null, "YES".equalsIgnoreCase(rs.getString("IS_AUTOINCREMENT")),
                             "YES".equalsIgnoreCase(rs.getString("IS_GENERATEDCOLUMN"))));
+                } else {
+                    invalidMetadataIdentifier = true;
                 }
             }
         }
         List<String> primaryKey = new ArrayList<>();
         try (ResultSet rs = metadata.getPrimaryKeys(database, null, table)) {
             while (rs.next()) {
-                primaryKey.add(rs.getString("COLUMN_NAME"));
+                String name = rs.getString("COLUMN_NAME");
+                if (validMetadataIdentifier(name)) {
+                    primaryKey.add(name);
+                } else {
+                    invalidMetadataIdentifier = true;
+                }
             }
         }
         primaryKey.sort(Comparator.comparingInt(name -> columns.indexOf(columns.stream().filter(c -> c.name.equals(name)).findFirst().orElse(null))));
+        if (primaryKey.stream().anyMatch(name -> columns.stream().noneMatch(column -> column.name.equals(name)))) {
+            invalidMetadataIdentifier = true;
+        }
         Map<String, IndexBuilder> indexes = new LinkedHashMap<>();
         try (ResultSet rs = metadata.getIndexInfo(database, null, table, false, false)) {
             while (rs.next()) {
@@ -456,6 +478,8 @@ public class OpsDatabaseService {
                     int ordinal = rs.getInt("ORDINAL_POSITION");
                     indexes.computeIfAbsent(indexName, ignored -> new IndexBuilder(indexName, unique))
                             .columns.put(ordinal, indexColumn);
+                } else if (indexName != null || indexColumn != null) {
+                    invalidMetadataIdentifier = true;
                 }
             }
         }
@@ -463,7 +487,8 @@ public class OpsDatabaseService {
         ColumnInfo version = columns.stream().filter(c -> c.name.equalsIgnoreCase("updated_at")).findFirst().orElse(null);
         return new TableInfo(database, table, comment, columns, indexInfo,
                 primaryKey.size() == 1 ? primaryKey.get(0) : null,
-                primaryKey.size(), version, view, view ? "VIEW" : "TABLE");
+                primaryKey.size(), version, view, view ? "VIEW" : "TABLE", invalidMetadataIdentifier,
+                List.copyOf(primaryKey));
     }
 
     private List<RowDto> executeQuery(String sql, List<Object> parameters, TableInfo info, int maxRows) {
@@ -767,6 +792,9 @@ public class OpsDatabaseService {
         try {
             List<FilterRequest> filters = objectMapper.readValue(json, new TypeReference<>() {});
             if (filters == null || filters.size() > MAX_FILTERS) throw invalid("筛选条件过多");
+            if (filters.stream().anyMatch(filter -> filter == null || filter.column() == null)) {
+                throw invalid("筛选条件格式无效");
+            }
             return filters;
         } catch (JsonProcessingException ex) {
             throw invalid("筛选条件格式无效");
@@ -937,7 +965,8 @@ public class OpsDatabaseService {
 
     private record TableInfo(String database, String table, String comment, List<ColumnInfo> columns,
                              List<IndexInfo> indexes, String primaryKey, int primaryKeyCount,
-                             ColumnInfo versionColumn, boolean view, String tableType) {
+                             ColumnInfo versionColumn, boolean view, String tableType,
+                             boolean invalidMetadataIdentifier, List<String> primaryKeyColumns) {
         ColumnInfo column(String name) { return columns.stream().filter(c -> c.name.equals(name)).findFirst().orElse(null); }
         String primaryKeyMode() { return primaryKeyCount == 1 ? "SINGLE" : primaryKeyCount > 1 ? "COMPOSITE" : "NONE"; }
         boolean writable() { return !view && primaryKeyCount == 1; }

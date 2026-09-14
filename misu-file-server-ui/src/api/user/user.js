@@ -1,7 +1,7 @@
 import request from '@/api/request'
 import Cookies from 'js-cookie'
 import logger from '@/utils/logger'
-import { getCookieOptions } from '@/api/auth/token'
+import { removeCookie, setCookie } from '@/api/auth/token'
 
 const UserKey = 'User-Info';
 
@@ -30,7 +30,7 @@ export function getUserInfo() {
 // 把用户信息写入 Cookie，过期时间对齐 refreshToken（30 天），
 // 否则会话级 Cookie 在浏览器重启后丢失，而 refreshToken 仍有效，导致权限误判
 export function cacheUserInfo(userInfo) {
-    Cookies.set(UserKey, JSON.stringify(userInfo || {}), getCookieOptions(30));
+    setCookie(UserKey, JSON.stringify(userInfo || {}), 30);
 }
 
 export function setUserInfo() {
@@ -42,7 +42,7 @@ export function setUserInfo() {
 }
 
 export function removeUserInfo() {
-    Cookies.remove(UserKey);
+    removeCookie(UserKey);
 }
 
 // 分页查询用户

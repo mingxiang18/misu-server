@@ -66,7 +66,11 @@ const visibleTables = computed(() => {
   return query ? tables.value.filter((table) => String(table.name).toLowerCase().includes(query)) : tables.value
 })
 const rowColumns = computed(() => metadata.value.columns || [])
-const hasStatusColumn = computed(() => rowColumns.value.some((column) => column.name === 'status'))
+const statusColumn = computed(() => rowColumns.value.find((column) => column.name === 'status'))
+const hasStatusColumn = computed(() => {
+  const typeName = String(statusColumn.value?.typeName || '').toUpperCase()
+  return /^(CHAR|VARCHAR|TEXT|TINYTEXT|MEDIUMTEXT|LONGTEXT|NCHAR|NVARCHAR|CLOB)/.test(typeName)
+})
 const rowFilter = computed(() => {
   const filters = []
   if (statusQuery.value && hasStatusColumn.value) filters.push({ column: 'status', operator: 'eq', value: statusQuery.value })
@@ -126,8 +130,11 @@ function normalizeRow(row) {
 }
 
 function apiError(error, fallback = '操作失败，请稍后重试') {
-  const rawMessage = error?.message || error?.response?.data?.msg || ''
-  const code = error?.code || error?.response?.data?.code || error?.response?.data?.errorCode || rawMessage.match(/OPS_DB_[A-Z_]+/)?.[0]
+  const responseData = error?.response?.data || {}
+  const rawMessage = responseData.msg || responseData.message || error?.message || ''
+  const code = responseData.errorCode
+    || rawMessage.match(/OPS_DB_[A-Z_]+/)?.[0]
+    || (responseData.code === 400 || error?.response?.status === 400 ? 'OPS_DB_INVALID_REQUEST' : null)
   const messages = {
     OPS_DB_TABLE_READ_ONLY: '当前表没有单列主键，页面仅支持只读查看。',
     OPS_DB_CONFLICT: '记录已被其他操作修改，请刷新后重试。',
@@ -268,6 +275,11 @@ function toggleSort(column) {
   loadRows().catch((error) => notifyError(error, '排序查询失败'))
 }
 
+function handlePageChange(page) {
+  currentPage.value = page
+  loadRows().catch((error) => notifyError(error, '分页查询失败'))
+}
+
 function rowValue(row, column) {
   return row?.values?.[typeof column === 'string' ? column : column?.name]
 }
@@ -317,7 +329,9 @@ async function saveRow() {
       const protectedForUpdate = column.primaryKey || column.name === primaryKey.value || column.autoIncrement || column.generated || column.readOnly
       if (rowMode.value === 'create' ? protectedForCreate : protectedForUpdate) return
       const value = rowForm.value[column.name]
-      if (value !== '' || !column.nullable) values[column.name] = value === '' && column.nullable ? null : value
+      if (value !== '' || !column.nullable || rowMode.value === 'edit') {
+        values[column.name] = value === '' && column.nullable ? null : value
+      }
     })
     if (rowMode.value === 'create') {
       await createTableRow(selectedDatabase.value, selectedTable.value, values)
@@ -408,6 +422,11 @@ watch(selectedDatabase, async () => {
   rows.value = []
   metadata.value = { columns: [], indexes: [], primaryKey: [], primaryKeyMode: 'NONE', writable: false }
   currentPage.value = 1
+  sortColumn.value = ''
+  sortOrder.value = 'asc'
+  rowQuery.value = ''
+  statusQuery.value = ''
+  view.value = 'data'
   await loadTables()
 })
 watch(selectedTable, () => {
@@ -418,10 +437,12 @@ watch(selectedTable, () => {
   rows.value = []
   total.value = null
   hasNext.value = false
+  sortColumn.value = ''
+  sortOrder.value = 'asc'
   metadata.value = { columns: [], indexes: [], primaryKey: [], primaryKeyMode: 'NONE', writable: false }
   if (selectedTable.value) loadTable()
 })
-watch([rowQuery, statusQuery], () => {
+watch(statusQuery, () => {
   currentPage.value = 1
   if (selectedTable.value) loadRows().catch((error) => notifyError(error, '筛选查询失败'))
 })
@@ -454,28 +475,28 @@ onMounted(loadCatalogs)
       <div v-if="errorMessage" class="database-error" role="alert"><WarningFilled /> {{ errorMessage }}</div>
       <div class="database-main-head">
         <div class="database-title">
-          <h2>{{ selectedTable || '数据库' }} <span v-if="selectedTable" class="table-status" :class="{ readonly: !writable }">{{ writable ? '可编辑' : '只读' }}</span></h2>
+          <h2><span class="database-title-name">{{ selectedTable || '数据库' }}</span> <span v-if="selectedTable" class="table-status" :class="{ readonly: !writable }">{{ writable ? '可编辑' : '只读' }}</span></h2>
           <p v-if="selectedTable">{{ currentTableInfo.comment || '数据表' }} · {{ currentTableInfo.rowCountEstimate ?? '—' }} 行 · {{ rowColumns.length }} 个字段 · {{ writable ? `主键 ${primaryKey}` : readOnlyReason }}</p>
           <p v-else>请选择一个数据表开始查看</p>
         </div>
         <div class="database-actions">
           <el-button text :icon="Refresh" :loading="tablesLoading || metadataLoading || rowsLoading" @click="refresh">刷新</el-button>
-          <el-button :icon="Plus" @click="newTableVisible = true">新建表</el-button>
+          <el-button :icon="Plus" :disabled="!selectedDatabase || databasesLoading" @click="newTableVisible = true">新建表</el-button>
         </div>
       </div>
 
       <template v-if="selectedTable">
         <div class="database-view-tabs" role="tablist">
-          <button type="button" role="tab" :aria-selected="view === 'data'" class="database-view-tab" :class="{ active: view === 'data' }" @click="view = 'data'">数据</button>
-          <button type="button" role="tab" :aria-selected="view === 'schema'" class="database-view-tab" :class="{ active: view === 'schema' }" @click="view = 'schema'">表结构</button>
+          <button id="database-view-data-tab" type="button" role="tab" :aria-controls="view === 'data' ? 'database-data-view' : undefined" :aria-selected="view === 'data'" class="database-view-tab" :class="{ active: view === 'data' }" @click="view = 'data'">数据</button>
+          <button id="database-view-schema-tab" type="button" role="tab" :aria-controls="view === 'schema' ? 'database-schema-view' : undefined" :aria-selected="view === 'schema'" class="database-view-tab" :class="{ active: view === 'schema' }" @click="view = 'schema'">表结构</button>
         </div>
 
-        <div v-if="view === 'data'" class="database-data-view">
+        <div v-if="view === 'data'" id="database-data-view" class="database-data-view" role="tabpanel" aria-labelledby="database-view-data-tab">
           <div class="database-toolbar">
             <div class="database-filters">
               <el-input v-model="rowQuery" class="row-filter" placeholder="筛选当前页" aria-label="筛选当前页" clearable />
               <span class="row-filter-hint">仅筛选当前已加载页面</span>
-              <el-select v-if="hasStatusColumn" v-model="statusQuery" class="status-filter" clearable placeholder="全部状态"><el-option v-for="status in ['待处理', '已支付', '已发货', '已完成']" :key="status" :label="status" :value="status" /></el-select>
+              <el-input v-if="hasStatusColumn" v-model="statusQuery" class="status-filter" clearable placeholder="status 精确筛选" aria-label="status 精确筛选" />
             </div>
             <el-button type="primary" :icon="Plus" :disabled="!writable" @click="openRowDrawer()">新增行</el-button>
           </div>
@@ -491,11 +512,11 @@ onMounted(loadCatalogs)
               <template #empty><div class="database-empty">没有匹配的记录</div></template>
             </el-table>
           </div>
-          <div class="database-footer"><span>{{ rowRangeText }}</span><el-pagination v-model:current-page="currentPage" layout="prev, pager, next" :page-count="pageCount" :disabled="rowsLoading" @current-change="loadRows" /></div>
+          <div class="database-footer"><span>{{ rowRangeText }}</span><el-pagination v-model:current-page="currentPage" layout="prev, pager, next" :page-count="pageCount" :disabled="rowsLoading" @current-change="handlePageChange" /></div>
         </div>
 
-        <div v-else class="database-schema-view">
-          <div class="schema-intro"><p>字段定义 · 类型和默认值由服务端安全校验</p><el-button class="add-field-button" :icon="Plus" :disabled="!selectedTable || tablesLoading || metadataLoading || !rowColumns.length" @click="fieldVisible = true">添加字段</el-button></div>
+        <div v-else id="database-schema-view" class="database-schema-view" role="tabpanel" aria-labelledby="database-view-schema-tab">
+          <div class="schema-intro"><p>字段定义 · 类型和默认值由服务端安全校验</p><el-button class="add-field-button" :icon="Plus" :disabled="!selectedTable || tablesLoading || metadataLoading || !rowColumns.length || String(currentTableInfo.tableType || '').toUpperCase() === 'VIEW'" @click="fieldVisible = true">添加字段</el-button></div>
           <el-table v-loading="metadataLoading" :data="rowColumns" class="schema-table">
             <el-table-column prop="name" label="字段" min-width="190"><template #default="scope"><code>{{ scope.row.name }}</code><el-tag v-if="scope.row.name === primaryKey" size="small" effect="plain"><Key /> 主键</el-tag><el-tag v-if="scope.row.generated || scope.row.readOnly" size="small" type="info" effect="plain">只读</el-tag></template></el-table-column>
             <el-table-column label="类型" min-width="140"><template #default="scope"><code>{{ scope.row.typeName }}</code></template></el-table-column>
@@ -519,8 +540,8 @@ onMounted(loadCatalogs)
       </el-form>
     </el-drawer>
 
-    <el-dialog v-model="newTableVisible" title="新建表" width="420px"><el-form label-position="top" @submit.prevent="submitNewTable"><el-form-item label="表名" required><el-input v-model="newTableForm.name" pattern="[A-Za-z][A-Za-z0-9_]*" placeholder="例如 customer_notes" /></el-form-item><p class="field-hint">使用字母、数字和下划线，需以字母开头。将创建 id（自增主键）和 created_at 字段。</p><el-form-item label="说明"><el-input v-model="newTableForm.comment" placeholder="例如 客户备注" /></el-form-item><div class="dialog-actions"><el-button @click="newTableVisible = false">取消</el-button><el-button type="primary" native-type="submit" :loading="saving">创建表</el-button></div></el-form></el-dialog>
-    <el-dialog v-model="fieldVisible" title="添加字段" width="460px"><el-form label-position="top" @submit.prevent="submitField"><el-form-item label="字段名" required><el-input v-model="fieldForm.name" pattern="[A-Za-z][A-Za-z0-9_]*" placeholder="例如 note" /></el-form-item><el-form-item label="类型"><el-select v-model="fieldForm.type" class="full-width"><el-option v-for="type in ['VARCHAR(255)', 'INT', 'BIGINT', 'DECIMAL(10,2)', 'DATETIME', 'DATE', 'TEXT', 'JSON']" :key="type" :label="type" :value="type" /></el-select></el-form-item><el-form-item label="允许空值"><el-switch v-model="fieldForm.nullable" /></el-form-item><el-form-item label="默认值"><el-input v-model="fieldForm.defaultValue" placeholder="留空表示无默认值" /></el-form-item><div class="dialog-actions"><el-button @click="fieldVisible = false">取消</el-button><el-button type="primary" native-type="submit" :loading="saving">添加字段</el-button></div></el-form></el-dialog>
+    <el-dialog v-model="newTableVisible" class="database-dialog" title="新建表" width="420px"><el-form label-position="top" @submit.prevent="submitNewTable"><el-form-item label="表名" required><el-input v-model="newTableForm.name" pattern="[A-Za-z][A-Za-z0-9_]*" placeholder="例如 customer_notes" /></el-form-item><p class="field-hint">使用字母、数字和下划线，需以字母开头。将创建 id（自增主键）和 created_at 字段。</p><el-form-item label="说明"><el-input v-model="newTableForm.comment" placeholder="例如 客户备注" /></el-form-item><div class="dialog-actions"><el-button @click="newTableVisible = false">取消</el-button><el-button type="primary" native-type="submit" :loading="saving">创建表</el-button></div></el-form></el-dialog>
+    <el-dialog v-model="fieldVisible" class="database-dialog" title="添加字段" width="460px"><el-form label-position="top" @submit.prevent="submitField"><el-form-item label="字段名" required><el-input v-model="fieldForm.name" pattern="[A-Za-z][A-Za-z0-9_]*" placeholder="例如 note" /></el-form-item><el-form-item label="类型"><el-select v-model="fieldForm.type" class="full-width"><el-option v-for="type in ['VARCHAR(255)', 'INT', 'BIGINT', 'DECIMAL(10,2)', 'DATETIME', 'DATE', 'TEXT', 'JSON']" :key="type" :label="type" :value="type" /></el-select></el-form-item><el-form-item label="允许空值"><el-switch v-model="fieldForm.nullable" /></el-form-item><el-form-item label="默认值"><el-input v-model="fieldForm.defaultValue" placeholder="留空表示无默认值" /></el-form-item><div class="dialog-actions"><el-button @click="fieldVisible = false">取消</el-button><el-button type="primary" native-type="submit" :loading="saving">添加字段</el-button></div></el-form></el-dialog>
   </section>
 </template>
 
@@ -530,6 +551,23 @@ onMounted(loadCatalogs)
 .database-label,.database-table-heading { display:block; margin:0 0 6px; color:var(--color-text-secondary); font-size:var(--font-size-xs); font-weight:600; }
 .row-filter-hint { color:var(--color-text-tertiary); font-size:11px; white-space:nowrap; }
 .database-select { width:100%; }.database-meta { display:flex; justify-content:space-between; gap:8px; margin:8px 1px 18px; color:var(--color-text-tertiary); font-size:var(--font-size-xs); }.online-dot { display:inline-flex; align-items:center; gap:5px; color:var(--color-success); }.online-dot:before { content:""; width:6px; height:6px; border-radius:50%; background:var(--color-success); }.database-table-heading small { color:var(--color-text-tertiary); font-weight:400; }.database-table-list { display:flex; flex:1 1 auto; flex-direction:column; gap:2px; min-height:100px; margin-top:9px; overflow:auto; }.database-table-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 9px; border:1px solid transparent; border-radius:7px; color:var(--color-text-secondary); background:transparent; text-align:left; }.database-table-item:hover { background:var(--color-bg-hover); }.database-table-item.active { border-color:#F1C4A9; color:var(--accent); background:var(--accent-soft); }.database-table-name { display:flex; min-width:0; align-items:center; gap:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-family-mono); font-size:13px; }.table-glyph { color:var(--color-text-tertiary); }.database-table-count { flex:none; color:var(--color-text-tertiary); font-size:11px; }.database-table-count small { font-size:10px; }.database-empty { padding:24px 8px; color:var(--color-text-tertiary); font-size:var(--font-size-xs); text-align:center; }.database-sidebar-foot { margin-top:12px; padding:12px 4px 0; border-top:1px solid var(--color-border-subtle); color:var(--color-text-tertiary); font-size:var(--font-size-xs); }.database-main { display:flex; flex:1 1 auto; flex-direction:column; min-width:0; }.database-error { display:flex; align-items:center; gap:6px; padding:8px 20px; border-bottom:1px solid var(--color-danger-soft); color:var(--color-danger); font-size:var(--font-size-xs); }.database-main-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:18px 20px 14px; border-bottom:1px solid var(--color-border-subtle); }.database-title { min-width:0; }.database-title h2 { display:flex; align-items:center; gap:8px; margin:0; font-size:18px; }.database-title p { margin:4px 0 0; color:var(--color-text-tertiary); font-size:12px; }.table-status { display:inline-flex; padding:2px 7px; border-radius:999px; color:var(--color-success); background:var(--color-success-soft); font-size:11px; font-weight:500; }.table-status.readonly { color:var(--color-text-tertiary); background:var(--color-bg-muted); }.database-actions,.database-filters,.row-actions,.drawer-actions,.dialog-actions { display:flex; align-items:center; gap:8px; }.database-actions { flex:none; }.database-view-tabs { display:flex; gap:22px; padding:0 20px; border-bottom:1px solid var(--color-border-subtle); }.database-view-tab { position:relative; padding:13px 2px 11px; border:0; color:var(--color-text-tertiary); background:transparent; }.database-view-tab.active { color:var(--accent); font-weight:600; }.database-view-tab.active:after { position:absolute; right:0; bottom:-1px; left:0; height:2px; border-radius:2px 2px 0 0; background:var(--accent); content:""; }.database-data-view,.database-schema-view { display:flex; flex:1 1 auto; flex-direction:column; min-height:0; }.database-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px 20px; }.row-filter { width:230px; }.status-filter { width:150px; }.database-table-scroll { flex:1 1 auto; min-height:260px; overflow:auto; border-top:1px solid var(--color-border-subtle); border-bottom:1px solid var(--color-border-subtle); }.database-data-table,.schema-table { min-width:760px; height:100%; }.database-data-table :deep(.el-table__body-wrapper),.schema-table :deep(.el-table__body-wrapper) { overflow-y:auto; }.sort-button { padding:0; border:0; color:inherit; background:transparent; font:inherit; cursor:pointer; }.sort-button span { color:var(--color-text-disabled); }.sort-button.sorted span { color:var(--accent); }.muted-cell { color:var(--color-text-tertiary); }.key-cell { color:var(--color-text-primary); font-family:var(--font-family-mono); }.status-pill { display:inline-flex; padding:2px 7px; border-radius:999px; font-size:11px; }.status-success { color:var(--color-success); background:var(--color-success-soft); }.status-warning { color:var(--color-warning); background:var(--color-warning-soft); }.status-muted { color:var(--color-text-tertiary); background:var(--color-bg-muted); }.database-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 20px; color:var(--color-text-tertiary); font-size:12px; }.schema-intro { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 20px 12px; }.schema-intro p { margin:0; color:var(--color-text-tertiary); font-size:12px; }.add-field-button { color:var(--accent); border-color:#EDC1A7; background:var(--accent-soft); }.schema-table { height:auto; margin:0 20px; width:calc(100% - 40px); }.schema-note { display:flex; align-items:flex-start; gap:7px; margin:16px 20px; padding:10px 12px; border:1px solid var(--color-border-subtle); border-radius:6px; color:var(--color-text-tertiary); background:var(--color-bg-muted); font-size:12px; }.schema-note :deep(svg) { flex:none; width:15px; color:var(--color-warning); }.drawer-intro { margin:0 0 18px; color:var(--color-text-tertiary); font-size:12px; }.field-hint { margin-top:4px; color:var(--color-text-tertiary); font-size:11px; line-height:1.4; }.full-width { width:100%; }.drawer-actions,.dialog-actions { justify-content:flex-end; margin-top:20px; }
-@media (max-width:640px) { .database-workspace { flex-direction:column; min-height:calc(100dvh - var(--layout-tab-bar-height) - 190px); border-radius:var(--radius-md); overflow:auto; }.database-sidebar { flex:0 0 auto; border-right:0; border-bottom:1px solid var(--color-border-subtle); }.database-table-list { flex:0 0 auto; max-height:116px; }.database-sidebar-foot { display:none; }.database-main { min-height:540px; }.database-main-head { padding:14px 12px 12px; }.database-title h2 { font-size:16px; }.database-title p { max-width:220px; line-height:1.45; }.database-actions { gap:2px; }.database-actions :deep(.el-button) { padding:0 7px; }.database-toolbar { align-items:stretch; flex-direction:column; padding:12px; }.database-filters { width:100%; }.row-filter { flex:1; width:auto; }.status-filter { width:130px; }.database-table-scroll { min-height:270px; }.database-footer { padding:10px 12px; }.database-footer :deep(.el-pagination) { --el-pagination-button-width:26px; }.database-view-tabs { padding:0 12px; }.schema-intro { align-items:flex-start; padding:14px 12px 10px; }.schema-table { margin:0 12px; width:calc(100% - 24px); }.schema-note { margin:12px; }.database-error { padding:8px 12px; }.database-row-drawer { width:100% !important; } }
+@media (max-width:640px) { .database-workspace { flex-direction:column; min-height:calc(100dvh - var(--layout-tab-bar-height) - 190px); border-radius:var(--radius-md); overflow:auto; }.database-sidebar { flex:0 0 auto; border-right:0; border-bottom:1px solid var(--color-border-subtle); }.database-table-list { flex:0 0 auto; max-height:116px; }.database-sidebar-foot { display:none; }.database-main { min-height:540px; }.database-main-head { padding:14px 12px 12px; }.database-title h2 { font-size:16px; gap:6px; }.database-title p { max-width:220px; line-height:1.45; }.database-actions { gap:2px; }.database-actions :deep(.el-button) { min-height:36px; padding:0 7px; }.database-toolbar { align-items:stretch; flex-direction:column; padding:12px; }.database-filters { width:100%; }.row-filter { flex:1; width:auto; }.status-filter { width:130px; }.database-table-scroll { min-height:270px; }.database-footer { flex-wrap:wrap; padding:10px 12px; }.database-footer > span { flex:1 1 100%; }.database-footer :deep(.el-pagination) { --el-pagination-button-width:26px; margin:0 auto; }.database-view-tabs { padding:0 12px; }.schema-intro { align-items:flex-start; padding:14px 12px 10px; }.schema-table { margin:0 12px; width:calc(100% - 24px); }.schema-note { margin:12px; }.database-error { padding:8px 12px; }.database-row-drawer { width:100% !important; } }
+@media (max-width:640px) { :deep(.database-dialog) { width:calc(100vw - 24px) !important; max-width:480px; margin:8vh auto 0; } }
 @media (max-width:640px) { .database-filters { flex-wrap:wrap; }.row-filter-hint { order:3; width:100%; } }
+.database-title-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width:640px) {
+  .database-table-item,
+  .database-view-tab,
+  .database-actions :deep(.el-button),
+  .database-toolbar :deep(.el-input__wrapper),
+  .database-toolbar :deep(.el-select__wrapper),
+  .database-sidebar :deep(.el-input__wrapper),
+  .add-field-button,
+  .drawer-actions :deep(.el-button),
+  .dialog-actions :deep(.el-button),
+  .database-footer :deep(.el-pagination button),
+  .database-footer :deep(.el-pagination .el-pager li) {
+    min-height: 44px;
+  }
+}
 </style>

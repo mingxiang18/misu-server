@@ -138,6 +138,42 @@ class Handler(BaseHTTPRequestHandler):
                     self.headers.get("Cookie", ""),
                 ))
                 return
+        if role == "qbittorrent" and self.path.startswith("/api/v2/"):
+            self.append("QBITTORRENT_UPSTREAM_HEADERS path=%s origin=%s referer=%s accept_encoding=%s" % (
+                self.path,
+                self.headers.get("Origin", ""),
+                self.headers.get("Referer", ""),
+                self.headers.get("Accept-Encoding", ""),
+            ))
+            body = "QBITTORRENT_UPSTREAM path=%s host=%s cookie=%s auth=%s user=%s groups=%s group=%s email=%s id_token=%s ops_user=%s ops_target=%s ops_key=%s original_uri=%s original_host=%s origin=%s referer=%s" % (
+                self.path,
+                self.headers.get("Host", ""),
+                self.headers.get("Cookie", ""),
+                self.headers.get("Authorization", ""),
+                self.headers.get("X-Forwarded-User", ""),
+                self.headers.get("X-Forwarded-Groups", ""),
+                self.headers.get("X-Forwarded-Group", ""),
+                self.headers.get("X-Forwarded-Email", ""),
+                self.headers.get("X-Forwarded-Id-Token", ""),
+                self.headers.get("X-Ops-User", ""),
+                self.headers.get("X-Ops-Console-Target", ""),
+                self.headers.get("X-Ops-Proxy-Key", ""),
+                self.headers.get("X-Original-URI", ""),
+                self.headers.get("X-Original-Host", ""),
+                self.headers.get("Origin", ""),
+                self.headers.get("Referer", ""),
+            )
+            self.append(body)
+            # Deliberately return the headers that must be hidden at the edge.
+            # The test would fail if any of these reached the browser.
+            self.write(200, body, headers={
+                "Content-Type": "application/json",
+                "Set-Cookie": "QBT_SID_30120=server-only; Path=/",
+                "X-CSRF-Token": "csrf-server-only",
+                "X-QBittorrent-Session": "csrf-server-only",
+                "Authorization": "Bearer server-only",
+            })
+            return
         self.append("%s_UPSTREAM path=%s host=%s cookie=%s auth=%s user=%s groups=%s group=%s email=%s id_token=%s ops_user=%s ops_target=%s ops_key=%s original_uri=%s original_host=%s" % (
             role.upper(),
             self.path,

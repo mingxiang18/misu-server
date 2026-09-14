@@ -90,6 +90,9 @@ rg -q 'API_BACKEND path=/ops/api/ops/ping auth=Bearer main-jwt cookie= forwarded
 
 code=$(curl -sS -o "${TMP_DIR}/unauthorized" -w '%{http_code}' -H 'Host: api.misu.chat' "http://127.0.0.1:${NGINX_PORT}/nacos/")
 [[ "${code}" == 401 ]]
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: api.misu.chat' \
+  "http://127.0.0.1:${NGINX_PORT}/ops/qbittorrent/api/v2/torrents/info?filter=all")
+[[ "${code}" == 401 ]]
 code=$(curl -sS -o "${TMP_DIR}/nacos" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=nacos-session' \
   -H 'X-Forwarded-User: attacker' -H 'X-Forwarded-Groups: attacker-group' \
   -H 'X-Forwarded-Group: attacker-group-compat' -H 'X-Forwarded-Email: attacker@example.com' \
@@ -121,7 +124,7 @@ code=$(curl -sS -D "${TMP_DIR}/qbittorrent-headers" -o "${TMP_DIR}/qbittorrent" 
 [[ "${code}" == 200 ]]
 rg -q 'QBITTORRENT_UPSTREAM path=/api/v2/app/version' "${TMP_DIR}/qbittorrent"
 rg -q 'QBITTORRENT_UPSTREAM.*host=host\.docker\.internal:18120 cookie=QBT_SID_30120=server-only auth= user= groups= group= email= id_token= ops_user= ops_target= ops_key= original_uri= original_host=' "${TMP_DIR}/qbittorrent"
-if rg -q 'csrf-server-only|Set-Cookie|server-only' "${TMP_DIR}/qbittorrent-headers"; then
+if rg -qi '^Set-Cookie:|^X-CSRF-Token:|^X-QBittorrent-Session:|^Authorization:' "${TMP_DIR}/qbittorrent-headers"; then
   echo 'qBittorrent upstream credential leaked to browser' >&2
   exit 1
 fi
@@ -130,6 +133,30 @@ code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: api.misu.chat' \
   "http://127.0.0.1:${NGINX_PORT}/ops/qbittorrent")
 [[ "${code}" == 308 ]]
 rg -q 'QBITTORRENT_UPSTREAM path=/api/v2/app/version' "${TMP_DIR}/qbittorrent"
+
+code=$(curl -sS -D "${TMP_DIR}/qbittorrent-info-headers" -o "${TMP_DIR}/qbittorrent-info" -w '%{http_code}' \
+  -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=qbittorrent-session' \
+  -H 'Origin: https://server.misu.chat' -H 'Referer: https://server.misu.chat/ops/' \
+  "http://127.0.0.1:${NGINX_PORT}/ops/qbittorrent/api/v2/torrents/info?filter=all")
+[[ "${code}" == 200 ]]
+rg -q 'QBITTORRENT_UPSTREAM path=/api/v2/torrents/info\?filter=all' "${TMP_DIR}/qbittorrent-info"
+rg -q 'QBITTORRENT_UPSTREAM.*cookie=QBT_SID_30120=server-only auth= user= groups= group= email= id_token= ops_user= ops_target= ops_key= original_uri= original_host=' "${TMP_DIR}/qbittorrent-info"
+rg -q 'QBITTORRENT_UPSTREAM_HEADERS path=/api/v2/torrents/info\?filter=all origin=http://host.docker.internal:18120 referer=http://host.docker.internal:18120/' "${MOCK_LOG}"
+if rg -qi 'QBT_SID|csrf-server-only|X-CSRF-Token|X-QBittorrent-Session|Set-Cookie|Authorization' "${TMP_DIR}/qbittorrent-info-headers"; then
+  echo 'qBittorrent sensitive response header leaked on torrents/info' >&2
+  exit 1
+fi
+
+code=$(curl -sS -D "${TMP_DIR}/qbittorrent-maindata-headers" -o "${TMP_DIR}/qbittorrent-maindata" -w '%{http_code}' \
+  -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=qbittorrent-session' \
+  "http://127.0.0.1:${NGINX_PORT}/ops/qbittorrent/api/v2/sync/maindata?rid=0")
+[[ "${code}" == 200 ]]
+rg -q 'QBITTORRENT_UPSTREAM path=/api/v2/sync/maindata\?rid=0' "${TMP_DIR}/qbittorrent-maindata"
+rg -q 'QBITTORRENT_UPSTREAM_HEADERS path=/api/v2/sync/maindata\?rid=0 origin=http://host.docker.internal:18120 referer=http://host.docker.internal:18120/' "${MOCK_LOG}"
+if rg -qi 'QBT_SID|csrf-server-only|X-CSRF-Token|X-QBittorrent-Session|Set-Cookie|Authorization' "${TMP_DIR}/qbittorrent-maindata-headers"; then
+  echo 'qBittorrent sensitive response header leaked on sync/maindata' >&2
+  exit 1
+fi
 code=$(curl -sS -o "${TMP_DIR}/headlamp-token" -w '%{http_code}' -H 'Host: api.misu.chat' -H 'Cookie: MISU_OPS_SESSION=headlamp-session' "http://127.0.0.1:${NGINX_PORT}/ops/headlamp/c/main/token")
 [[ "${code}" == 200 ]]
 rg -q 'HEADLAMP_UPSTREAM path=/ops/headlamp/c/main/token.*user=admin' "${TMP_DIR}/headlamp-token"
@@ -242,6 +269,16 @@ rg -q 'NACOS_UPSTREAM path=/nacos/v1/console/server/state\?format=json' "${TMP_D
 code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: api.misu.chat' "http://127.0.0.1:${NGINX_PORT}/nacos")
 [[ "${code}" == 308 ]]
 code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: api.misu.chat' "http://127.0.0.1:${NGINX_PORT}/unknown")
+[[ "${code}" == 404 ]]
+code=$(curl -sS -D "${TMP_DIR}/main-qb-redirect-headers" -o /dev/null -w '%{http_code}' \
+  -H 'Host: server.misu.chat' "http://127.0.0.1:${MAIN_NGINX_PORT}/ops/qbittorrent")
+[[ "${code}" == 308 ]]
+if tr -d '\r' < "${TMP_DIR}/main-qb-redirect-headers" | rg -qi '^Location: https?://|:30110'; then
+  echo 'main Nginx redirect leaked internal origin' >&2
+  exit 1
+fi
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: server.misu.chat' \
+  "http://127.0.0.1:${MAIN_NGINX_PORT}/ops/internal/proxy-auth")
 [[ "${code}" == 404 ]]
 code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: attacker.example' "http://127.0.0.1:${NGINX_PORT}/nacos/")
 [[ "${code}" == 421 ]]

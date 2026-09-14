@@ -25,6 +25,7 @@ import static com.misu.ops.database.DatabaseModels.CreateTableRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OpsDatabaseServiceJdbcTest {
 
@@ -112,7 +113,37 @@ class OpsDatabaseServiceJdbcTest {
     }
 
     @Test
+    void nullFilterEntryIsRejectedAsBadRequestBeforeQuery() {
+        ResultSet tables = resultSet(List.of(row("TABLE_NAME", "users", "TABLE_TYPE", "TABLE")));
+        ResultSet columns = resultSet(List.of(row(
+                "COLUMN_NAME", "id", "DATA_TYPE", Types.INTEGER, "TYPE_NAME", "INT",
+                "COLUMN_SIZE", 10, "DECIMAL_DIGITS", 0,
+                "NULLABLE", DatabaseMetaData.columnNoNulls, "COLUMN_DEF", null,
+                "IS_AUTOINCREMENT", "NO", "IS_GENERATEDCOLUMN", "NO")));
+        ResultSet empty = resultSet(List.of());
+        DatabaseMetaData metadata = proxy(DatabaseMetaData.class, (ignored, method, args) -> switch (method.getName()) {
+            case "getTables" -> tables;
+            case "getColumns" -> columns;
+            case "getPrimaryKeys", "getIndexInfo" -> empty;
+            default -> defaultValue(method.getReturnType());
+        });
+        Connection connection = proxy(Connection.class, (ignored, method, args) -> {
+            if ("getMetaData".equals(method.getName())) return metadata;
+            if ("prepareStatement".equals(method.getName())) throw new AssertionError("query must not execute");
+            return defaultValue(method.getReturnType());
+        });
+        DataSource dataSource = proxy(DataSource.class, (ignored, method, args) ->
+                "getConnection".equals(method.getName()) ? connection : defaultValue(method.getReturnType()));
+
+        ServiceException exception = assertThrows(ServiceException.class,
+                () -> service(dataSource).rows("misu_test", "users", 1, 10, null, "asc", "[null]"));
+
+        assertEquals(400, exception.getCode());
+    }
+
+    @Test
     void rowsKeepBigIntAndDecimalPrecisionAsStrings() {
+        List<String> sql = new ArrayList<>();
         ResultSet tables = resultSet(List.of(row("TABLE_NAME", "payments", "TABLE_TYPE", "TABLE")));
         ResultSet columns = resultSet(List.of(
                 row("COLUMN_NAME", "id", "DATA_TYPE", Types.BIGINT, "TYPE_NAME", "BIGINT",
@@ -138,16 +169,49 @@ class OpsDatabaseServiceJdbcTest {
                 "executeQuery".equals(method.getName()) ? rows : defaultValue(method.getReturnType()));
         Connection connection = proxy(Connection.class, (ignored, method, args) -> {
             if ("getMetaData".equals(method.getName())) return metadata;
-            if ("prepareStatement".equals(method.getName())) return statement;
+            if ("prepareStatement".equals(method.getName())) {
+                sql.add((String) args[0]);
+                return statement;
+            }
             return defaultValue(method.getReturnType());
         });
         DataSource dataSource = proxy(DataSource.class, (ignored, method, args) ->
                 "getConnection".equals(method.getName()) ? connection : defaultValue(method.getReturnType()));
 
-        var page = service(dataSource).rows("misu_test", "payments", 1, 10, null, "asc", null);
+        var page = service(dataSource).rows("misu_test", "payments", 1, 10, "amount", "asc", null);
 
         assertEquals("9223372036854775807", page.items().get(0).values().get("id"));
         assertEquals("12345678901234567890.1234567890", page.items().get(0).values().get("amount"));
+        assertTrue(sql.get(0).contains("ORDER BY `amount` ASC, `id` ASC LIMIT ? OFFSET ?"));
+    }
+
+    @Test
+    void invalidMetadataIdentifierIsRejectedBeforeQuery() {
+        ResultSet tables = resultSet(List.of(row("TABLE_NAME", "users", "TABLE_TYPE", "TABLE")));
+        ResultSet columns = resultSet(List.of(row(
+                "COLUMN_NAME", "订单号", "DATA_TYPE", Types.INTEGER, "TYPE_NAME", "INT",
+                "COLUMN_SIZE", 10, "DECIMAL_DIGITS", 0,
+                "NULLABLE", DatabaseMetaData.columnNullable, "COLUMN_DEF", null,
+                "IS_AUTOINCREMENT", "NO", "IS_GENERATEDCOLUMN", "NO")));
+        ResultSet empty = resultSet(List.of());
+        DatabaseMetaData metadata = proxy(DatabaseMetaData.class, (ignored, method, args) -> switch (method.getName()) {
+            case "getTables" -> tables;
+            case "getColumns" -> columns;
+            case "getPrimaryKeys", "getIndexInfo" -> empty;
+            default -> defaultValue(method.getReturnType());
+        });
+        Connection connection = proxy(Connection.class, (ignored, method, args) -> {
+            if ("getMetaData".equals(method.getName())) return metadata;
+            if ("prepareStatement".equals(method.getName())) throw new AssertionError("query must not execute");
+            return defaultValue(method.getReturnType());
+        });
+        DataSource dataSource = proxy(DataSource.class, (ignored, method, args) ->
+                "getConnection".equals(method.getName()) ? connection : defaultValue(method.getReturnType()));
+
+        ServiceException exception = assertThrows(ServiceException.class,
+                () -> service(dataSource).rows("misu_test", "users", 1, 10, null, "asc", null));
+
+        assertEquals(400, exception.getCode());
     }
 
     @Test

@@ -455,6 +455,7 @@ import { playMyVideo } from '@/api/fileServer/videoRoom';
 import FilePathSelector from "@/components/fileServer/FilePathSelector.vue";
 import {addUserTorrent as addUserTorrentApi} from "@/api/fileServer/torrent";
 import {getUserInfo} from "@/api/user/user";
+import {getToken} from "@/api/auth/token";
 
 // 接收外部传入的接口函数
 const props = defineProps({
@@ -790,9 +791,7 @@ const downloadDirectoryZip = (file) => {
 };
 
 const getRawToken = () => {
-  const cookieMatch = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('User-Token='));
-  if (cookieMatch) return cookieMatch.substring('User-Token='.length);
-  return '';
+  return getToken() || '';
 };
 
 // ===== M8：搜索 =====

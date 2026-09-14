@@ -9,6 +9,9 @@
   "scripts": {
     "dev": "concurrently vite \"nodemon --exec electron . --watch ./ --ext .js,.html,.css,.vue\"",
     "build": "vite build",
+    "test:auth-cookie-contract": "node scripts/auth-cookie-contract.test.mjs",
+    "test:database-contract": "node scripts/database-contract.test.mjs",
+    "test:qbittorrent-bridge": "node src/views/ops/qbittorrentParentBridge.test.mjs",
     "preview": "vite preview",
     "start": "electron .",
     "pack": "electron-builder --dir",
