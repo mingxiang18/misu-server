@@ -28,6 +28,7 @@ template = template.gsub('127.0.0.1:30264', 'host.docker.internal:30264')
   .gsub('q-bit-torrent-pi.misu-server.svc.cluster.local:30120', 'host.docker.internal:18120')
 File.write(destination, template)
 RB
+rg -q 'proxy_set_header Host host\.docker\.internal:18120;' "${TMP_DIR}/nginx.conf"
 
 ruby - "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-server-nginx-config.yaml" "${TMP_DIR}/main-nginx.conf" "${NGINX_PORT}" <<'RB'
 require 'yaml'
@@ -119,7 +120,7 @@ code=$(curl -sS -D "${TMP_DIR}/qbittorrent-headers" -o "${TMP_DIR}/qbittorrent" 
   "http://127.0.0.1:${NGINX_PORT}/ops/qbittorrent/api/v2/app/version")
 [[ "${code}" == 200 ]]
 rg -q 'QBITTORRENT_UPSTREAM path=/api/v2/app/version' "${TMP_DIR}/qbittorrent"
-rg -q 'QBITTORRENT_UPSTREAM.*cookie=QBT_SID_30120=server-only auth= user= groups= group= email= id_token= ops_user= ops_target= ops_key= original_uri= original_host=' "${TMP_DIR}/qbittorrent"
+rg -q 'QBITTORRENT_UPSTREAM.*host=host\.docker\.internal:18120 cookie=QBT_SID_30120=server-only auth= user= groups= group= email= id_token= ops_user= ops_target= ops_key= original_uri= original_host=' "${TMP_DIR}/qbittorrent"
 if rg -q 'csrf-server-only|Set-Cookie|server-only' "${TMP_DIR}/qbittorrent-headers"; then
   echo 'qBittorrent upstream credential leaked to browser' >&2
   exit 1

@@ -321,7 +321,7 @@ data:
           auth_request_set $ops_upstream_csrf $upstream_http_x_ops_upstream_csrf;
           proxy_pass http://misu_ops_qbittorrent/;
           proxy_http_version 1.1;
-          proxy_set_header Host q-bit-torrent-pi.misu-server.svc.cluster.local;
+          proxy_set_header Host q-bit-torrent-pi.misu-server.svc.cluster.local:30120;
           proxy_set_header X-Forwarded-Host "";
           proxy_set_header X-Forwarded-Proto https;
           proxy_set_header Forwarded "";

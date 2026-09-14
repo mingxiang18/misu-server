@@ -163,6 +163,17 @@ routes.each do |name, path|
 end
 puts 'main nginx console Host routing invariants: PASS'
 RB
+ruby - "${ROOT_DIR}/scripts/deploy/k8s/misu-server/misu-ops-nginx-config.yaml" <<'RB'
+require 'yaml'
+template = YAML.load_stream(File.read(ARGV.fetch(0))).first.dig('data', 'nginx.conf.template')
+raise 'missing sidecar nginx template' unless template
+block = template[/location \^~ \/ops\/qbittorrent\/ \{(.*?)^\s*\}/m, 1]
+raise 'missing qBittorrent sidecar route' unless block
+expected = 'proxy_set_header Host q-bit-torrent-pi.misu-server.svc.cluster.local:30120;'
+raise 'qBittorrent sidecar Host must include upstream port' unless block.include?(expected)
+raise 'qBittorrent sidecar Host must not omit upstream port' if block.include?('proxy_set_header Host q-bit-torrent-pi.misu-server.svc.cluster.local;')
+puts 'qBittorrent sidecar Host port invariant: PASS'
+RB
 rg -q 'proxy_hide_header X-CSRF-Token' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header X-Ops-Target nacos' "${TMP_DIR}/normal-nginx.yaml"
 rg -q 'proxy_set_header X-Ops-Target headlamp' "${TMP_DIR}/normal-nginx.yaml"
