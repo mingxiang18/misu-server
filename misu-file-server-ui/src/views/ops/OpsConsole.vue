@@ -13,7 +13,7 @@ const tabs = [
   { key: 'nacos', target: 'NACOS', label: 'Nacos 控制台', hint: '配置与服务管理' },
   { key: 'headlamp', target: 'HEADLAMP', label: 'Kubernetes', hint: 'Headlamp 集群控制台' },
   { key: 'ssh', label: 'SSH 终端', hint: '节点交互式终端' },
-  { key: 'qbittorrent', target: 'QBITTORRENT', label: '下载任务', hint: '文件与转码任务' },
+  { key: 'qbittorrent', target: 'QBITTORRENT', label: 'qBittorrent', hint: '下载与做种管理' },
   { key: 'database', label: '数据库', hint: '表数据与结构' }
 ]
 

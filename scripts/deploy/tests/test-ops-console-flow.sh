@@ -32,6 +32,8 @@ assert_order(load,
              'if (generation !== consoleGeneration || activeTab.value !== target) return',
              'issueConsoleTicket(consoleTarget)')
 assert 'consoleFrameName.value = `ops-console-' in source
+assert "label: 'qBittorrent', hint: '下载与做种管理'" in source
+assert "label: '下载任务'" not in source
 assert_order(load,
              'form.target = consoleFrameName.value',
              'consoleFrameNavigationStarted.value = true',
