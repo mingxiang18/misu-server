@@ -19,11 +19,11 @@ spec:
     spec:
       automountServiceAccountToken: false
       # Both images run without a service-account token or Linux capabilities.
-      # Keep the default user for now: the Java image must read the 0400 SSH
-      # Secret and the stock Nginx entrypoint renders /etc/nginx at startup.
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+        fsGroup: 101
+        fsGroupChangePolicy: OnRootMismatch
       terminationGracePeriodSeconds: 30
       affinity:
         nodeAffinity:
@@ -158,12 +158,22 @@ spec:
         - name: nginx
           image: nginx:1.27-alpine
           imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              envsubst '${OPS_PROXY_SHARED_SECRET}'
+              < /etc/nginx/templates/nginx.conf.template
+              > /tmp/nginx/nginx.conf
+              && exec nginx -c /tmp/nginx/nginx.conf -g 'daemon off;'
           securityContext:
             allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
           env:
-            - { name: NGINX_ENVSUBST_OUTPUT_DIR, value: "/etc/nginx" }
             - { name: OPS_PROXY_SHARED_SECRET, valueFrom: { secretKeyRef: { name: misu-ops-config, key: proxy-shared-secret } } }
           ports:
             - { name: http, containerPort: 8080, protocol: TCP }
@@ -197,6 +207,7 @@ spec:
             failureThreshold: 5
           volumeMounts:
             - { name: nginx-config, mountPath: /etc/nginx/templates/nginx.conf.template, subPath: nginx.conf.template, readOnly: true }
+            - { name: nginx-tmp, mountPath: /tmp/nginx }
       volumes:
         - name: nginx-config
           configMap: { name: "misu-ops-nginx-config-${OPS_CONFIG_TAG}" }
@@ -204,6 +215,8 @@ spec:
           secret:
             secretName: misu-ops-ssh
             defaultMode: 0400
+        - name: nginx-tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

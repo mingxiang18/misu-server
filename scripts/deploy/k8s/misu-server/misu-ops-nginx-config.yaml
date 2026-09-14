@@ -9,7 +9,7 @@ metadata:
 data:
   nginx.conf.template: |
     worker_processes 1;
-    pid /tmp/nginx.pid;
+    pid /tmp/nginx/nginx.pid;
 
     events {
       worker_connections 512;
@@ -18,6 +18,11 @@ data:
     http {
       include /etc/nginx/mime.types;
       default_type application/octet-stream;
+      client_body_temp_path /tmp/nginx/client_body_temp;
+      proxy_temp_path /tmp/nginx/proxy_temp;
+      fastcgi_temp_path /tmp/nginx/fastcgi_temp;
+      uwsgi_temp_path /tmp/nginx/uwsgi_temp;
+      scgi_temp_path /tmp/nginx/scgi_temp;
       map $http_cookie $ops_cookie_count {
         default 0;
         ~*MISU_OPS_SESSION=.*MISU_OPS_SESSION= 2;

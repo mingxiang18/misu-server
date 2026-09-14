@@ -96,6 +96,8 @@ deployment = YAML.load_stream(File.read(ARGV.fetch(0))).first
 pod = deployment.dig('spec', 'template', 'spec')
 seccomp = pod.dig('securityContext', 'seccompProfile', 'type')
 raise "expected RuntimeDefault seccomp profile, got #{seccomp.inspect}" unless seccomp == 'RuntimeDefault'
+raise 'expected nginx emptyDir fsGroup' unless pod.dig('securityContext', 'fsGroup') == 101
+raise 'expected OnRootMismatch fsGroup policy' unless pod.dig('securityContext', 'fsGroupChangePolicy') == 'OnRootMismatch'
 containers = pod.fetch('containers')
 raise 'expected misu-ops and nginx containers' unless containers.map { |entry| entry['name'] }.sort == %w[misu-ops nginx]
 containers.each do |container|
@@ -104,6 +106,19 @@ containers.each do |container|
   raise "#{container['name']} does not drop all capabilities" unless context.dig('capabilities', 'drop') == ['ALL']
 end
 puts 'RuntimeDefault + no privilege escalation + drop ALL on both containers: PASS'
+nginx = containers.find { |entry| entry['name'] == 'nginx' }
+nginx_context = nginx.fetch('securityContext')
+raise 'nginx must run as non-root' unless nginx_context['runAsNonRoot'] == true
+raise 'nginx must run as uid 101' unless nginx_context['runAsUser'] == 101
+raise 'nginx must run as gid 101' unless nginx_context['runAsGroup'] == 101
+raise 'nginx must use a read-only root filesystem' unless nginx_context['readOnlyRootFilesystem'] == true
+raise 'nginx must not add capabilities' if nginx_context.dig('capabilities', 'add')
+raise 'nginx must bypass the root entrypoint' unless nginx['command'] == ['/bin/sh', '-c'] && nginx['args'].join.include?("envsubst '${OPS_PROXY_SHARED_SECRET}'") && nginx['args'].join.include?("exec nginx -c /tmp/nginx/nginx.conf -g 'daemon off;'")
+raise 'nginx must not use entrypoint envsubst output override' if nginx.fetch('env', []).any? { |entry| entry['name'] == 'NGINX_ENVSUBST_OUTPUT_DIR' }
+tmp_volume = pod.fetch('volumes').find { |entry| entry['name'] == 'nginx-tmp' }
+raise 'nginx tmp volume must be emptyDir' unless tmp_volume&.key?('emptyDir')
+raise 'nginx must mount writable tmp volume' unless nginx.fetch('volumeMounts').any? { |entry| entry['name'] == 'nginx-tmp' && entry['mountPath'] == '/tmp/nginx' && entry['readOnly'] != true }
+puts 'nginx uid/gid 101 + read-only root + tmp emptyDir + direct envsubst startup: PASS'
 env = deployment.dig('spec', 'template', 'spec', 'containers').first.fetch('env')
 auth_refs = env.select { |entry| entry['valueFrom']&.dig('secretKeyRef', 'name') == 'misu-ops-nacos-auth' }
 raise 'expected both optional Nacos auth Secret refs' unless auth_refs.size == 2

@@ -22,8 +22,7 @@ require 'yaml'
 source, destination = ARGV
 template = YAML.load_stream(File.read(source)).first.dig('data', 'nginx.conf.template')
 raise 'missing nginx template' unless template
-template = template.gsub('${OPS_PROXY_SHARED_SECRET}', 'test-secret')
-  .gsub('127.0.0.1:30264', 'host.docker.internal:30264')
+template = template.gsub('127.0.0.1:30264', 'host.docker.internal:30264')
   .gsub('nacos.misu-server.svc.cluster.local:8848', 'host.docker.internal:18848')
   .gsub('headlamp.kuboard.svc.cluster.local:80', 'host.docker.internal:18080')
   .gsub('q-bit-torrent-pi.misu-server.svc.cluster.local:30120', 'host.docker.internal:18120')
@@ -40,7 +39,10 @@ File.write(destination, config)
 RB
 
 docker run --rm -d --name "${CONTAINER}" --add-host host.docker.internal:host-gateway -p "${NGINX_PORT}:8080" \
-  -v "${TMP_DIR}/nginx.conf:/etc/nginx/nginx.conf:ro" nginx:1.27-alpine nginx -g 'daemon off;' >/dev/null
+  --user 101:101 --read-only --tmpfs /tmp/nginx:rw,uid=101,gid=101,mode=755 \
+  -e OPS_PROXY_SHARED_SECRET=test-secret \
+  -v "${TMP_DIR}/nginx.conf:/etc/nginx/templates/nginx.conf.template:ro" \
+  nginx:1.27-alpine /bin/sh -c "envsubst '\${OPS_PROXY_SHARED_SECRET}' < /etc/nginx/templates/nginx.conf.template > /tmp/nginx/nginx.conf && exec nginx -c /tmp/nginx/nginx.conf -g 'daemon off;'" >/dev/null
 docker run --rm -d --name "${MAIN_CONTAINER}" --add-host host.docker.internal:host-gateway -p "${MAIN_NGINX_PORT}:30110" \
   -v "${TMP_DIR}/main-nginx.conf:/etc/nginx/nginx.conf:ro" nginx:1.27-alpine nginx -g 'daemon off;' >/dev/null
 for _ in {1..30}; do
