@@ -7,14 +7,15 @@ import { FitAddon } from '@xterm/addon-fit'
 import 'xterm/css/xterm.css'
 import { createSshSession, getWebSocketUrl, issueConsoleTicket, revokeSshSession } from '@/api/ops/ops'
 import DatabaseManagement from './DatabaseManagement.vue'
-import AiCliWorkspace from './AiCliWorkspace.vue'
+import AiCliTerminal from './AiCliTerminal.vue'
 import { installQbittorrentParentBridge, releaseQbittorrentParentBridge } from './qbittorrentParentBridge.mjs'
 
 const tabs = [
   { key: 'nacos', target: 'NACOS', label: 'Nacos 控制台', hint: '配置与服务管理' },
   { key: 'headlamp', target: 'HEADLAMP', label: 'Kubernetes', hint: 'Headlamp 集群控制台' },
   { key: 'ssh', label: 'SSH 终端', hint: '节点交互式终端' },
-  { key: 'ai-cli', label: 'AI CLI', hint: 'Codex / Claude Code' },
+  { key: 'codex-cli', tool: 'CODEX', label: 'Codex CLI', hint: 'Codex 交互式终端' },
+  { key: 'claude-code', tool: 'CLAUDE', label: 'Claude Code', hint: 'Claude Code 交互式终端' },
   { key: 'qbittorrent', target: 'QBITTORRENT', label: 'qBittorrent', hint: '下载与做种管理' },
   { key: 'database', label: '数据库', hint: '表数据与结构' }
 ]
@@ -91,6 +92,7 @@ function handleConsoleFrameError() {
 
 const activeTabInfo = computed(() => tabs.find((tab) => tab.key === activeTab.value))
 const activeNodeInfo = computed(() => nodes.find((node) => node.id === activeNode.value))
+const isAiCliTab = computed(() => Boolean(activeTabInfo.value?.tool))
 const isSshConnected = computed(() => sshStatus.value === 'connected')
 
 const statusText = computed(() => ({
@@ -324,7 +326,7 @@ function openActiveTab() {
       if (!terminal.value) createTerminal()
       resizeTerminal()
     })
-  } else if (activeTab.value === 'ai-cli' || activeTab.value === 'database') {
+  } else if (isAiCliTab.value || activeTab.value === 'database') {
     cancelConsoleLoad()
   } else {
     loadConsole(activeTab.value)
@@ -351,7 +353,7 @@ function createTerminal() {
 
 watch(activeTab, (tab, previous) => {
   if (previous === 'ssh' && tab !== 'ssh') disconnectSsh()
-  if (tab === 'ssh' || tab === 'ai-cli' || tab === 'database') cancelConsoleLoad()
+  if (tab === 'ssh' || isAiCliTab.value || tab === 'database') cancelConsoleLoad()
   openActiveTab()
 })
 
@@ -407,11 +409,11 @@ onBeforeUnmount(() => {
       <DatabaseManagement />
     </div>
 
-    <div v-else-if="activeTab === 'ai-cli'" id="ops-panel-ai-cli" class="ops-ai-cli-panel" role="tabpanel" aria-labelledby="ops-tab-ai-cli">
+    <div v-else-if="isAiCliTab" :id="`ops-panel-${activeTab}`" class="ops-ai-cli-panel" role="tabpanel" :aria-labelledby="`ops-tab-${activeTab}`">
       <div class="ops-panel-bar">
-        <div class="ops-panel-status"><Connection /> AI CLI</div>
+        <div class="ops-panel-status"><Connection /> {{ activeTabInfo.label }}</div>
       </div>
-      <AiCliWorkspace />
+      <AiCliTerminal :key="activeTab" :tool="activeTabInfo.tool" :label="activeTabInfo.label" />
     </div>
 
     <div v-else-if="activeTab !== 'ssh'" :id="`ops-panel-${activeTab}`" class="ops-console-panel" role="tabpanel" :aria-labelledby="`ops-tab-${activeTab}`">

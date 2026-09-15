@@ -10,8 +10,7 @@ import { getAiCliExitError } from './aiCliErrors.mjs'
 
 const props = defineProps({
   tool: { type: String, required: true },
-  label: { type: String, required: true },
-  visible: { type: Boolean, default: true }
+  label: { type: String, required: true }
 })
 
 const terminalHost = ref(null)
@@ -60,7 +59,7 @@ function sendInput(data) {
 }
 
 function resize() {
-  if (!fitAddon.value || !terminal.value || !props.visible) return
+  if (!fitAddon.value || !terminal.value) return
   try {
     fitAddon.value.fit()
     send({ type: 'resize', cols: terminal.value.cols, rows: terminal.value.rows })
@@ -196,10 +195,6 @@ function createTerminal() {
   resizeObserver.observe(terminalHost.value)
   nextTick(resize)
 }
-
-watch(() => props.visible, (visible) => {
-  if (visible) nextTick(resize)
-})
 
 onMounted(() => {
   document.addEventListener('fullscreenchange', syncFullScreen)
