@@ -25,6 +25,11 @@ grep -Fq 'readonly WORKSPACE="${APP_ROOT}/workspace"' "$INSTALLER" || fail "work
 grep -Fq 'readonly WRAPPER="/usr/local/bin/misu-ai-cli"' "$INSTALLER" || fail "wrapper path changed"
 grep -Fq 'ANTHROPIC_BASE_URL' "$INSTALLER" || fail "Anthropic base URL wiring missing"
 grep -Fq 'ANTHROPIC_AUTH_TOKEN' "$INSTALLER" || fail "Anthropic auth token wiring missing"
+for model_env in ANTHROPIC_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL; do
+  grep -Fq "${model_env}=\"deepseek-flash\"" "$INSTALLER" || fail "Claude ${model_env} wiring missing"
+done
+grep -Fq 'readonly CODEX_HTTP_PROXY="http://127.0.0.1:7890"' "$INSTALLER" || fail "Codex Clash HTTP proxy pin changed"
+grep -Fq 'readonly CODEX_NO_PROXY="localhost,127.0.0.1,::1,10.8.0.1,10.8.0.26,192.168.50.227,.svc,.cluster.local"' "$INSTALLER" || fail "Codex internal NO_PROXY pin changed"
 
 awk 'index($0, "cat > \"$wrapper_tmp\"") { capture=1; next }
      capture && /^WRAPPER$/ { exit }
@@ -87,9 +92,17 @@ mkdir -p "${runtime_root}/cli/node-current/bin" "${runtime_root}/cli/node_module
 node_stub="${runtime_root}/cli/node-current/bin/node"
 printf '%s\n' '#!/usr/bin/env bash' 'script="$1"; shift' 'printf "stub:%s\\n" "$*" >> "$MISU_STUB_LOG"' > "$node_stub"
 chmod 0755 "$node_stub"
+stat_stub="${runtime_root}/cli/node-current/bin/stat"
+printf '%s\n' '#!/usr/bin/env bash' '[[ "$1" == "-c" && "$2" == "%a" ]] || exit 1' 'printf "%s\\n" 600' > "$stat_stub"
+chmod 0755 "$stat_stub"
 stub="${runtime_root}/cli/node_modules/.bin/claude"
-printf '%s\n' '#!/usr/bin/env node' > "$stub"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'printf "claude-env:%s|%s|%s|%s|%s|%s|%s\\n" "${ANTHROPIC_BASE_URL-}" "${ANTHROPIC_MODEL-}" "${ANTHROPIC_DEFAULT_OPUS_MODEL-}" "${ANTHROPIC_DEFAULT_SONNET_MODEL-}" "${ANTHROPIC_DEFAULT_HAIKU_MODEL-}" "${CLAUDE_CODE_SUBAGENT_MODEL-}" "$*" >> "$MISU_STUB_LOG"' > "$stub"
 chmod 0755 "$stub"
+codex_stub="${runtime_root}/cli/node_modules/.bin/codex"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'printf "codex-env:%s|%s|%s|%s|%s|%s|%s|%s\\n" "${HTTP_PROXY-}" "${HTTPS_PROXY-}" "${ALL_PROXY-}" "${NO_PROXY-}" "${http_proxy-}" "${https_proxy-}" "${all_proxy-}" "${no_proxy-}" >> "$MISU_STUB_LOG"' > "$codex_stub"
+chmod 0755 "$codex_stub"
 : > "${runtime_root}/config/anthropic-base-url"
 : > "${runtime_root}/config/anthropic-auth-token"
 chmod 0600 "${runtime_root}/config/anthropic-base-url" "${runtime_root}/config/anthropic-auth-token"
@@ -108,12 +121,34 @@ export MISU_STUB_LOG="$stub_log"
 if ! "${runtime_root}/wrapper" claude --version >/dev/null 2>&1; then
   fail "claude --version should bypass empty credentials"
 fi
-grep -Fq 'stub:--version' "$stub_log" || fail "claude --version did not execute"
+grep -Fq 'claude-env:||||||--version' "$stub_log" || fail "claude --version did not execute"
+: > "$stub_log"
+if ! env HTTP_PROXY=http://inherited.invalid HTTPS_PROXY=http://inherited.invalid ALL_PROXY=http://inherited.invalid NO_PROXY=inherited.invalid \
+  http_proxy=http://inherited.invalid https_proxy=http://inherited.invalid all_proxy=http://inherited.invalid no_proxy=inherited.invalid \
+  "${runtime_root}/wrapper" codex >/dev/null 2>&1; then
+  fail "codex interactive mode failed"
+fi
+grep -Fq 'codex-env:http://127.0.0.1:7890|http://127.0.0.1:7890|http://127.0.0.1:7890|localhost,127.0.0.1,::1,10.8.0.1,10.8.0.26,192.168.50.227,.svc,.cluster.local|http://127.0.0.1:7890|http://127.0.0.1:7890|http://127.0.0.1:7890|localhost,127.0.0.1,::1,10.8.0.1,10.8.0.26,192.168.50.227,.svc,.cluster.local' "$stub_log" \
+  || fail "codex did not receive the worker-local Clash proxy"
 : > "$stub_log"
 if "${runtime_root}/wrapper" claude >/dev/null 2>&1; then
   fail "claude interactive mode accepted empty credentials"
 fi
 [[ ! -s "$stub_log" ]] || fail "claude interactive mode ran with empty credentials"
+printf '%s\n' 'https://api.deepseek.com/anthropic' > "${runtime_root}/config/anthropic-base-url"
+printf '%s\n' 'fixture-token' > "${runtime_root}/config/anthropic-auth-token"
+if ! env \
+  ANTHROPIC_MODEL=inherited-model \
+  ANTHROPIC_DEFAULT_OPUS_MODEL=inherited-model \
+  ANTHROPIC_DEFAULT_SONNET_MODEL=inherited-model \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL=inherited-model \
+  CLAUDE_CODE_SUBAGENT_MODEL=inherited-model \
+  "${runtime_root}/wrapper" claude >/dev/null 2>&1; then
+  fail "claude interactive mode failed with configured credentials"
+fi
+grep -Fq 'claude-env:https://api.deepseek.com/anthropic|deepseek-flash|deepseek-flash|deepseek-flash|deepseek-flash|deepseek-flash|' "$stub_log" \
+  || fail "claude did not receive the fixed DeepSeek model environment"
+: > "$stub_log"
 if "${runtime_root}/wrapper" claude --help >/dev/null 2>&1; then
   fail "wrapper accepted an unsupported CLI argument"
 fi

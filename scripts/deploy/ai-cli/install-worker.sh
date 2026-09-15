@@ -181,12 +181,22 @@ readonly NODE_CURRENT="/opt/misu-ai-cli/node-current"
 readonly CONTROLLED_PATH="${NODE_CURRENT}/bin:/usr/bin:/bin"
 readonly BASE_URL_FILE="/etc/misu-ai-cli/anthropic-base-url"
 readonly AUTH_TOKEN_FILE="/etc/misu-ai-cli/anthropic-auth-token"
+readonly CODEX_HTTP_PROXY="http://127.0.0.1:7890"
+readonly CODEX_NO_PROXY="localhost,127.0.0.1,::1,10.8.0.1,10.8.0.26,192.168.50.227,.svc,.cluster.local"
 die() { printf 'misu-ai-cli: %s\n' "$*" >&2; exit 64; }
 [[ "$(id -u)" == 0 ]] || die "must run as root"
 (($# >= 1)) || die "choose exactly codex or claude"
 tool="$1"; shift
 case "$tool" in
-  codex) executable="${CLI_ROOT}/node_modules/.bin/codex" ;;
+  codex)
+    executable="${CLI_ROOT}/node_modules/.bin/codex"
+    # The worker's Clash HTTP port is local to this host. Set proxy variables
+    # only for Codex so Claude and other SSH-launched workloads keep their
+    # inherited environment unchanged, and never proxy loopback traffic.
+    export HTTP_PROXY="$CODEX_HTTP_PROXY" HTTPS_PROXY="$CODEX_HTTP_PROXY" ALL_PROXY="$CODEX_HTTP_PROXY"
+    export NO_PROXY="$CODEX_NO_PROXY"
+    export http_proxy="$HTTP_PROXY" https_proxy="$HTTPS_PROXY" all_proxy="$ALL_PROXY" no_proxy="$NO_PROXY"
+    ;;
   claude) executable="${CLI_ROOT}/node_modules/.bin/claude" ;;
   *) die "tool must be exactly codex or claude" ;;
 esac
@@ -210,7 +220,14 @@ if [[ "$tool" == claude ]]; then
   IFS= read -r ANTHROPIC_AUTH_TOKEN < "$AUTH_TOKEN_FILE" || [[ -n "$ANTHROPIC_AUTH_TOKEN" ]]
   [[ "$ANTHROPIC_BASE_URL" =~ ^https?://[^[:space:]]+$ ]] || die "Anthropic base URL is empty or invalid"
   [[ -n "$ANTHROPIC_AUTH_TOKEN" ]] || die "Anthropic auth token is empty"
-  export ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN
+  ANTHROPIC_MODEL="deepseek-flash"
+  ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-flash"
+  ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-flash"
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-flash"
+  CLAUDE_CODE_SUBAGENT_MODEL="deepseek-flash"
+  export ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL \
+    ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL \
+    ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL
 fi
 exec "$executable" "$@"
 WRAPPER
