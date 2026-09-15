@@ -26,7 +26,7 @@ grep -Fq 'readonly WRAPPER="/usr/local/bin/misu-ai-cli"' "$INSTALLER" || fail "w
 grep -Fq 'ANTHROPIC_BASE_URL' "$INSTALLER" || fail "Anthropic base URL wiring missing"
 grep -Fq 'ANTHROPIC_AUTH_TOKEN' "$INSTALLER" || fail "Anthropic auth token wiring missing"
 for model_env in ANTHROPIC_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL; do
-  grep -Fq "${model_env}=\"deepseek-flash\"" "$INSTALLER" || fail "Claude ${model_env} wiring missing"
+  grep -Fq "${model_env}=\"deepseek-v4-pro\"" "$INSTALLER" || fail "Claude ${model_env} wiring missing"
 done
 grep -Fq 'readonly CODEX_HTTP_PROXY="http://127.0.0.1:7890"' "$INSTALLER" || fail "Codex Clash HTTP proxy pin changed"
 grep -Fq 'readonly CODEX_NO_PROXY="localhost,127.0.0.1,::1,10.8.0.1,10.8.0.26,192.168.50.227,.svc,.cluster.local"' "$INSTALLER" || fail "Codex internal NO_PROXY pin changed"
@@ -146,7 +146,7 @@ if ! env \
   "${runtime_root}/wrapper" claude >/dev/null 2>&1; then
   fail "claude interactive mode failed with configured credentials"
 fi
-grep -Fq 'claude-env:https://api.deepseek.com/anthropic|deepseek-flash|deepseek-flash|deepseek-flash|deepseek-flash|deepseek-flash|' "$stub_log" \
+grep -Fq 'claude-env:https://api.deepseek.com/anthropic|deepseek-v4-pro|deepseek-v4-pro|deepseek-v4-pro|deepseek-v4-pro|deepseek-v4-pro|' "$stub_log" \
   || fail "claude did not receive the fixed DeepSeek model environment"
 : > "$stub_log"
 if "${runtime_root}/wrapper" claude --help >/dev/null 2>&1; then
