@@ -26,5 +26,6 @@ assert.match(opsConsole, /key: 'claude-code', tool: 'CLAUDE', label: 'Claude Cod
 assert.match(opsConsole, /const isAiCliTab = computed\(\(\) => Boolean\(activeTabInfo\.value\?\.tool\)\)/)
 assert.match(opsConsole, /<AiCliTerminal :key="activeTab" :tool="activeTabInfo\.tool" :label="activeTabInfo\.label" \/>/)
 assert.doesNotMatch(opsConsole, /AiCliWorkspace|ai-cli-grid|ai-cli-mobile-switch|ai-cli-pane-hidden-mobile/)
+assert.match(terminal, /\.ai-cli-terminal \{[\s\S]*?flex: 1 1 0;[\s\S]*?min-height: 0;/, 'AI CLI 终端应填满运维面板可用高度')
 
 console.log('AI CLI frontend contract checks passed')

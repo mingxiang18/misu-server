@@ -257,6 +257,7 @@ onBeforeUnmount(() => {
 .ai-cli-terminal {
   display: flex;
   flex-direction: column;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
