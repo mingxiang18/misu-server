@@ -12,6 +12,11 @@ import java.nio.ByteBuffer;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.Map;
 
 class OpsWebSocketHandlerTest {
 
@@ -33,5 +38,19 @@ class OpsWebSocketHandlerTest {
                 OpsWebSocketLimitsConfig.MAX_TEXT_MESSAGE_BYTES / 2 + 1));
 
         assertThrows(Exception.class, () -> handler.handleTextMessage(mock(WebSocketSession.class), message));
+    }
+
+    @Test
+    void pingTouchesTheLiveSessionWithoutWritingToSsh() throws Exception {
+        SshConnectionService ssh = mock(SshConnectionService.class);
+        WebSocketSession webSocket = mock(WebSocketSession.class);
+        when(webSocket.getAttributes()).thenReturn(Map.of("opsSshSessionId", "ssh-session"));
+        OpsWebSocketHandler handler = new OpsWebSocketHandler(
+                mock(OpsSessionStore.class), ssh, new ObjectMapper());
+
+        handler.handleTextMessage(webSocket, new TextMessage("{\"type\":\"ping\"}"));
+
+        verify(ssh).ping("ssh-session");
+        verifyNoMoreInteractions(ssh);
     }
 }

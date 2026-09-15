@@ -25,7 +25,7 @@ grep -Fq 'readonly WORKSPACE="${APP_ROOT}/workspace"' "$INSTALLER" || fail "work
 grep -Fq 'readonly WRAPPER="/usr/local/bin/misu-ai-cli"' "$INSTALLER" || fail "wrapper path changed"
 grep -Fq 'ANTHROPIC_BASE_URL' "$INSTALLER" || fail "Anthropic base URL wiring missing"
 grep -Fq 'ANTHROPIC_AUTH_TOKEN' "$INSTALLER" || fail "Anthropic auth token wiring missing"
-for model_env in ANTHROPIC_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL; do
+for model_env in ANTHROPIC_DEFAULT_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL; do
   grep -Fq "${model_env}=\"deepseek-v4-pro\"" "$INSTALLER" || fail "Claude ${model_env} wiring missing"
 done
 grep -Fq 'readonly CODEX_HTTP_PROXY="http://127.0.0.1:7890"' "$INSTALLER" || fail "Codex Clash HTTP proxy pin changed"
@@ -97,7 +97,7 @@ printf '%s\n' '#!/usr/bin/env bash' '[[ "$1" == "-c" && "$2" == "%a" ]] || exit 
 chmod 0755 "$stat_stub"
 stub="${runtime_root}/cli/node_modules/.bin/claude"
 printf '%s\n' '#!/usr/bin/env bash' \
-  'printf "claude-env:%s|%s|%s|%s|%s|%s|%s\\n" "${ANTHROPIC_BASE_URL-}" "${ANTHROPIC_MODEL-}" "${ANTHROPIC_DEFAULT_OPUS_MODEL-}" "${ANTHROPIC_DEFAULT_SONNET_MODEL-}" "${ANTHROPIC_DEFAULT_HAIKU_MODEL-}" "${CLAUDE_CODE_SUBAGENT_MODEL-}" "$*" >> "$MISU_STUB_LOG"' > "$stub"
+  'printf "claude-env:%s|%s|%s|%s|%s|%s|%s|%s\\n" "${ANTHROPIC_BASE_URL-}" "${ANTHROPIC_MODEL-}" "${ANTHROPIC_DEFAULT_MODEL-}" "${ANTHROPIC_DEFAULT_OPUS_MODEL-}" "${ANTHROPIC_DEFAULT_SONNET_MODEL-}" "${ANTHROPIC_DEFAULT_HAIKU_MODEL-}" "${CLAUDE_CODE_SUBAGENT_MODEL-}" "$*" >> "$MISU_STUB_LOG"' > "$stub"
 chmod 0755 "$stub"
 codex_stub="${runtime_root}/cli/node_modules/.bin/codex"
 printf '%s\n' '#!/usr/bin/env bash' \
@@ -121,7 +121,7 @@ export MISU_STUB_LOG="$stub_log"
 if ! "${runtime_root}/wrapper" claude --version >/dev/null 2>&1; then
   fail "claude --version should bypass empty credentials"
 fi
-grep -Fq 'claude-env:||||||--version' "$stub_log" || fail "claude --version did not execute"
+grep -Fq 'claude-env:|||||||--version' "$stub_log" || fail "claude --version did not execute"
 : > "$stub_log"
 if ! env HTTP_PROXY=http://inherited.invalid HTTPS_PROXY=http://inherited.invalid ALL_PROXY=http://inherited.invalid NO_PROXY=inherited.invalid \
   http_proxy=http://inherited.invalid https_proxy=http://inherited.invalid all_proxy=http://inherited.invalid no_proxy=inherited.invalid \
@@ -146,8 +146,8 @@ if ! env \
   "${runtime_root}/wrapper" claude >/dev/null 2>&1; then
   fail "claude interactive mode failed with configured credentials"
 fi
-grep -Fq 'claude-env:https://api.deepseek.com/anthropic|deepseek-v4-pro|deepseek-v4-pro|deepseek-v4-pro|deepseek-v4-pro|deepseek-v4-pro|' "$stub_log" \
-  || fail "claude did not receive the fixed DeepSeek model environment"
+grep -Fq 'claude-env:https://api.deepseek.com/anthropic||deepseek-v4-pro|deepseek-v4-pro|deepseek-v4-pro|deepseek-v4-pro|deepseek-v4-pro|' "$stub_log" \
+  || fail "claude did not receive the default DeepSeek model environment"
 : > "$stub_log"
 if "${runtime_root}/wrapper" claude --help >/dev/null 2>&1; then
   fail "wrapper accepted an unsupported CLI argument"

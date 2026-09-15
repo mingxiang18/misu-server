@@ -59,6 +59,8 @@ public class OpsWebSocketHandler extends AbstractWebSocketHandler {
                 throw new IOException("terminal input is missing");
             }
             ssh.write(sessionId(webSocket), data.getBytes(StandardCharsets.UTF_8));
+        } else if ("ping".equals(type)) {
+            ssh.ping(sessionId(webSocket));
         } else if ("resize".equals(type)) {
             ssh.resize(sessionId(webSocket), command.path("cols").asInt(80), command.path("rows").asInt(24));
         } else {

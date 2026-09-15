@@ -24,6 +24,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 class AiCliWebSocketHandlerTest {
 
@@ -89,6 +92,19 @@ class AiCliWebSocketHandlerTest {
 
         org.junit.jupiter.api.Assertions.assertSame(failure, actual);
         org.junit.jupiter.api.Assertions.assertEquals(0, webSocket.closeCount);
+    }
+
+    @Test
+    void pingTouchesTheLiveSessionWithoutWritingToCli() throws Exception {
+        AiCliConnectionService aiCli = mock(AiCliConnectionService.class);
+        RecordingWebSocketSession webSocket = webSocket();
+        AiCliWebSocketHandler handler = new AiCliWebSocketHandler(
+                mock(com.misu.ops.session.OpsSessionStore.class), aiCli, new ObjectMapper());
+
+        handler.handleTextMessage(webSocket, new TextMessage("{\"type\":\"ping\"}"));
+
+        verify(aiCli).ping("closed");
+        verifyNoMoreInteractions(aiCli);
     }
 
     private RecordingWebSocketSession webSocket() {

@@ -113,6 +113,12 @@ public class SshConnectionService {
         }
     }
 
+    /** Validates the live SSH session and refreshes its idle timeout without writing to the node. */
+    public void ping(String sessionId) {
+        Connection connection = requireConnection(sessionId);
+        sessions.touchSshSession(connection.sshSession);
+    }
+
     public void resize(String sessionId, int cols, int rows) {
         Connection connection = requireConnection(sessionId);
         sessions.touchSshSession(connection.sshSession);

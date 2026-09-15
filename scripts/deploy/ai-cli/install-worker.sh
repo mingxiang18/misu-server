@@ -220,12 +220,15 @@ if [[ "$tool" == claude ]]; then
   IFS= read -r ANTHROPIC_AUTH_TOKEN < "$AUTH_TOKEN_FILE" || [[ -n "$ANTHROPIC_AUTH_TOKEN" ]]
   [[ "$ANTHROPIC_BASE_URL" =~ ^https?://[^[:space:]]+$ ]] || die "Anthropic base URL is empty or invalid"
   [[ -n "$ANTHROPIC_AUTH_TOKEN" ]] || die "Anthropic auth token is empty"
-  ANTHROPIC_MODEL="deepseek-v4-pro"
+  # Keep the provider's default configurable without overriding an explicit
+  # /model choice for the current session or the saved model setting.
+  unset ANTHROPIC_MODEL
+  ANTHROPIC_DEFAULT_MODEL="deepseek-v4-pro"
   ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro"
   ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro"
   ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-pro"
   CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-pro"
-  export ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL \
+  export ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_DEFAULT_MODEL \
     ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL \
     ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL
 fi

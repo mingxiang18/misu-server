@@ -10,7 +10,8 @@ import { getAiCliExitError } from './aiCliErrors.mjs'
 
 const props = defineProps({
   tool: { type: String, required: true },
-  label: { type: String, required: true }
+  label: { type: String, required: true },
+  visible: { type: Boolean, default: true }
 })
 
 const terminalHost = ref(null)
@@ -23,8 +24,11 @@ const error = ref('')
 const receivedOutput = ref(false)
 const fullScreen = ref(false)
 const ctrlPending = ref(false)
+const modelSwitching = ref(false)
 let resizeObserver
 let generation = 0
+let modelSwitchTimer
+let heartbeatTimer
 const sessionLifecycle = createAiCliSessionLifecycle(revokeAiSession)
 
 const connected = computed(() => status.value === 'connected')
@@ -47,6 +51,22 @@ function send(message) {
   return true
 }
 
+function stopHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer)
+  heartbeatTimer = undefined
+}
+
+function startHeartbeat(nextSocket, currentGeneration) {
+  stopHeartbeat()
+  heartbeatTimer = setInterval(() => {
+    if (socket.value !== nextSocket || currentGeneration !== generation || nextSocket.readyState !== WebSocket.OPEN) {
+      stopHeartbeat()
+      return
+    }
+    nextSocket.send(JSON.stringify({ type: 'ping' }))
+  }, 45_000)
+}
+
 function sendInput(data) {
   if (!connected.value) return
   if (ctrlPending.value) {
@@ -58,8 +78,18 @@ function sendInput(data) {
   send({ type: 'input', data })
 }
 
+function switchClaudeModel(model) {
+  if (props.tool !== 'CLAUDE' || !connected.value || modelSwitching.value) return
+  modelSwitching.value = true
+  sendInput(`/model ${model}\r`)
+  modelSwitchTimer = setTimeout(() => {
+    modelSwitching.value = false
+    modelSwitchTimer = undefined
+  }, 1200)
+}
+
 function resize() {
-  if (!fitAddon.value || !terminal.value) return
+  if (!props.visible || !fitAddon.value || !terminal.value) return
   try {
     fitAddon.value.fit()
     send({ type: 'resize', cols: terminal.value.cols, rows: terminal.value.rows })
@@ -70,6 +100,7 @@ function resize() {
 
 async function disconnect(invalidate = true) {
   if (invalidate) generation += 1
+  stopHeartbeat()
   const currentSocket = socket.value
   const currentSession = sessionId.value
   socket.value = null
@@ -105,6 +136,7 @@ async function connect() {
     nextSocket.onopen = () => {
       if (socket.value !== nextSocket || currentGeneration !== generation) return
       status.value = 'connected'
+      startHeartbeat(nextSocket, currentGeneration)
       write(`\r\n${props.label} 会话已连接\r\n`)
       resize()
     }
@@ -128,6 +160,7 @@ async function connect() {
     nextSocket.onclose = () => {
       const result = sessionLifecycle.close(nextSocket, nextSessionId, currentGeneration)
       if (result.current && isCurrentAiCliSocket(nextSocket, socket.value, currentGeneration, generation)) {
+        stopHeartbeat()
         const hadExplicitError = Boolean(error.value)
         socket.value = null
         if (sessionId.value === nextSessionId) sessionId.value = ''
@@ -201,8 +234,14 @@ onMounted(() => {
   createTerminal()
 })
 
+watch(() => props.visible, (visible) => {
+  if (visible) nextTick(resize)
+})
+
 onBeforeUnmount(() => {
   generation += 1
+  stopHeartbeat()
+  if (modelSwitchTimer) clearTimeout(modelSwitchTimer)
   document.removeEventListener('fullscreenchange', syncFullScreen)
   resizeObserver?.disconnect()
   disconnect(false)
@@ -247,6 +286,12 @@ onBeforeUnmount(() => {
         <button type="button" @click="assistKey('left')">←</button>
         <button type="button" @click="assistKey('right')">→</button>
         <button type="button" @click="paste">粘贴</button>
+      </div>
+      <div v-if="tool === 'CLAUDE'" class="ai-cli-model-switcher" aria-label="Claude Code 模型">
+        <span>模型</span>
+        <button type="button" :disabled="!connected || modelSwitching" @click="switchClaudeModel('deepseek-flash')">Flash</button>
+        <button type="button" :disabled="!connected || modelSwitching" @click="switchClaudeModel('deepseek-v4-pro')">Pro</button>
+        <small>在当前会话中执行 /model</small>
       </div>
     </div>
     <p v-if="error" class="ai-cli-terminal-error">{{ error }}</p>
@@ -295,6 +340,27 @@ onBeforeUnmount(() => {
 .ai-cli-terminal-host :deep(.xterm) { height: 100%; }
 .ai-cli-terminal-host :deep(.xterm-viewport) { overflow-y: auto; }
 .ai-cli-terminal-footer { padding: var(--space-2) var(--space-3); background: #111827; }
+.ai-cli-model-switcher {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  color: #cbd5e1;
+  font-size: var(--font-size-xs);
+}
+.ai-cli-model-switcher button {
+  min-height: 28px;
+  padding: 4px 9px;
+  color: #cbd5e1;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+}
+.ai-cli-model-switcher button:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.ai-cli-model-switcher button:disabled { cursor: not-allowed; opacity: 0.5; }
+.ai-cli-model-switcher small { color: #94a3b8; }
 .ai-cli-assist-keys { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .ai-cli-assist-keys button {
   min-height: 28px;
@@ -313,6 +379,7 @@ onBeforeUnmount(() => {
   .ai-cli-terminal-actions :deep(.el-button) { min-height: 40px; padding-left: 8px; padding-right: 8px; }
   .ai-cli-terminal-host { min-height: 0; padding: var(--space-2); }
   .ai-cli-terminal-footer { padding: var(--space-2); }
+  .ai-cli-model-switcher { align-items: flex-start; }
   .ai-cli-assist-keys button { min-width: 40px; min-height: 40px; padding: 8px; }
 }
 </style>

@@ -131,6 +131,12 @@ public class AiCliConnectionService {
         }
     }
 
+    /** Validates the live AI CLI session and refreshes its idle timeout without sending CLI input. */
+    public void ping(String sessionId) {
+        Connection connection = requireConnection(sessionId);
+        sessions.touchAiSession(connection.aiSession);
+    }
+
     public void resize(String sessionId, int cols, int rows) {
         Connection connection = requireConnection(sessionId);
         sessions.touchAiSession(connection.aiSession);

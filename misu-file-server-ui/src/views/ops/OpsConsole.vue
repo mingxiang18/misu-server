@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { FullScreen, Refresh, Monitor, Connection, WarningFilled } from '@element-plus/icons-vue'
 import { Terminal } from 'xterm'
@@ -27,13 +27,19 @@ const nodes = [
 
 const activeTab = ref('nacos')
 const activeNode = ref('master')
-const consoleFrame = ref(null)
-const consoleFrameName = ref(`ops-console-${Math.random().toString(36).slice(2)}`)
-const consoleUrl = ref('')
-const consoleLoading = ref(false)
-const consoleError = ref('')
 const consoleFullScreen = ref(false)
-const consoleFrameNavigationStarted = ref(false)
+const embeddedTabs = tabs.filter((tab) => tab.target)
+const openedTabs = ref(new Set(['nacos']))
+const consoleFrames = {}
+const consoleStates = reactive(Object.fromEntries(embeddedTabs.map((tab) => [tab.key, {
+  frameName: `ops-console-${tab.key}-${Math.random().toString(36).slice(2)}`,
+  url: '',
+  loading: false,
+  error: '',
+  navigationStarted: false,
+  initialized: false,
+  generation: 0
+}])))
 
 const terminalHost = ref(null)
 const terminal = shallowRef(null)
@@ -46,10 +52,24 @@ const terminalFullScreen = ref(false)
 const ctrlPending = ref(false)
 let resizeObserver
 let connectionGeneration = 0
-let consoleGeneration = 0
+let sshHeartbeatTimer
 
-function stopConsoleFrame() {
-  const frame = consoleFrame.value
+function setConsoleFrame(key, frame) {
+  if (frame) consoleFrames[key] = frame
+  else delete consoleFrames[key]
+}
+
+function isTabOpened(key) {
+  return openedTabs.value.has(key)
+}
+
+function openTabOnce(key) {
+  if (isTabOpened(key)) return
+  openedTabs.value = new Set([...openedTabs.value, key])
+}
+
+function stopConsoleFrame(key) {
+  const frame = consoleFrames[key]
   if (!frame) return
   // Stop a previous form navigation before removing the document. This also
   // prevents a stale console request from racing a newly issued ticket.
@@ -61,17 +81,19 @@ function stopConsoleFrame() {
   frame.src = 'about:blank'
 }
 
-function cancelConsoleLoad() {
-  consoleGeneration += 1
-  releaseQbittorrentParentBridge()
-  stopConsoleFrame()
-  consoleUrl.value = ''
-  consoleLoading.value = false
-  consoleFrameNavigationStarted.value = false
+function cancelConsoleLoad(key) {
+  const state = consoleStates[key]
+  if (!state) return
+  state.generation += 1
+  stopConsoleFrame(key)
+  state.url = ''
+  state.loading = false
+  state.navigationStarted = false
 }
 
-function handleConsoleFrameLoad(event) {
-  if (!consoleFrameNavigationStarted.value) return
+function handleConsoleFrameLoad(key, event) {
+  const state = consoleStates[key]
+  if (!state?.navigationStarted) return
   // The initial about:blank can dispatch after form.submit() on slower mobile
   // browsers. Keep the loading mask until the POST navigation leaves blank.
   try {
@@ -80,14 +102,15 @@ function handleConsoleFrameLoad(event) {
     // Cross-origin console documents cannot expose location; that is the real
     // navigation, so it is safe to clear the mask.
   }
-  consoleLoading.value = false
+  state.loading = false
 }
 
-function handleConsoleFrameError() {
-  if (!consoleFrameNavigationStarted.value) return
-  releaseQbittorrentParentBridge()
-  consoleLoading.value = false
-  consoleError.value = '控制台加载失败，请重试'
+function handleConsoleFrameError(key) {
+  const state = consoleStates[key]
+  if (!state?.navigationStarted) return
+  if (embeddedTabs.find((tab) => tab.key === key)?.target === 'QBITTORRENT') releaseQbittorrentParentBridge()
+  state.loading = false
+  state.error = '控制台加载失败，请重试'
 }
 
 const activeTabInfo = computed(() => tabs.find((tab) => tab.key === activeTab.value))
@@ -103,26 +126,28 @@ const statusText = computed(() => ({
   error: '连接失败'
 }[sshStatus.value] || '未连接'))
 
-async function loadConsole(target) {
-  const generation = ++consoleGeneration
-  // A qBittorrent shim belongs only to the previous iframe. Release it before
-  // switching to another console so the parent page cannot leak qB globals.
-  releaseQbittorrentParentBridge()
-  consoleError.value = ''
-  consoleLoading.value = true
-  consoleFrameNavigationStarted.value = false
-  stopConsoleFrame()
-  consoleUrl.value = ''
-  // Wait for Vue to remove the old iframe before asking the server for a new
-  // ticket. A fresh name prevents a detached old frame from being a form
-  // target if the browser has not finished its previous navigation yet.
-  consoleFrameName.value = `ops-console-${Math.random().toString(36).slice(2)}`
+async function loadConsole(target, force = false) {
+  const state = consoleStates[target]
+  if (!state || (!force && (state.initialized || state.loading))) return
+  const generation = ++state.generation
+  state.initialized = true
+  state.error = ''
+  state.loading = true
+  state.navigationStarted = false
+  if (force) {
+    if (embeddedTabs.find((tab) => tab.key === target)?.target === 'QBITTORRENT') {
+      releaseQbittorrentParentBridge()
+    }
+    stopConsoleFrame(target)
+    state.url = ''
+    state.frameName = `ops-console-${target}-${Math.random().toString(36).slice(2)}`
+  }
   await nextTick()
-  if (generation !== consoleGeneration || activeTab.value !== target) return
+  if (generation !== state.generation) return
   try {
     const consoleTarget = tabs.find((tab) => tab.key === target)?.target || target
     const data = await issueConsoleTicket(consoleTarget)
-    if (generation !== consoleGeneration || activeTab.value !== target) return
+    if (generation !== state.generation) return
     const entryUrl = data.entryUrl
     if (!entryUrl) {
       throw new Error('运维控制台尚未配置访问地址')
@@ -132,15 +157,15 @@ async function loadConsole(target) {
     const ticket = data.ticket
     const exchangeUrl = data.exchangeUrl
     if (!ticket || !exchangeUrl) throw new Error('后端未返回有效的控制台会话')
-    consoleUrl.value = entryUrl
+    state.url = entryUrl
     await nextTick()
-    if (generation !== consoleGeneration || activeTab.value !== target) return
-    if (ticket && consoleFrame.value) {
+    if (generation !== state.generation) return
+    if (ticket && consoleFrames[target]) {
       if (consoleTarget === 'QBITTORRENT') installQbittorrentParentBridge()
       const form = document.createElement('form')
       form.method = 'post'
       form.action = exchangeUrl
-      form.target = consoleFrameName.value
+      form.target = state.frameName
       form.hidden = true
       const input = document.createElement('input')
       input.type = 'hidden'
@@ -148,21 +173,21 @@ async function loadConsole(target) {
       input.value = ticket
       form.appendChild(input)
       document.body.appendChild(form)
-      consoleFrameNavigationStarted.value = true
+      state.navigationStarted = true
       form.submit()
       form.remove()
     }
   } catch (error) {
-    if (generation === consoleGeneration && activeTab.value === target) {
-      consoleError.value = error?.message || '控制台加载失败'
+    if (generation === state.generation) {
+      state.error = error?.message || '控制台加载失败'
     }
   } finally {
-    if (generation === consoleGeneration && consoleError.value) consoleLoading.value = false
+    if (generation === state.generation && state.error) state.loading = false
   }
 }
 
 function reloadConsole() {
-  if (activeTab.value !== 'ssh') loadConsole(activeTab.value)
+  if (consoleStates[activeTab.value]) loadConsole(activeTab.value, true)
 }
 
 async function toggleFullScreen(element, state) {
@@ -179,11 +204,11 @@ async function toggleFullScreen(element, state) {
 }
 
 function setConsoleFullScreen() {
-  toggleFullScreen(consoleFrame.value?.parentElement, consoleFullScreen)
+  toggleFullScreen(consoleFrames[activeTab.value]?.parentElement, consoleFullScreen)
 }
 
 function syncFullScreenState() {
-  consoleFullScreen.value = document.fullscreenElement === consoleFrame.value?.parentElement
+  consoleFullScreen.value = document.fullscreenElement === consoleFrames[activeTab.value]?.parentElement
   terminalFullScreen.value = document.fullscreenElement === terminalHost.value
 }
 
@@ -197,6 +222,22 @@ function sendSocketMessage(message) {
     return true
   }
   return false
+}
+
+function stopSshHeartbeat() {
+  if (sshHeartbeatTimer) clearInterval(sshHeartbeatTimer)
+  sshHeartbeatTimer = undefined
+}
+
+function startSshHeartbeat(nextSocket, generation) {
+  stopSshHeartbeat()
+  sshHeartbeatTimer = setInterval(() => {
+    if (socket.value !== nextSocket || generation !== connectionGeneration || nextSocket.readyState !== WebSocket.OPEN) {
+      stopSshHeartbeat()
+      return
+    }
+    nextSocket.send(JSON.stringify({ type: 'ping' }))
+  }, 45_000)
 }
 
 function sendInput(data) {
@@ -214,7 +255,7 @@ function handleSocketMessage(event) {
 }
 
 function resizeTerminal() {
-  if (!fitAddon.value || !terminal.value) return
+  if (activeTab.value !== 'ssh' || !fitAddon.value || !terminal.value) return
   try {
     fitAddon.value.fit()
     sendSocketMessage({ type: 'resize', cols: terminal.value.cols, rows: terminal.value.rows })
@@ -225,6 +266,7 @@ function resizeTerminal() {
 
 async function disconnectSsh(invalidate = true) {
   if (invalidate) connectionGeneration += 1
+  stopSshHeartbeat()
   const currentSocket = socket.value
   const currentSession = sshSessionId.value
   socket.value = null
@@ -264,6 +306,7 @@ async function connectSsh() {
     nextSocket.onopen = () => {
       if (socket.value !== nextSocket || generation !== connectionGeneration) return
       sshStatus.value = 'connected'
+      startSshHeartbeat(nextSocket, generation)
       writeTerminal(`\r\n已连接 ${activeNodeInfo.value.name} (${activeNodeInfo.value.host})\r\n`)
       resizeTerminal()
     }
@@ -277,6 +320,7 @@ async function connectSsh() {
     }
     nextSocket.onclose = () => {
       if (socket.value !== nextSocket || generation !== connectionGeneration) return
+      stopSshHeartbeat()
       socket.value = null
       sshSessionId.value = ''
       if (sshStatus.value === 'connected' || sshStatus.value === 'connecting') {
@@ -321,14 +365,16 @@ function assistKey(key) {
 
 function openActiveTab() {
   if (activeTab.value === 'ssh') {
+    openTabOnce('ssh')
     nextTick(() => {
       if (activeTab.value !== 'ssh' || !terminalHost.value) return
       if (!terminal.value) createTerminal()
       resizeTerminal()
     })
   } else if (isAiCliTab.value || activeTab.value === 'database') {
-    cancelConsoleLoad()
+    openTabOnce(activeTab.value)
   } else {
+    openTabOnce(activeTab.value)
     loadConsole(activeTab.value)
   }
 }
@@ -352,9 +398,8 @@ function createTerminal() {
 }
 
 watch(activeTab, (tab, previous) => {
-  if (previous === 'ssh' && tab !== 'ssh') disconnectSsh()
-  if (tab === 'ssh' || isAiCliTab.value || tab === 'database') cancelConsoleLoad()
   openActiveTab()
+  if (tab === 'ssh' && previous !== 'ssh') nextTick(resizeTerminal)
 })
 
 onMounted(() => {
@@ -363,9 +408,11 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  cancelConsoleLoad()
+  embeddedTabs.forEach((tab) => cancelConsoleLoad(tab.key))
+  releaseQbittorrentParentBridge()
   document.removeEventListener('fullscreenchange', syncFullScreenState)
   resizeObserver?.disconnect()
+  stopSshHeartbeat()
   disconnectSsh()
   terminal.value?.dispose()
   terminal.value = null
@@ -402,47 +449,51 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div v-if="activeTab === 'database'" id="ops-panel-database" class="ops-database-panel" role="tabpanel" aria-labelledby="ops-tab-database">
+    <div v-if="isTabOpened('database')" v-show="activeTab === 'database'" id="ops-panel-database" class="ops-database-panel" role="tabpanel" aria-labelledby="ops-tab-database">
       <div class="ops-panel-bar">
         <div class="ops-panel-status"><Connection /> 数据库</div>
       </div>
       <DatabaseManagement />
     </div>
 
-    <div v-else-if="isAiCliTab" :id="`ops-panel-${activeTab}`" class="ops-ai-cli-panel" role="tabpanel" :aria-labelledby="`ops-tab-${activeTab}`">
-      <div class="ops-panel-bar">
-        <div class="ops-panel-status"><Connection /> {{ activeTabInfo.label }}</div>
+    <template v-for="tab in tabs.filter((item) => item.tool)" :key="tab.key">
+      <div v-if="isTabOpened(tab.key)" v-show="activeTab === tab.key" :id="`ops-panel-${tab.key}`" class="ops-ai-cli-panel" role="tabpanel" :aria-labelledby="`ops-tab-${tab.key}`">
+        <div class="ops-panel-bar">
+          <div class="ops-panel-status"><Connection /> {{ tab.label }}</div>
+        </div>
+        <AiCliTerminal :tool="tab.tool" :label="tab.label" :visible="activeTab === tab.key" />
       </div>
-      <AiCliTerminal :key="activeTab" :tool="activeTabInfo.tool" :label="activeTabInfo.label" />
-    </div>
+    </template>
 
-    <div v-else-if="activeTab !== 'ssh'" :id="`ops-panel-${activeTab}`" class="ops-console-panel" role="tabpanel" :aria-labelledby="`ops-tab-${activeTab}`">
+    <template v-for="tab in embeddedTabs" :key="tab.key">
+      <div v-if="isTabOpened(tab.key)" v-show="activeTab === tab.key" :id="`ops-panel-${tab.key}`" class="ops-console-panel" role="tabpanel" :aria-labelledby="`ops-tab-${tab.key}`">
       <div class="ops-panel-bar">
-        <div class="ops-panel-status"><Connection /> {{ activeTabInfo.label }}</div>
+        <div class="ops-panel-status"><Connection /> {{ tab.label }}</div>
         <div class="ops-panel-actions">
-          <el-button text :icon="Refresh" :disabled="consoleLoading" @click="reloadConsole">刷新</el-button>
+          <el-button text :icon="Refresh" :disabled="consoleStates[tab.key].loading" @click="reloadConsole">刷新</el-button>
           <el-button text :icon="FullScreen" @click="setConsoleFullScreen">全屏</el-button>
         </div>
       </div>
       <div class="ops-frame-wrap">
         <iframe
-            v-if="consoleUrl && !consoleError"
-            ref="consoleFrame"
-            :name="consoleFrameName"
+            v-if="consoleStates[tab.key].url && !consoleStates[tab.key].error"
+            :ref="(element) => setConsoleFrame(tab.key, element)"
+            :name="consoleStates[tab.key].frameName"
             class="ops-console-frame"
             src="about:blank"
-            :title="activeTabInfo.label"
+            :title="tab.label"
             allow="clipboard-read; clipboard-write"
-            @load="handleConsoleFrameLoad"
-            @error="handleConsoleFrameError" />
-        <div v-if="consoleLoading" class="ops-loading">正在建立运维控制台会话…</div>
-        <div v-else-if="consoleError" class="ops-empty">
+            @load="handleConsoleFrameLoad(tab.key, $event)"
+            @error="handleConsoleFrameError(tab.key)" />
+        <div v-if="consoleStates[tab.key].loading" class="ops-loading">正在建立运维控制台会话…</div>
+        <div v-else-if="consoleStates[tab.key].error" class="ops-empty">
           <WarningFilled />
-          <p>{{ consoleError }}</p>
-          <el-button type="primary" @click="openActiveTab">重试</el-button>
+          <p>{{ consoleStates[tab.key].error }}</p>
+          <el-button type="primary" @click="loadConsole(tab.key, true)">重试</el-button>
         </div>
       </div>
     </div>
+    </template>
 
     <div v-show="activeTab === 'ssh'" id="ops-panel-ssh" class="ops-terminal-panel" role="tabpanel" aria-labelledby="ops-tab-ssh">
       <div class="ops-panel-bar ops-terminal-bar">

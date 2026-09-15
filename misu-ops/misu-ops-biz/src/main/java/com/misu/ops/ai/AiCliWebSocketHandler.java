@@ -57,6 +57,8 @@ public class AiCliWebSocketHandler extends AbstractWebSocketHandler {
             String data = command.path("data").asText(null);
             if (data == null) throw new IOException("AI CLI 输入缺失");
             write(webSocket, data.getBytes(StandardCharsets.UTF_8));
+        } else if ("ping".equals(type)) {
+            ping(webSocket);
         } else if ("resize".equals(type)) {
             try {
                 aiCli.resize(sessionId(webSocket), command.path("cols").asInt(80),
@@ -93,6 +95,15 @@ public class AiCliWebSocketHandler extends AbstractWebSocketHandler {
     private void write(WebSocketSession webSocket, byte[] data) throws IOException {
         try {
             aiCli.write(sessionId(webSocket), data);
+        } catch (ServiceException ex) {
+            if (!isClosedSession(ex)) throw ex;
+            closeAfterSessionEnded(webSocket);
+        }
+    }
+
+    private void ping(WebSocketSession webSocket) throws IOException {
+        try {
+            aiCli.ping(sessionId(webSocket));
         } catch (ServiceException ex) {
             if (!isClosedSession(ex)) throw ex;
             closeAfterSessionEnded(webSocket);
