@@ -113,9 +113,7 @@ function handleConsoleFrameError(key) {
   state.error = '控制台加载失败，请重试'
 }
 
-const activeTabInfo = computed(() => tabs.find((tab) => tab.key === activeTab.value))
 const activeNodeInfo = computed(() => nodes.find((node) => node.id === activeNode.value))
-const isAiCliTab = computed(() => Boolean(activeTabInfo.value?.tool))
 const isSshConnected = computed(() => sshStatus.value === 'connected')
 
 const statusText = computed(() => ({
@@ -160,23 +158,22 @@ async function loadConsole(target, force = false) {
     state.url = entryUrl
     await nextTick()
     if (generation !== state.generation) return
-    if (ticket && consoleFrames[target]) {
-      if (consoleTarget === 'QBITTORRENT') installQbittorrentParentBridge()
-      const form = document.createElement('form')
-      form.method = 'post'
-      form.action = exchangeUrl
-      form.target = state.frameName
-      form.hidden = true
-      const input = document.createElement('input')
-      input.type = 'hidden'
-      input.name = 'ticket'
-      input.value = ticket
-      form.appendChild(input)
-      document.body.appendChild(form)
-      state.navigationStarted = true
-      form.submit()
-      form.remove()
-    }
+    if (!consoleFrames[target]) throw new Error('控制台页面尚未就绪，请重试')
+    if (consoleTarget === 'QBITTORRENT') installQbittorrentParentBridge()
+    const form = document.createElement('form')
+    form.method = 'post'
+    form.action = exchangeUrl
+    form.target = state.frameName
+    form.hidden = true
+    const input = document.createElement('input')
+    input.type = 'hidden'
+    input.name = 'ticket'
+    input.value = ticket
+    form.appendChild(input)
+    document.body.appendChild(form)
+    state.navigationStarted = true
+    form.submit()
+    form.remove()
   } catch (error) {
     if (generation === state.generation) {
       state.error = error?.message || '控制台加载失败'
@@ -364,17 +361,14 @@ function assistKey(key) {
 }
 
 function openActiveTab() {
+  openTabOnce(activeTab.value)
   if (activeTab.value === 'ssh') {
-    openTabOnce('ssh')
     nextTick(() => {
       if (activeTab.value !== 'ssh' || !terminalHost.value) return
       if (!terminal.value) createTerminal()
       resizeTerminal()
     })
-  } else if (isAiCliTab.value || activeTab.value === 'database') {
-    openTabOnce(activeTab.value)
-  } else {
-    openTabOnce(activeTab.value)
+  } else if (consoleStates[activeTab.value]) {
     loadConsole(activeTab.value)
   }
 }

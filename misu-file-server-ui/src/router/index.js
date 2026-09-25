@@ -21,7 +21,6 @@ import EpubViewer from '@/components/utils/EpubViewer.vue';
 import PdfViewer from '@/components/utils/PdfViewer.vue';
 import TextViewer from '@/components/utils/TextViewer.vue';
 import LanguageLearn from "@/components/languageLearn/LanguageLearn.vue";
-import OpsConsole from '@/views/ops/OpsConsole.vue';
 import { getUserInfo } from '@/api/user/user';
 
 const routes = [
@@ -48,7 +47,7 @@ const routes = [
             { path: 'fileServer/textViewer', component: TextViewer, name: 'TextViewer' },
             { path: 'chat', component: ChatWorkspace, name: 'ChatWorkspace' },
             { path: 'chat/:conversationId', component: ChatWorkspace, name: 'ChatConversation' },
-            { path: 'ops', component: OpsConsole, name: 'OpsConsole', meta: { adminOnly: true } },
+            { path: 'ops', component: () => import('@/views/ops/OpsConsole.vue'), name: 'OpsConsole', meta: { adminOnly: true } },
         ],
     },
     {   path: '/login', component: Login },

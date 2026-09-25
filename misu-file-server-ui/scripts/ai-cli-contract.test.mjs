@@ -25,7 +25,6 @@ for (const forbidden of ['startupCommand', 'argv', 'cwd', 'apiKey']) {
 }
 assert.match(opsConsole, /key: 'codex-cli', tool: 'CODEX', label: 'Codex CLI'/)
 assert.match(opsConsole, /key: 'claude-code', tool: 'CLAUDE', label: 'Claude Code'/)
-assert.match(opsConsole, /const isAiCliTab = computed\(\(\) => Boolean\(activeTabInfo\.value\?\.tool\)\)/)
 assert.match(opsConsole, /const openedTabs = ref\(new Set\(\['nacos'\]\)\)/)
 assert.match(opsConsole, /<AiCliTerminal :tool="tab\.tool" :label="tab\.label" :visible="activeTab === tab\.key" \/>/)
 assert.match(opsConsole, /v-show="activeTab === tab\.key"/)
