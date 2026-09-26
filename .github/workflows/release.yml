@@ -2,7 +2,7 @@ name: release
 
 on:
   push:
-    branches: [master]
+    branches: [master, codex/deploy-turnstile-20260926]
   workflow_dispatch:
     inputs:
       services:
@@ -89,6 +89,12 @@ jobs:
         run: |
           TAG=$(git rev-parse --short HEAD)
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          # One-time Turnstile release: deploy only the affected services.
+          if [[ "$EVENT" == "push" && "$GITHUB_REF_NAME" == "codex/deploy-turnstile-20260926" ]]; then
+            EVENT=workflow_dispatch
+            SEL_INPUT=account,frontend
+          fi
 
           set_flag() {
             local svc="$1" auto="$2" on=0
