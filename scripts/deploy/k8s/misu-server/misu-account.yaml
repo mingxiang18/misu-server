@@ -35,6 +35,9 @@ spec:
           env:
             - { name: JAVA_XMX, value: "512m" }
             - { name: JAVA_XMS, value: "256m" }
+            - { name: TURNSTILE_ENABLED, value: "true" }
+            - { name: TURNSTILE_SITE_KEY, value: "0x4AAAAAAFECS0cUBtj5g2Mp" }
+            - { name: TURNSTILE_HOSTNAMES, value: "server.misu.chat" }
             - name: TURNSTILE_SECRET
               valueFrom:
                 secretKeyRef:
