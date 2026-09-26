@@ -3,11 +3,11 @@ import {getRefreshToken, getToken, removeLoginTokens} from '@/api/auth/token'
 import {getUserInfo, removeUserInfo} from '@/api/user/user'
 
 // 登录方法
-export function login(userName, password, captchaCode) {
+export function login(userName, password, turnstileToken) {
     const data = {
         userName,
         password,
-        captchaCode
+        turnstileToken
     }
     return request({
         url: '/account/auth/login',
@@ -16,6 +16,15 @@ export function login(userName, password, captchaCode) {
         },
         method: 'post',
         data: data
+    })
+}
+
+export function getTurnstileConfig() {
+    return request({
+        url: '/account/auth/turnstile-config',
+        headers: { isToken: false, skipAuthRefresh: true },
+        method: 'get',
+        timeout: 8000
     })
 }
 
