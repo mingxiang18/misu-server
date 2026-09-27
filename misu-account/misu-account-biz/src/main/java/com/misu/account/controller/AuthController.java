@@ -6,6 +6,7 @@ import com.misu.account.domain.dto.auth.LoginRequestDto;
 import com.misu.account.domain.dto.auth.RefreshTokenRequestDto;
 import com.misu.account.domain.dto.auth.RegisterRequestDto;
 import com.misu.account.service.AuthService;
+import com.misu.account.service.TurnstileService;
 import com.misu.account.dao.impl.UserDaoImpl;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -28,6 +29,16 @@ public class AuthController {
 
     @Resource
     private AuthService authService;
+
+    @Resource
+    private TurnstileService turnstileService;
+
+    /** 登录页的公开组件配置，不包含服务端密钥。 */
+    @Anonymous
+    @GetMapping("/turnstile-config")
+    public AjaxResult turnstileConfig() {
+        return AjaxResult.success(turnstileService.publicConfig());
+    }
 
     /**
      * 登录

@@ -49,6 +49,9 @@ public class UserInnerController {
     public LoginUser getUserFromUsername(@RequestParam("username") String username) {
         LoginUser loginUser = new LoginUser();
         LoginUserDto loginUserDto = userService.selectUserLoginInfo(username);
+        if (loginUserDto == null) {
+            return null;
+        }
         BeanUtils.copyProperties(loginUserDto, loginUser);
         return loginUser;
     }

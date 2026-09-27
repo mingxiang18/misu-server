@@ -106,6 +106,10 @@ instance.interceptors.response.use(
         markBackendUp()
         // 未设置状态码则默认成功状态
         const code = response.data.code || 200;
+        // 尽力执行的清理请求不触发登录跳转或错误提示。
+        if (response.config.silent && code !== 200) {
+            return Promise.reject(new Error(response.data.msg || '请求失败'))
+        }
         // 获取错误信息
         const msg = errorCode[code] || response.data.msg || errorCode['default']
         // 二进制数据则直接返回
@@ -134,6 +138,7 @@ instance.interceptors.response.use(
         }
     },
     error => {
+        if (error.config?.silent) return Promise.reject(error)
         logger.error('err' + error)
         let { message } = error;
         const status = error?.response?.status

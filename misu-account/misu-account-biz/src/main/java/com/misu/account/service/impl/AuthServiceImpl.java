@@ -1,6 +1,7 @@
 package com.misu.account.service.impl;
 
 import com.misu.account.service.UserService;
+import com.misu.account.service.TurnstileService;
 import com.misu.common.constant.HttpStatus;
 import com.misu.common.exception.ServiceException;
 import com.misu.security.dto.LoginUser;
@@ -32,11 +33,16 @@ public class AuthServiceImpl implements AuthService {
     @Resource
     private TokenService tokenService;
 
+    @Resource
+    private TurnstileService turnstileService;
+
     @Value("${register.enable:false}")
     private Boolean registerEnable;
 
     @Override
     public LoginResponseDto login(LoginRequestDto loginRequestDto) {
+
+        turnstileService.verifyLogin(loginRequestDto.getTurnstileToken());
 
         LoginUserDto loginUserDto = userService.selectUserLoginInfo(loginRequestDto.getUserName());
 

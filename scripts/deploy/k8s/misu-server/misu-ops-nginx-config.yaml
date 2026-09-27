@@ -1,0 +1,630 @@
+---
+# misu-ops sidecar Nginx 配置。
+# 外部 TLS/域名入口由现有边缘 Nginx 负责，这里只接收集群内的 HTTP 30264。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: misu-ops-nginx-config-${OPS_CONFIG_TAG}
+  namespace: misu-server
+data:
+  nginx.conf.template: |
+    worker_processes 1;
+    pid /tmp/nginx/nginx.pid;
+
+    events {
+      worker_connections 512;
+    }
+
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+      client_body_temp_path /tmp/nginx/client_body_temp;
+      proxy_temp_path /tmp/nginx/proxy_temp;
+      fastcgi_temp_path /tmp/nginx/fastcgi_temp;
+      uwsgi_temp_path /tmp/nginx/uwsgi_temp;
+      scgi_temp_path /tmp/nginx/scgi_temp;
+      map $http_cookie $ops_cookie_count {
+        default 0;
+        ~*MISU_OPS_SESSION=.*MISU_OPS_SESSION= 2;
+        ~*MISU_OPS_SESSION= 1;
+      }
+      # Never log $request/$request_uri: console query strings and one-time
+      # tickets must not end up in the sidecar log stream.
+      log_format ops_sanitized '$remote_addr $host "$request_method $uri" $status $body_bytes_sent $request_time cookie_count=$ops_cookie_count';
+      access_log /dev/stdout ops_sanitized;
+      # Upstream connection errors include the request line (and therefore
+      # query strings) at warn/error. Keep the sidecar at crit so ticket or
+      # SSH path details cannot be copied into error logs.
+      error_log /dev/stderr crit;
+
+      map $http_upgrade $connection_upgrade {
+        default upgrade;
+        '' close;
+      }
+
+      # $request_uri is the original client URI and remains stable in
+      # auth_request subrequests and the internal WebSocket rewrite. Resolve
+      # this variable from it instead of using a server-level `set`, which is
+      # reevaluated in the /_ops/auth subrequest context.
+      map $request_uri $ops_original_uri {
+        default $request_uri;
+      }
+
+      # Select the upstream from the original request path. The public Host is
+      # fixed to api.misu.chat and is preserved by Gateway.
+      map $ops_original_uri $ops_console_target {
+        default "";
+        ~^/nacos/ nacos;
+        ~^/ops/headlamp/ headlamp;
+        ~^/ops/qbittorrent/ qbittorrent;
+      }
+
+      map $http_upgrade $ops_is_websocket {
+        default 0;
+        ~*^websocket$ 1;
+      }
+
+      map $ops_original_uri $ops_console_upstream {
+        default "";
+        ~^/nacos/ http://misu_ops_nacos;
+        ~^/ops/headlamp/ http://misu_ops_headlamp;
+        ~^/ops/qbittorrent/ http://misu_ops_qbittorrent;
+      }
+
+      # Only Headlamp receives the identity returned by Java auth_request.
+      # The proxy_set_header below also overwrites any client-supplied value.
+      map $ops_console_target $ops_headlamp_identity {
+        default "";
+        headlamp $ops_user;
+      }
+
+      map $ops_is_websocket $ops_console_dispatch {
+        default /_ops/http;
+        1 /_ops/ws;
+      }
+
+      upstream misu_ops_backend {
+        server 127.0.0.1:30264;
+      }
+      upstream misu_ops_nacos {
+        server nacos.misu-server.svc.cluster.local:8848;
+      }
+      upstream misu_ops_headlamp {
+        server headlamp.kuboard.svc.cluster.local:80;
+      }
+      upstream misu_ops_qbittorrent {
+        server q-bit-torrent-pi.misu-server.svc.cluster.local:30120;
+      }
+
+      # 未知 Host 不得成为开放代理。
+      server {
+        listen 8080 default_server;
+        server_name _;
+        return 421;
+      }
+
+      server {
+        listen 8080;
+        server_name api.misu.chat server.misu.chat;
+        add_header Content-Security-Policy "frame-ancestors https://server.misu.chat" always;
+        # Keep the browser URI across the internal HTTP/WS dispatch so query
+        # parameters reach the upstream but never appear in access logs.
+
+        # 仅暴露精确健康路径；不通过此路径绕过控制台鉴权。
+        location = /_ops/healthz {
+          proxy_pass http://misu_ops_backend/ops/internal/health;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header Authorization "";
+          proxy_set_header Cookie "";
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+        }
+
+        # auth_request 的内部子请求，Java 服务负责校验 ADMIN 运维会话，
+        # 并用 X-Ops-Upstream-* 响应头返回经过校验的上游凭据。
+        location = /_ops/auth {
+          internal;
+          proxy_pass http://misu_ops_backend/ops/internal/proxy-auth;
+          proxy_pass_request_body off;
+          proxy_set_header Content-Length "";
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Original-URI $ops_original_uri;
+          proxy_set_header X-Original-Method $request_method;
+          proxy_set_header X-Original-Host $host;
+          proxy_set_header X-Original-Origin $http_origin;
+          proxy_set_header X-Original-Referer $http_referer;
+          proxy_set_header X-Original-Upgrade $http_upgrade;
+          proxy_set_header X-Ops-Target $ops_console_target;
+          proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
+          # The Java loopback trust check must see the sidecar peer, never an
+          # edge-provided client address forwarded into this subrequest.
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header Cookie $http_cookie;
+          proxy_set_header Authorization "";
+        }
+
+        # Each exchange path is target-specific. The Java endpoint only
+        # accepts these target headers from the loopback sidecar.
+        location = /nacos/_ops/exchange {
+          proxy_pass http://misu_ops_backend/ops/api/console-sessions/exchange;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Forwarded-Proto https;
+          # Do not let edge forwarding headers rewrite Java's remote address;
+          # the exchange trust check must see the sidecar's 127.0.0.1 peer.
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target nacos;
+          proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_set_header Cookie "";
+          proxy_set_header Authorization "";
+          # Retire the legacy root-path cookie before the target-scoped cookie
+          # from Java is stored. Otherwise both values are sent and fail closed.
+          add_header Set-Cookie "MISU_OPS_SESSION=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None" always;
+          add_header Content-Security-Policy "frame-ancestors https://server.misu.chat" always;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
+        }
+        location = /ops/headlamp/_ops/exchange {
+          proxy_pass http://misu_ops_backend/ops/api/console-sessions/exchange;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target headlamp;
+          proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_set_header Cookie "";
+          proxy_set_header Authorization "";
+          add_header Set-Cookie "MISU_OPS_SESSION=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None" always;
+          add_header Content-Security-Policy "frame-ancestors https://server.misu.chat" always;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
+        }
+
+        location = /ops/qbittorrent/_ops/exchange {
+          proxy_pass http://misu_ops_backend/ops/api/console-sessions/exchange;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target qbittorrent;
+          proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_set_header Cookie "";
+          proxy_set_header Authorization "";
+          add_header Set-Cookie "MISU_OPS_SESSION=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None" always;
+          add_header Content-Security-Policy "frame-ancestors https://server.misu.chat" always;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
+        }
+
+        location = /nacos { return 308 /nacos/; }
+        location = /ops/headlamp { return 308 /ops/headlamp/; }
+        location = /ops/qbittorrent { return 308 /ops/qbittorrent/; }
+
+        # Exchange is the only public _ops location.
+        location ^~ /nacos/_ops/ { return 404; }
+        location ^~ /ops/headlamp/_ops/ { return 404; }
+        location ^~ /ops/qbittorrent/_ops/ { return 404; }
+        location ^~ /ops/internal/ { return 404; }
+
+        # qBittorrent is served below a fixed public prefix while its existing
+        # Web UI remains rooted at the upstream service. auth_request obtains
+        # the server-side SID; no browser cookie or credential is forwarded.
+        location ^~ /ops/qbittorrent/ {
+          auth_request /_ops/auth;
+          auth_request_set $ops_upstream_cookie $upstream_http_x_ops_upstream_cookie;
+          auth_request_set $ops_upstream_csrf $upstream_http_x_ops_upstream_csrf;
+          proxy_pass http://misu_ops_qbittorrent/;
+          proxy_http_version 1.1;
+          proxy_set_header Host q-bit-torrent-pi.misu-server.svc.cluster.local:30120;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header Origin http://q-bit-torrent-pi.misu-server.svc.cluster.local:30120;
+          proxy_set_header Referer http://q-bit-torrent-pi.misu-server.svc.cluster.local:30120/;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_set_header Authorization "";
+          proxy_set_header Cookie $ops_upstream_cookie;
+          proxy_set_header X-CSRF-Token $ops_upstream_csrf;
+          proxy_set_header X-QBittorrent-Session $ops_upstream_csrf;
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_hide_header Set-Cookie;
+          proxy_hide_header Authorization;
+          proxy_hide_header X-CSRF-Token;
+          proxy_hide_header X-QBittorrent-Session;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
+          proxy_redirect / /ops/qbittorrent/;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
+        }
+
+        location / {
+          if ($ops_console_target = "") { return 404; }
+          if ($ops_is_websocket = 1) { rewrite ^ /_ops/ws last; }
+          auth_request /_ops/auth;
+          auth_request_set $ops_user $upstream_http_x_ops_user;
+          auth_request_set $ops_upstream_cookie $upstream_http_x_ops_upstream_cookie;
+          auth_request_set $ops_upstream_authorization $upstream_http_x_ops_upstream_authorization;
+          proxy_pass $ops_console_upstream$ops_original_uri;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header Upgrade "";
+          proxy_set_header Connection "";
+          proxy_set_header Authorization $ops_upstream_authorization;
+          proxy_set_header Cookie $ops_upstream_cookie;
+          proxy_set_header X-Forwarded-User $ops_headlamp_identity;
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Ops-Upstream-Csrf "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_hide_header Set-Cookie;
+          proxy_hide_header Authorization;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
+        }
+
+        location = /_ops/http {
+          internal;
+          auth_request /_ops/auth;
+          auth_request_set $ops_user $upstream_http_x_ops_user;
+          auth_request_set $ops_upstream_cookie $upstream_http_x_ops_upstream_cookie;
+          auth_request_set $ops_upstream_authorization $upstream_http_x_ops_upstream_authorization;
+          proxy_pass $ops_console_upstream$ops_original_uri;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header Upgrade "";
+          proxy_set_header Connection "";
+          proxy_set_header Authorization $ops_upstream_authorization;
+          proxy_set_header Cookie $ops_upstream_cookie;
+          proxy_set_header X-Forwarded-User $ops_headlamp_identity;
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_hide_header Set-Cookie;
+          proxy_hide_header Authorization;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
+        }
+
+        location = /_ops/ws {
+          internal;
+          auth_request /_ops/auth;
+          auth_request_set $ops_user $upstream_http_x_ops_user;
+          auth_request_set $ops_upstream_cookie $upstream_http_x_ops_upstream_cookie;
+          auth_request_set $ops_upstream_authorization $upstream_http_x_ops_upstream_authorization;
+          proxy_pass http://misu_ops_backend/ops/ws/console/$ops_console_target;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Forwarded-Proto https;
+          # Spring's forwarded-header handling must see the sidecar's
+          # loopback peer for its trusted-proxy check. Preserve the explicit
+          # X-Ops-* context below, but never let edge forwarding headers
+          # rewrite the Java request's remote address.
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header Origin $http_origin;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
+          proxy_set_header Cookie $http_cookie;
+          proxy_set_header Authorization "";
+          proxy_set_header X-Ops-User $ops_user;
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-Console-Target $ops_console_target;
+          proxy_set_header X-Ops-Original-URI $ops_original_uri;
+          proxy_set_header X-Ops-Original-Host $host;
+          proxy_set_header X-Ops-Proxy-Key ${OPS_PROXY_SHARED_SECRET};
+          proxy_set_header X-Ops-Upstream-Cookie $ops_upstream_cookie;
+          proxy_set_header X-Ops-Upstream-Authorization $ops_upstream_authorization;
+          proxy_set_header X-Forwarded-User $ops_headlamp_identity;
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_hide_header Set-Cookie;
+          proxy_hide_header Authorization;
+          proxy_hide_header X-Frame-Options;
+          proxy_hide_header Content-Security-Policy;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
+        }
+      # 主站 API 网关将 /ops/api/** 和 /ops/ws/** 路由到本 Service。
+      # Java 自己校验 JWT/单次会话；这里仅禁止内部代理接口被外部访问。
+      # Java REST/SSH endpoints share the same api.misu.chat server above.
+        location ^~ /ops/ws/ssh/ {
+          access_log off;
+          proxy_pass http://misu_ops_backend;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_set_header Authorization "";
+          proxy_set_header Cookie "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
+        }
+
+        location ^~ /ops/ws/ai/ {
+          access_log off;
+          proxy_pass http://misu_ops_backend;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_set_header Authorization "";
+          proxy_set_header Cookie "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_buffering off;
+        }
+
+        location ^~ /ops/api/ {
+          proxy_pass http://misu_ops_backend;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Host "";
+          proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header Forwarded "";
+          proxy_set_header X-Forwarded-For "";
+          proxy_set_header X-Real-IP "";
+          proxy_set_header X-Forwarded-Port "";
+          proxy_set_header Authorization $http_authorization;
+          proxy_set_header Cookie "";
+          proxy_set_header X-Forwarded-User "";
+          proxy_set_header X-Forwarded-Groups "";
+          proxy_set_header X-Forwarded-Group "";
+          proxy_set_header X-Forwarded-Email "";
+          proxy_set_header X-Forwarded-Id-Token "";
+          proxy_set_header X-Ops-Target "";
+          proxy_set_header X-Ops-User "";
+          proxy_set_header X-Ops-Console-Target "";
+          proxy_set_header X-Ops-Original-URI "";
+          proxy_set_header X-Ops-Original-Host "";
+          proxy_set_header X-Ops-Proxy-Key "";
+          proxy_set_header X-Ops-Upstream-Cookie "";
+          proxy_set_header X-Ops-Upstream-Authorization "";
+          proxy_set_header X-Original-URI "";
+          proxy_set_header X-Original-Method "";
+          proxy_set_header X-Original-Host "";
+          proxy_set_header X-Original-Origin "";
+          proxy_set_header X-Original-Referer "";
+          proxy_set_header X-Original-Upgrade "";
+        }
+
+      }
+    }
