@@ -103,7 +103,7 @@ cd scripts/deploy/arc/runner-image
 docker buildx build --platform linux/amd64 \
   --build-arg http_proxy=http://host.docker.internal:7897 \
   --build-arg https_proxy=http://host.docker.internal:7897 \
-  -t 192.168.50.227:30500/misuaa/misu-ci-runner:latest \
+  -t 192.168.50.227:30500/misuaa/misu-ci-runner:v2.337.0 \
   --push .
 ```
 

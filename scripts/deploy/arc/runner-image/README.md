@@ -17,18 +17,17 @@ cd "$ROOT/scripts/deploy/arc/runner-image"
 # buildx 多平台不必要，runner 只跑 amd64
 docker buildx build \
   --platform linux/amd64 \
-  -t 192.168.50.227:30500/misuaa/misu-ci-runner:latest \
-  -t 192.168.50.227:30500/misuaa/misu-ci-runner:$(date +%Y%m%d) \
+  -t 192.168.50.227:30500/misuaa/misu-ci-runner:v2.337.0 \
   --push .
 ```
 
 ## 何时需要重建
 
-- 上游 `actions-runner` 大版本升级（一年一两次）
+- GitHub 发布新 runner 版本（须在 GitHub 要求的更新期限内同步 Dockerfile、镜像 tag 和两组 Helm values）
 - 想换 JDK / Maven / Node / kubectl / Kaniko 版本
 - 加新工具
 
-平时不动它。runner pod 用 `imagePullPolicy: Always` 拉 `:latest`，重建推送完，下次 workflow 自动用新版本。
+runner pod 使用固定版本 tag。构建并推送新镜像后，更新两个 scale set 的 Helm values，检查镜像内的 `Runner.Listener --version`，再验收 listener 与实际工作流。
 
 ## 排错
 
