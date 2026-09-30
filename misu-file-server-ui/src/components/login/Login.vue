@@ -1,7 +1,7 @@
 <script setup>
-import { ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { login } from '@/api/auth/auth'
+import { getTurnstileConfig, login } from '@/api/auth/auth'
 import { setLoginTokens } from '@/api/auth/token'
 import { setUserInfo } from '@/api/user/user'
 
@@ -9,12 +9,69 @@ const router = useRouter()
 
 const userName = ref('')
 const password = ref('')
-const captchaCode = ref('123')
-
 const errorMsg = ref('')
 const loading = ref(false)
+const configReady = ref(false)
+const turnstileEnabled = ref(false)
+const turnstileToken = ref('')
+const turnstileElement = ref(null)
+let widgetId = null
+let scriptPromise = null
+
+function loadTurnstile() {
+  if (window.turnstile) return Promise.resolve()
+  if (!scriptPromise) {
+    scriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script')
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+      script.async = true
+      script.onload = resolve
+      script.onerror = reject
+      document.head.appendChild(script)
+    }).catch(error => {
+      scriptPromise = null
+      throw error
+    })
+  }
+  return scriptPromise
+}
+
+onMounted(async () => {
+  try {
+    const { data } = await getTurnstileConfig()
+    turnstileEnabled.value = data.enabled === true
+    if (turnstileEnabled.value) {
+      if (!data.siteKey) throw new Error('登录验证配置缺失，请联系管理员')
+      await loadTurnstile()
+      await nextTick()
+      widgetId = window.turnstile.render(turnstileElement.value, {
+        sitekey: data.siteKey,
+        action: 'login',
+        size: window.innerWidth < 360 ? 'compact' : 'flexible',
+        callback: token => {
+          turnstileToken.value = token
+          errorMsg.value = ''
+        },
+        'expired-callback': () => { turnstileToken.value = '' },
+        'error-callback': () => {
+          turnstileToken.value = ''
+          errorMsg.value = '人机验证未完成，请稍后重试'
+        }
+      })
+    }
+    configReady.value = true
+  } catch (error) {
+    errorMsg.value = error?.message || '登录验证暂不可用，请稍后重试'
+  }
+})
+
+onUnmounted(() => {
+  if (widgetId !== null && window.turnstile) window.turnstile.remove(widgetId)
+  widgetId = null
+})
 
 const handleLogin = () => {
+  if (loading.value || !configReady.value) return
   errorMsg.value = ''
 
   if (!userName.value.trim()) {
@@ -25,9 +82,13 @@ const handleLogin = () => {
     errorMsg.value = '密码不能为空'
     return
   }
+  if (turnstileEnabled.value && !turnstileToken.value) {
+    errorMsg.value = '请完成人机验证'
+    return
+  }
 
   loading.value = true
-  login(userName.value, password.value, captchaCode.value)
+  login(userName.value, password.value, turnstileToken.value)
       .then(response => {
         setLoginTokens(response.data.token, response.data.refreshToken)
         return setUserInfo()
@@ -40,6 +101,10 @@ const handleLogin = () => {
       })
       .finally(() => {
         loading.value = false
+        if (turnstileEnabled.value && widgetId !== null && window.turnstile) {
+          turnstileToken.value = ''
+          window.turnstile.reset(widgetId)
+        }
       })
 }
 </script>
@@ -61,8 +126,7 @@ const handleLogin = () => {
               placeholder="请输入账号"
               clearable
               autocomplete="username"
-              size="large"
-              @keyup.enter="handleLogin"/>
+              size="large"/>
         </label>
 
         <label class="login-field">
@@ -73,9 +137,10 @@ const handleLogin = () => {
               placeholder="请输入密码"
               show-password
               autocomplete="current-password"
-              size="large"
-              @keyup.enter="handleLogin"/>
+              size="large"/>
         </label>
+
+        <div v-if="turnstileEnabled" ref="turnstileElement" class="turnstile-widget"></div>
 
         <p v-if="errorMsg" class="login-error" role="alert">{{ errorMsg }}</p>
 
@@ -84,7 +149,8 @@ const handleLogin = () => {
             class="login-submit"
             size="large"
             :loading="loading"
-            @click="handleLogin">
+            :disabled="!configReady || (turnstileEnabled && !turnstileToken)"
+            native-type="submit">
           登录
         </el-button>
       </form>
@@ -93,6 +159,10 @@ const handleLogin = () => {
 </template>
 
 <style scoped>
+.turnstile-widget {
+  min-height: 65px;
+}
+
 .login-page {
   display: flex;
   justify-content: center;

@@ -35,6 +35,15 @@ spec:
           env:
             - { name: JAVA_XMX, value: "512m" }
             - { name: JAVA_XMS, value: "256m" }
+            - { name: TURNSTILE_ENABLED, value: "true" }
+            - { name: TURNSTILE_SITE_KEY, value: "0x4AAAAAAFECS0cUBtj5g2Mp" }
+            - { name: TURNSTILE_HOSTNAMES, value: "server.misu.chat" }
+            - name: TURNSTILE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: misu-account-turnstile
+                  key: secret
+                  optional: true # 启用前先创建 Secret 并重启 account Pod
           resources:
             requests: { cpu: 100m, memory: 384Mi }
             limits:   { cpu: 2,    memory: 1Gi }

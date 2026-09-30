@@ -39,7 +39,7 @@ template:
       fsGroup: 1001
     containers:
       - name: runner
-        image: 10.8.0.26:30500/misuaa/misu-ci-runner:latest
+        image: 10.8.0.26:30500/misuaa/misu-ci-runner:v2.337.0
         imagePullPolicy: Always
         # 临时：包一层 tee 把 stderr+stdout 抓到 hostPath，方便 pod 死后 misu-maco 上读
         # 跑通后可以改回 ["/home/runner/run.sh"]

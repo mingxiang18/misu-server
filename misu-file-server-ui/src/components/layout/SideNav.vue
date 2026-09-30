@@ -17,7 +17,8 @@ import {
   Files,
   Box,
   ArrowRight,
-  SwitchButton
+  SwitchButton,
+  Monitor
 } from '@element-plus/icons-vue'
 import { logOut } from '@/api/auth/auth'
 
@@ -59,6 +60,7 @@ const nav = computed(() => {
   ]
   if (isAdmin.value) {
     items.push({ key: 'users', label: '用户管理', icon: User, to: '/userManagement' })
+    items.push({ key: 'ops', label: '运维中心', icon: Monitor, to: '/ops', match: ['ops'] })
   }
   return items
 })

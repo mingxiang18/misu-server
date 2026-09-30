@@ -49,5 +49,14 @@ electron-dist/
 /.claude/
 .claude/settings.local.json
 
+# Design, planning, review, prototype, and acceptance notes stay local.
+/docs/**/*-design.md
+/docs/**/*-plan.md
+/docs/**/*-tech-plan.md
+/docs/**/*-todo.md
+/docs/**/*-review.md
+/docs/**/*-acceptance.md
+/docs/prototypes/
+
 # ARC GitHub App 凭据（含私钥），永远不入库
 /scripts/deploy/arc/02-secret.yaml

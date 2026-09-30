@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "release targets (comma sep): gateway,account,file_server,frontend,all"
+        description: "release targets (comma sep): gateway,account,file_server,ops,frontend,all"
         default: "all"
         type: string
 
@@ -65,6 +65,13 @@ jobs:
               - 'misu-net/**'
               - 'pom.xml'
               - 'scripts/deploy/k8s/misu-server/misu-file-server.yaml'
+            ops:
+              - 'misu-ops/**'
+              - 'misu-framework/**'
+              - 'misu-net/**'
+              - 'pom.xml'
+              - 'scripts/deploy/k8s/misu-server/misu-ops.yaml'
+              - 'scripts/deploy/k8s/misu-server/misu-ops-nginx-config.yaml'
             frontend:
               - 'misu-file-server-ui/**'
 
@@ -77,6 +84,7 @@ jobs:
           CHG_GATEWAY: ${{ steps.changes.outputs.gateway }}
           CHG_ACCOUNT: ${{ steps.changes.outputs.account }}
           CHG_FILE_SERVER: ${{ steps.changes.outputs.file_server }}
+          CHG_OPS: ${{ steps.changes.outputs.ops }}
           CHG_FRONTEND: ${{ steps.changes.outputs.frontend }}
         run: |
           TAG=$(git rev-parse --short HEAD)
@@ -101,16 +109,18 @@ jobs:
           set_flag gateway     "$CHG_GATEWAY"
           set_flag account     "$CHG_ACCOUNT"
           set_flag file_server "$CHG_FILE_SERVER"
+          set_flag ops         "$CHG_OPS"
           set_flag frontend    "$CHG_FRONTEND"
 
       # ---------- Maven ----------
       - name: Build JARs
-        if: steps.meta.outputs.do_gateway == '1' || steps.meta.outputs.do_account == '1' || steps.meta.outputs.do_file_server == '1'
+        if: steps.meta.outputs.do_gateway == '1' || steps.meta.outputs.do_account == '1' || steps.meta.outputs.do_file_server == '1' || steps.meta.outputs.do_ops == '1'
         run: |
           MODULES=""
           [[ "${{ steps.meta.outputs.do_gateway }}" == "1" ]]      && MODULES="$MODULES,misu-gateway"
           [[ "${{ steps.meta.outputs.do_account }}" == "1" ]]      && MODULES="$MODULES,misu-account/misu-account-biz"
           [[ "${{ steps.meta.outputs.do_file_server }}" == "1" ]]  && MODULES="$MODULES,misu-file-server/misu-file-server-biz"
+          [[ "${{ steps.meta.outputs.do_ops }}" == "1" ]]          && MODULES="$MODULES,misu-ops/misu-ops-biz"
           MODULES="${MODULES#,}"
           echo "Maven modules: $MODULES"
           mvn -B clean package -pl "$MODULES" -am -DskipTests -P prod
@@ -146,6 +156,17 @@ jobs:
             --dockerfile="$(pwd)/misu-file-server/misu-file-server-biz/DockerfileLocal" \
             --destination="${REGISTRY}/misuaa/misu-file-server:${{ steps.meta.outputs.tag }}" \
             --destination="${REGISTRY}/misuaa/misu-file-server:latest" \
+            --insecure --skip-tls-verify --insecure-pull --skip-tls-verify-pull \
+            --snapshot-mode=redo --use-new-run
+
+      - name: Build & push misu-ops image
+        if: steps.meta.outputs.do_ops == '1'
+        run: |
+          /kaniko/executor \
+            --context="$(pwd)/misu-ops/misu-ops-biz" \
+            --dockerfile="$(pwd)/misu-ops/misu-ops-biz/DockerfileLocal" \
+            --destination="${REGISTRY}/misuaa/misu-ops:${{ steps.meta.outputs.tag }}" \
+            --destination="${REGISTRY}/misuaa/misu-ops:latest" \
             --insecure --skip-tls-verify --insecure-pull --skip-tls-verify-pull \
             --snapshot-mode=redo --use-new-run
 
@@ -189,15 +210,24 @@ jobs:
           DO_GATEWAY: ${{ steps.meta.outputs.do_gateway }}
           DO_ACCOUNT: ${{ steps.meta.outputs.do_account }}
           DO_FILE_SERVER: ${{ steps.meta.outputs.do_file_server }}
+          DO_OPS: ${{ steps.meta.outputs.do_ops }}
           DO_FRONTEND: ${{ steps.meta.outputs.do_frontend }}
           REGISTRY_PULL: ${{ env.REGISTRY }}
+          OPS_CONFIG_TAG: ${{ steps.meta.outputs.tag }}
         run: |
           export IMAGE_TAG="$TAG"
+          export OPS_CONFIG_TAG="$TAG"
           TMP=$(mktemp -d)
           apply_one() {
             local flag="$1" name="$2"
             [[ "$flag" != "1" ]] && return 0
-            envsubst '${REGISTRY_PULL} ${IMAGE_TAG}' \
+            if [[ "$name" == "misu-ops" ]]; then
+              envsubst '${OPS_CONFIG_TAG}' \
+                < scripts/deploy/k8s/misu-server/misu-ops-nginx-config.yaml \
+                > "${TMP}/misu-ops-nginx-config.yaml"
+              kubectl apply -f "${TMP}/misu-ops-nginx-config.yaml"
+            fi
+            envsubst '${REGISTRY_PULL} ${IMAGE_TAG} ${OPS_CONFIG_TAG}' \
               < "scripts/deploy/k8s/misu-server/${name}.yaml" \
               > "${TMP}/${name}.yaml"
             kubectl apply -f "${TMP}/${name}.yaml"
@@ -205,6 +235,7 @@ jobs:
           apply_one "$DO_GATEWAY"     misu-gateway
           apply_one "$DO_ACCOUNT"     misu-account
           apply_one "$DO_FILE_SERVER" misu-file-server
+          apply_one "$DO_OPS"         misu-ops
           # 静态文件已替换，重启 nginx pod 清掉内部缓存
           [[ "$DO_FRONTEND" == "1" ]] && kubectl -n "$NAMESPACE" rollout restart deploy/misu-server-nginx
           true
@@ -215,6 +246,7 @@ jobs:
           DO_GATEWAY: ${{ steps.meta.outputs.do_gateway }}
           DO_ACCOUNT: ${{ steps.meta.outputs.do_account }}
           DO_FILE_SERVER: ${{ steps.meta.outputs.do_file_server }}
+          DO_OPS: ${{ steps.meta.outputs.do_ops }}
           DO_FRONTEND: ${{ steps.meta.outputs.do_frontend }}
         run: |
           set +e
@@ -231,6 +263,7 @@ jobs:
           check "$DO_GATEWAY"     misu-gateway
           check "$DO_ACCOUNT"     misu-account
           check "$DO_FILE_SERVER" misu-file-server
+          check "$DO_OPS"         misu-ops
           check "$DO_FRONTEND"    misu-server-nginx
           if [[ -n "$FAIL" ]]; then
             echo "failed_deps=$FAIL" >> "$GITHUB_OUTPUT"
