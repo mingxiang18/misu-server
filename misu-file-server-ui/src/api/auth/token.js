@@ -3,60 +3,64 @@ import Cookies from 'js-cookie'
 const TokenKey = 'User-Token'
 const RefreshTokenKey = 'User-Refresh-Token'
 const UserInfoKey = 'User-Info'
-const LegacyCookieDomain = '.misu.chat'
+const CookieRootDomain = 'misu.chat'
 const CookiePath = '/'
 
+const getCookieDomain = () => {
+  const hostname = typeof window === 'undefined' ? '' : window.location.hostname.toLowerCase()
+  return hostname === CookieRootDomain || hostname.endsWith(`.${CookieRootDomain}`)
+    ? `.${CookieRootDomain}`
+    : undefined
+}
+
 export const getCookieOptions = (expires) => {
-  // Keep the main-site credentials host-only. A Domain=.misu.chat cookie is
-  // readable and sendable by every sibling subdomain, including services that
-  // are not part of the main application.
-  return {
+  const options = {
     expires,
     path: CookiePath,
     secure: typeof window === 'undefined' || window.location?.protocol === 'https:',
     sameSite: 'Lax'
   }
+  const domain = getCookieDomain()
+  if (domain) options.domain = domain
+  return options
 }
 
-const removeLegacyCookie = (key) => {
-  // The explicit path handles cookies created by the former implementation;
-  // the no-path attempt preserves cleanup for cookies created with the browser
-  // default path.
-  Cookies.remove(key, { domain: LegacyCookieDomain, path: CookiePath })
-  Cookies.remove(key, { domain: LegacyCookieDomain })
+const removeSharedCookie = (key) => {
+  const domain = getCookieDomain()
+  if (!domain) return
+  Cookies.remove(key, { domain, path: CookiePath })
+  Cookies.remove(key, { domain })
 }
 
 const migrateCookie = (key, expires) => {
-  // document.cookie does not reveal a cookie's Domain attribute. Capture the
-  // browser-selected value first, remove the legacy scope, then prefer any
-  // host-only value that remains. This preserves an existing host cookie when
-  // duplicate host/domain names are present; if the legacy cookie was the only
-  // value, its session survives in the new host-only scope.
+  if (!getCookieDomain()) return
+  // Prefer the current host's session if old host and shared cookies coexist.
   const selectedValue = Cookies.get(key)
-  removeLegacyCookie(key)
+  removeSharedCookie(key)
   const hostOnlyValue = Cookies.get(key)
-  if (hostOnlyValue !== undefined || selectedValue === undefined) return
-  Cookies.set(key, selectedValue, getCookieOptions(expires))
+  const value = hostOnlyValue ?? selectedValue
+  if (value === undefined) return
+  Cookies.remove(key, { path: CookiePath })
+  Cookies.remove(key)
+  Cookies.set(key, value, getCookieOptions(expires))
 }
 
-// Migrate already-open sessions as soon as the auth module is loaded, before
-// the router or request interceptor reads a potentially attacker-controlled
-// Domain=.misu.chat cookie.
-migrateCookie(TokenKey, 1)
+// Move existing sessions to the shared suffix before images request api.misu.chat.
+migrateCookie(TokenKey, 30)
 migrateCookie(RefreshTokenKey, 30)
 migrateCookie(UserInfoKey, 30)
 
 export const removeCookie = (key) => {
   Cookies.remove(key, { path: CookiePath })
   Cookies.remove(key)
-  removeLegacyCookie(key)
+  removeSharedCookie(key)
 }
 
 export const setCookie = (key, value, expires) => {
-  // Remove a legacy domain cookie before creating the host-only replacement;
-  // otherwise both cookies can be sent to server.misu.chat with ambiguous
-  // same-name ordering during the migration window.
-  removeLegacyCookie(key)
+  // Clear host-only duplicates before writing the shared cookie.
+  Cookies.remove(key, { path: CookiePath })
+  Cookies.remove(key)
+  removeSharedCookie(key)
   return Cookies.set(key, value, getCookieOptions(expires))
 }
 
@@ -65,7 +69,8 @@ export function getToken() {
 }
 
 export function setToken(token) {
-  return setCookie(TokenKey, token, 1)
+  // Cookie retention does not extend the JWT's server-side expiry.
+  return setCookie(TokenKey, token, 30)
 }
 
 export function removeToken() {

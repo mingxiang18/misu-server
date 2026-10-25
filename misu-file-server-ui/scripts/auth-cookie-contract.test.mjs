@@ -5,15 +5,20 @@ import { fileURLToPath } from 'node:url'
 
 const appHost = 'server.misu.chat'
 
-function createCookieDocument(initialCookies = []) {
+function createCookieDocument(initialCookies = [], hostname = appHost) {
   const jar = new Map(initialCookies.map((cookie, index) => [
     `${cookie.domain || 'host'}|${cookie.path || '/'}|${cookie.name}`,
     { ...cookie, order: index }
   ]))
   const writes = []
 
-  const visibleCookies = () => [...jar.values()]
-    .filter((cookie) => cookie.path === '/' && (cookie.domain === 'host' || appHost === cookie.domain || appHost.endsWith(cookie.domain)))
+  const visibleCookies = (requestHost = hostname) => [...jar.values()]
+    .filter((cookie) => {
+      if (cookie.path !== '/') return false
+      if (cookie.domain === 'host') return requestHost === hostname
+      const domain = cookie.domain.replace(/^\./, '')
+      return requestHost === domain || requestHost.endsWith(`.${domain}`)
+    })
     .sort((left, right) => left.order - right.order)
     .map((cookie) => `${encodeURIComponent(cookie.name)}=${encodeURIComponent(cookie.value)}`)
     .join('; ')
@@ -21,6 +26,7 @@ function createCookieDocument(initialCookies = []) {
   return {
     writes,
     jar,
+    requestCookie: visibleCookies,
     get cookie() {
       return visibleCookies()
     },
@@ -47,8 +53,8 @@ function createCookieDocument(initialCookies = []) {
   }
 }
 
-async function loadTokenApi(document, suffix) {
-  globalThis.window = { location: { protocol: 'https:', hostname: appHost } }
+async function loadTokenApi(document, suffix, hostname = appHost) {
+  globalThis.window = { location: { protocol: 'https:', hostname } }
   globalThis.document = document
   return import(`../src/api/auth/token.js?${suffix}`)
 }
@@ -61,11 +67,19 @@ const legacyDocument = createCookieDocument([
 const legacyApi = await loadTokenApi(legacyDocument, 'legacy-only')
 assert.equal(legacyApi.getToken(), 'legacy-access', 'legacy access token must survive migration')
 assert.equal(legacyApi.getRefreshToken(), 'legacy-refresh', 'legacy refresh token must survive migration')
-assert.equal(legacyDocument.jar.get('host|/|User-Token')?.value, 'legacy-access')
-assert.equal(legacyDocument.jar.get('host|/|User-Refresh-Token')?.value, 'legacy-refresh')
-assert.equal(legacyDocument.jar.get('.misu.chat|/|User-Token'), undefined)
-assert.equal(legacyDocument.jar.get('.misu.chat|/|User-Refresh-Token'), undefined)
-assert.equal(legacyDocument.jar.get('.misu.chat|/|User-Info'), undefined)
+assert.equal(legacyDocument.jar.get('host|/|User-Token'), undefined)
+assert.equal(legacyDocument.jar.get('.misu.chat|/|User-Token')?.value, 'legacy-access')
+assert.equal(legacyDocument.jar.get('.misu.chat|/|User-Refresh-Token')?.value, 'legacy-refresh')
+assert.equal(legacyDocument.jar.get('.misu.chat|/|User-Info')?.value, '{"id":7}')
+
+const hostDocument = createCookieDocument([
+  { name: 'User-Token', value: 'host-access', domain: 'host', path: '/' },
+  { name: 'User-Refresh-Token', value: 'host-refresh', domain: 'host', path: '/' }
+])
+assert.equal(hostDocument.requestCookie('api.misu.chat'), '', 'host-only cookies cannot authenticate API images')
+await loadTokenApi(hostDocument, 'host-only')
+assert.match(hostDocument.requestCookie('api.misu.chat'), /User-Token=host-access/, 'migration must authenticate sibling API requests')
+assert.equal(hostDocument.jar.get('host|/|User-Token'), undefined)
 
 const duplicateDocument = createCookieDocument([
   { name: 'User-Token', value: 'legacy-access', domain: '.misu.chat', path: '/' },
@@ -73,14 +87,14 @@ const duplicateDocument = createCookieDocument([
 ])
 const duplicateApi = await loadTokenApi(duplicateDocument, 'duplicate')
 assert.equal(duplicateApi.getToken(), 'host-access', 'an existing host-only token must win after legacy cleanup')
-assert.equal(duplicateDocument.jar.get('host|/|User-Token')?.value, 'host-access')
-assert.equal(duplicateDocument.jar.get('.misu.chat|/|User-Token'), undefined)
+assert.equal(duplicateDocument.jar.get('host|/|User-Token'), undefined)
+assert.equal(duplicateDocument.jar.get('.misu.chat|/|User-Token')?.value, 'host-access')
 
 const options = legacyApi.getCookieOptions(1)
 assert.equal(options.path, '/')
 assert.equal(options.sameSite, 'Lax')
 assert.equal(options.secure, true)
-assert.equal('domain' in options, false, 'main-site cookies must be host-only')
+assert.equal(options.domain, '.misu.chat')
 const explorerSource = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/components/fileServer/FileExplorer.vue'), 'utf8')
 assert.equal(explorerSource.includes('document.cookie'), false, 'feature code must use the shared auth-token accessor')
 
@@ -89,12 +103,27 @@ legacyApi.setToken('new-access')
 legacyApi.setRefreshToken('new-refresh')
 legacyApi.setCookie('User-Info', '{}', 30)
 for (const key of ['User-Token', 'User-Refresh-Token', 'User-Info']) {
-  assert.equal(legacyDocument.jar.get(`host|/|${key}`)?.domain, 'host')
+  assert.equal(legacyDocument.jar.get(`host|/|${key}`), undefined)
+  assert.equal(legacyDocument.jar.get(`.misu.chat|/|${key}`)?.domain, '.misu.chat')
   assert.ok(legacyDocument.writes.some((value) => value.startsWith(`${key}=;`) && value.toLowerCase().includes('domain=.misu.chat') && value.toLowerCase().includes('path=/')))
 }
 
 legacyApi.removeCookie('User-Token')
 assert.equal(legacyDocument.jar.get('host|/|User-Token'), undefined)
+assert.equal(legacyDocument.jar.get('.misu.chat|/|User-Token'), undefined)
 assert.ok(legacyDocument.writes.some((value) => value.startsWith('User-Token=;') && value.toLowerCase().includes('domain=.misu.chat') && value.toLowerCase().includes('path=/')))
+
+for (const hostname of ['misu.chat', 'api.misu.chat', 'nested.server.misu.chat']) {
+  const api = await loadTokenApi(createCookieDocument([], hostname), `allowed-${hostname}`, hostname)
+  assert.equal(api.getCookieOptions(1).domain, '.misu.chat', hostname)
+}
+for (const hostname of ['evilmisu.chat', 'misu.chat.evil.test', 'localhost']) {
+  const document = createCookieDocument([], hostname)
+  const api = await loadTokenApi(document, `excluded-${hostname}`, hostname)
+  assert.equal('domain' in api.getCookieOptions(1), false, hostname)
+  api.setToken('local-access')
+  assert.equal(document.jar.get('host|/|User-Token')?.value, 'local-access')
+  assert.equal(document.jar.get('.misu.chat|/|User-Token'), undefined)
+}
 
 console.log('authentication cookie behavior checks passed')
