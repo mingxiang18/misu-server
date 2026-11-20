@@ -11,7 +11,7 @@ fail() { printf 'ai-cli contract: %s\n' "$*" >&2; exit 1; }
 
 bash -n "$INSTALLER" || fail "installer has invalid shell syntax"
 grep -Fq 'readonly NODE_VERSION="24.21.0"' "$INSTALLER" || fail "Node pin changed"
-grep -Fq 'readonly CODEX_VERSION_PIN="0.154.0"' "$INSTALLER" || fail "Codex pin changed"
+grep -Fq 'readonly CODEX_VERSION_PIN="0.171.0"' "$INSTALLER" || fail "Codex bootstrap version changed"
 grep -Fq 'readonly CLAUDE_VERSION_PIN="2.1.270"' "$INSTALLER" || fail "Claude Code pin changed"
 grep -Fq 'npm" install --prefix "$CLI_ROOT" --package-lock-only' "$INSTALLER" || fail "first install must create a lockfile"
 grep -Fq 'npm" ci --prefix "$CLI_ROOT"' "$INSTALLER" || fail "install must use npm ci"
@@ -40,6 +40,7 @@ grep -Fq 'tool must be exactly codex or claude' "$tmp_wrapper" || fail "tool all
 grep -Fq 'only no arguments or the exact --version argument is allowed' "$tmp_wrapper" || fail "wrapper argument contract changed"
 grep -Fq 'IFS= read -r ANTHROPIC_BASE_URL' "$tmp_wrapper" || fail "base URL is not read literally"
 grep -Fq 'IFS= read -r ANTHROPIC_AUTH_TOKEN' "$tmp_wrapper" || fail "auth token is not read literally"
+grep -Fq 'export npm_config_prefix="$CODEX_NPM_PREFIX" NPM_CONFIG_PREFIX="$CODEX_NPM_PREFIX"' "$tmp_wrapper" || fail "Codex updater prefix is missing"
 
 checksum_function="${tmp_root}/checksum-function.sh"
 awk 'capture && /^}/ { print; exit }
@@ -87,8 +88,62 @@ EOF
 bash "$native_function" || fail "fixed Claude install.cjs was not invoked successfully"
 [[ -x "${native_package}/bin/claude.exe" ]] || fail "native binary was not placed"
 
+global_function="${tmp_root}/global-function.sh"
+awk '/^install_claude_native\(\)/ { exit }
+     /^install_codex_global\(\) \{/ { capture=1 }
+     capture { print }' "$INSTALLER" \
+  | sed 's/install -d -m 0755 -o root -g root/mkdir -p/' > "$global_function"
+global_root="${tmp_root}/global"
+mkdir -p "${global_root}/node/bin" "${global_root}/codex/bin" "${global_root}/codex/lib/node_modules/@openai/codex"
+ln -s "$(command -v node)" "${global_root}/node/bin/node"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "${global_root}/codex/bin/codex"
+chmod 0755 "${global_root}/codex/bin/codex"
+printf '%s\n' '{"version":"0.180.0"}' > "${global_root}/codex/lib/node_modules/@openai/codex/package.json"
+printf '%s\n' '#!/usr/bin/env bash' \
+  '[[ "$*" == "install --global --prefix "*" --include=optional --ignore-scripts --no-audit --no-fund @openai/codex@0.171.0" ]] || exit 1' \
+  'printf "installed\\n" >> "$MISU_GLOBAL_LOG"' > "${global_root}/node/bin/npm"
+chmod 0755 "${global_root}/node/bin/npm"
+export MISU_GLOBAL_LOG="${global_root}/npm.log"
+cat >> "$global_function" <<EOF
+readonly CODEX_NPM_PREFIX="${global_root}/codex"
+readonly NODE_CURRENT="${global_root}/node"
+readonly CONTROLLED_PATH="\${NODE_CURRENT}/bin:/usr/bin:/bin"
+codex_version="0.171.0"
+die() { exit 1; }
+install_codex_global
+[[ "\$codex_version" == 0.180.0 ]] || exit 1
+[[ ! -e "\$MISU_GLOBAL_LOG" ]] || exit 1
+printf '%s\\n' '{"version":"0.154.0"}' > "\${CODEX_NPM_PREFIX}/lib/node_modules/@openai/codex/package.json"
+codex_version="0.171.0"
+install_codex_global
+grep -Fxq installed "\$MISU_GLOBAL_LOG"
+EOF
+bash "$global_function" || fail "Codex bootstrap must preserve newer versions and upgrade older versions"
+
+manifest_function="${tmp_root}/manifest-function.sh"
+awk '/^install_cli\(\)/ { exit }
+     /^install_manifest\(\) \{/ { capture=1 }
+     capture { print }' "$INSTALLER" > "$manifest_function"
+mkdir -p "${global_root}/legacy-cli"
+printf '%s\n' '{"private":true,"dependencies":{"@openai/codex":"0.154.0","@anthropic-ai/claude-code":"2.1.270"}}' > "${global_root}/legacy-cli/package.json"
+cat >> "$manifest_function" <<EOF
+readonly CLI_ROOT="${global_root}/legacy-cli"
+readonly NODE_CURRENT="${global_root}/node"
+readonly CONTROLLED_PATH="\${NODE_CURRENT}/bin:/usr/bin:/bin"
+claude_version="2.1.270"
+manifest_changed=0
+die() { exit 1; }
+install_manifest
+[[ "\$manifest_changed" == 1 ]] || exit 1
+"\${NODE_CURRENT}/bin/node" -e 'const d=require(process.argv[1]); if (d.dependencies["@openai/codex"] || d.dependencies["@anthropic-ai/claude-code"]!=="2.1.270") process.exit(1)' "\${CLI_ROOT}/package.json"
+manifest_changed=0
+install_manifest
+[[ "\$manifest_changed" == 0 ]] || exit 1
+EOF
+bash "$manifest_function" || fail "legacy manifest migration must preserve Claude and be idempotent"
+
 runtime_root="${tmp_root}/runtime"
-mkdir -p "${runtime_root}/cli/node-current/bin" "${runtime_root}/cli/node_modules/.bin" "${runtime_root}/workspace" "${runtime_root}/config"
+mkdir -p "${runtime_root}/cli/node-current/bin" "${runtime_root}/cli/node_modules/.bin" "${runtime_root}/codex/bin" "${runtime_root}/workspace" "${runtime_root}/config"
 node_stub="${runtime_root}/cli/node-current/bin/node"
 printf '%s\n' '#!/usr/bin/env bash' 'script="$1"; shift' 'printf "stub:%s\\n" "$*" >> "$MISU_STUB_LOG"' > "$node_stub"
 chmod 0755 "$node_stub"
@@ -99,15 +154,24 @@ stub="${runtime_root}/cli/node_modules/.bin/claude"
 printf '%s\n' '#!/usr/bin/env bash' \
   'printf "claude-env:%s|%s|%s|%s|%s|%s|%s|%s\\n" "${ANTHROPIC_BASE_URL-}" "${ANTHROPIC_MODEL-}" "${ANTHROPIC_DEFAULT_MODEL-}" "${ANTHROPIC_DEFAULT_OPUS_MODEL-}" "${ANTHROPIC_DEFAULT_SONNET_MODEL-}" "${ANTHROPIC_DEFAULT_HAIKU_MODEL-}" "${CLAUDE_CODE_SUBAGENT_MODEL-}" "$*" >> "$MISU_STUB_LOG"' > "$stub"
 chmod 0755 "$stub"
-codex_stub="${runtime_root}/cli/node_modules/.bin/codex"
+codex_stub="${runtime_root}/codex/bin/codex"
 printf '%s\n' '#!/usr/bin/env bash' \
-  'printf "codex-env:%s|%s|%s|%s|%s|%s|%s|%s\\n" "${HTTP_PROXY-}" "${HTTPS_PROXY-}" "${ALL_PROXY-}" "${NO_PROXY-}" "${http_proxy-}" "${https_proxy-}" "${all_proxy-}" "${no_proxy-}" >> "$MISU_STUB_LOG"' > "$codex_stub"
+  'printf "codex-env:%s|%s|%s|%s|%s|%s|%s|%s\\n" "${HTTP_PROXY-}" "${HTTPS_PROXY-}" "${ALL_PROXY-}" "${NO_PROXY-}" "${http_proxy-}" "${https_proxy-}" "${all_proxy-}" "${no_proxy-}" >> "$MISU_STUB_LOG"' \
+  '[[ "${MISU_STUB_UPDATE-}" != 1 ]] || npm install -g @openai/codex@0.172.0' > "$codex_stub"
 chmod 0755 "$codex_stub"
+npm_stub="${runtime_root}/cli/node-current/bin/npm"
+printf '%s\n' '#!/usr/bin/env bash' \
+  '[[ "$*" == "install -g @openai/codex@0.172.0" ]] || exit 1' \
+  '[[ "$npm_config_prefix" == "$NPM_CONFIG_PREFIX" ]] || exit 1' \
+  '[[ "$(command -v codex)" == "$npm_config_prefix/bin/codex" ]] || exit 1' \
+  'printf "update-prefix:%s\\n" "$npm_config_prefix" >> "$MISU_STUB_LOG"' > "$npm_stub"
+chmod 0755 "$npm_stub"
 : > "${runtime_root}/config/anthropic-base-url"
 : > "${runtime_root}/config/anthropic-auth-token"
 chmod 0600 "${runtime_root}/config/anthropic-base-url" "${runtime_root}/config/anthropic-auth-token"
 sed \
   -e "s#/srv/misu-ai-cli/cli#${runtime_root}/cli#" \
+  -e "s#/srv/misu-ai-cli/codex#${runtime_root}/codex#" \
   -e "s#/srv/misu-ai-cli/workspace#${runtime_root}/workspace#" \
   -e "s#/opt/misu-ai-cli/node-current#${runtime_root}/cli/node-current#" \
   -e "s#/etc/misu-ai-cli/anthropic-base-url#${runtime_root}/config/anthropic-base-url#" \
@@ -130,6 +194,10 @@ if ! env HTTP_PROXY=http://inherited.invalid HTTPS_PROXY=http://inherited.invali
 fi
 grep -Fq 'codex-env:http://127.0.0.1:7890|http://127.0.0.1:7890|http://127.0.0.1:7890|localhost,127.0.0.1,::1,10.8.0.1,10.8.0.26,192.168.50.227,.svc,.cluster.local|http://127.0.0.1:7890|http://127.0.0.1:7890|http://127.0.0.1:7890|localhost,127.0.0.1,::1,10.8.0.1,10.8.0.26,192.168.50.227,.svc,.cluster.local' "$stub_log" \
   || fail "codex did not receive the worker-local Clash proxy"
+: > "$stub_log"
+env MISU_STUB_UPDATE=1 npm_config_prefix=/wrong/global NPM_CONFIG_PREFIX=/wrong/global \
+  "${runtime_root}/wrapper" codex || fail "confirmed npm update failed"
+grep -Fxq "update-prefix:${runtime_root}/codex" "$stub_log" || fail "confirmed update targets a different installation"
 : > "$stub_log"
 if "${runtime_root}/wrapper" claude >/dev/null 2>&1; then
   fail "claude interactive mode accepted empty credentials"

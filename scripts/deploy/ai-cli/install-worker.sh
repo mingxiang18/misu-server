@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Root-only, idempotent worker installer with exact release pins.
+# Root-only worker installer. Codex can update itself after user confirmation.
 #
 #   bash install-worker.sh \
 #     --anthropic-base-url-file /root/secrets/anthropic-base-url \
 #     --anthropic-auth-token-file /root/secrets/anthropic-auth-token
 #
-# Real credentials and unreviewed versions stay outside this repository.
+# Real credentials stay outside this repository.
 
 set -Eeuo pipefail
 IFS=$'\n\t'
 
 readonly NODE_VERSION="24.21.0"
-readonly CODEX_VERSION_PIN="0.154.0"
+readonly CODEX_VERSION_PIN="0.171.0"
 readonly CLAUDE_VERSION_PIN="2.1.270"
 readonly PREFIX="/opt/misu-ai-cli"
 readonly NODE_DIR="${PREFIX}/node-v${NODE_VERSION}"
@@ -19,6 +19,7 @@ readonly NODE_CURRENT="${PREFIX}/node-current"
 readonly CONTROLLED_PATH="${NODE_CURRENT}/bin:/usr/bin:/bin"
 readonly APP_ROOT="/srv/misu-ai-cli"
 readonly CLI_ROOT="${APP_ROOT}/cli"
+readonly CODEX_NPM_PREFIX="${APP_ROOT}/codex"
 readonly WORKSPACE="${APP_ROOT}/workspace"
 readonly CONFIG_ROOT="/etc/misu-ai-cli"
 readonly BASE_URL_FILE="${CONFIG_ROOT}/anthropic-base-url"
@@ -29,6 +30,7 @@ codex_version="$CODEX_VERSION_PIN"
 claude_version="$CLAUDE_VERSION_PIN"
 base_url_source=""
 auth_token_source=""
+manifest_changed=0
 
 die() { printf 'misu-ai-cli install: %s\n' "$*" >&2; exit 1; }
 
@@ -40,7 +42,7 @@ while (($# > 0)); do
     --anthropic-auth-token-file) (($# >= 2)) || die "--anthropic-auth-token-file requires a path"; auth_token_source="$2"; shift 2 ;;
     --help|-h)
       sed -n '2,7p' "$0"
-      printf '%s\n' 'Usage: install-worker.sh [--codex-version 0.154.0] [--claude-version 2.1.270] [--anthropic-base-url-file PATH] [--anthropic-auth-token-file PATH]'
+      printf '%s\n' 'Usage: install-worker.sh [--codex-version 0.171.0] [--claude-version 2.1.270] [--anthropic-base-url-file PATH] [--anthropic-auth-token-file PATH]'
       exit 0
       ;;
     *) die "unknown option: $1" ;;
@@ -94,16 +96,27 @@ install_manifest() {
   local manifest="${CLI_ROOT}/package.json"
   if [[ -e "$manifest" ]]; then
     [[ -f "$manifest" && ! -L "$manifest" ]] || die "package.json is not a regular file"
-    if ! env PATH="$CONTROLLED_PATH" "${NODE_CURRENT}/bin/node" - "$manifest" "$codex_version" "$claude_version" <<'NODE'
+    if ! env PATH="$CONTROLLED_PATH" "${NODE_CURRENT}/bin/node" - "$manifest" "$claude_version" <<'NODE'
 const fs = require('fs');
-const [file, codex, claude] = process.argv.slice(2);
+const [file, claude] = process.argv.slice(2);
 const data = JSON.parse(fs.readFileSync(file, 'utf8'));
 if (data.private !== true || !data.dependencies ||
-    data.dependencies['@openai/codex'] !== codex ||
     data.dependencies['@anthropic-ai/claude-code'] !== claude) process.exit(1);
 NODE
     then
       die "package.json has different pinned CLI versions"
+    fi
+    # Codex now has its own npm global prefix. Remove only its legacy local dependency.
+    if env PATH="$CONTROLLED_PATH" "${NODE_CURRENT}/bin/node" - "$manifest" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+if (!Object.hasOwn(data.dependencies, '@openai/codex')) process.exit(1);
+delete data.dependencies['@openai/codex'];
+fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+NODE
+    then
+      manifest_changed=1
     fi
     return
   fi
@@ -113,7 +126,6 @@ NODE
   "name": "misu-ai-cli",
   "private": true,
   "dependencies": {
-    "@openai/codex": "${codex_version}",
     "@anthropic-ai/claude-code": "${claude_version}"
   }
 }
@@ -125,13 +137,40 @@ install_cli() {
   install -d -m 0755 -o root -g root "$APP_ROOT" "$CLI_ROOT" "$WORKSPACE"
   install_manifest
   local npm="${NODE_CURRENT}/bin/npm"
-  if [[ ! -f "${CLI_ROOT}/package-lock.json" ]]; then
+  if [[ ! -f "${CLI_ROOT}/package-lock.json" || "$manifest_changed" == 1 ]]; then
     env PATH="$CONTROLLED_PATH" "$npm" install --prefix "$CLI_ROOT" --package-lock-only --ignore-scripts --no-audit --no-fund
   fi
   env PATH="$CONTROLLED_PATH" "$npm" ci --prefix "$CLI_ROOT" --omit=dev --include=optional --ignore-scripts --no-audit --no-fund
-  [[ -x "${CLI_ROOT}/node_modules/.bin/codex" ]] || die "Codex binary was not installed"
   [[ -x "${CLI_ROOT}/node_modules/.bin/claude" ]] || die "Claude Code binary was not installed"
   install_claude_native
+  install_codex_global
+}
+
+install_codex_global() {
+  local metadata="${CODEX_NPM_PREFIX}/lib/node_modules/@openai/codex/package.json"
+  local executable="${CODEX_NPM_PREFIX}/bin/codex"
+  install -d -m 0755 -o root -g root "$CODEX_NPM_PREFIX"
+  if [[ -f "$metadata" && -x "$executable" ]]; then
+    # Do not downgrade a version already installed by the CLI's confirmed updater.
+    if env PATH="$CONTROLLED_PATH" "${NODE_CURRENT}/bin/node" - "$metadata" "$codex_version" <<'NODE'
+const fs = require('fs');
+const [file, baseline] = process.argv.slice(2);
+const version = JSON.parse(fs.readFileSync(file, 'utf8')).version;
+const parse = v => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
+const actual = parse(version), minimum = parse(baseline);
+if (!actual || !minimum) process.exit(1);
+for (let i = 0; i < 3; i++) {
+  if (actual[i] !== minimum[i]) process.exit(actual[i] > minimum[i] ? 0 : 1);
+}
+NODE
+    then
+      codex_version="$(env PATH="$CONTROLLED_PATH" "${NODE_CURRENT}/bin/node" -p 'require(process.argv[1]).version' "$metadata")"
+      return
+    fi
+  fi
+  env PATH="$CONTROLLED_PATH" "${NODE_CURRENT}/bin/npm" install --global --prefix "$CODEX_NPM_PREFIX" \
+    --include=optional --ignore-scripts --no-audit --no-fund "@openai/codex@${codex_version}"
+  [[ -x "$executable" ]] || die "Codex global binary was not installed"
 }
 
 install_claude_native() {
@@ -176,6 +215,7 @@ write_wrapper() {
 set -Eeuo pipefail
 IFS=$'\n\t'
 readonly CLI_ROOT="/srv/misu-ai-cli/cli"
+readonly CODEX_NPM_PREFIX="/srv/misu-ai-cli/codex"
 readonly WORKSPACE="/srv/misu-ai-cli/workspace"
 readonly NODE_CURRENT="/opt/misu-ai-cli/node-current"
 readonly CONTROLLED_PATH="${NODE_CURRENT}/bin:/usr/bin:/bin"
@@ -189,7 +229,9 @@ die() { printf 'misu-ai-cli: %s\n' "$*" >&2; exit 64; }
 tool="$1"; shift
 case "$tool" in
   codex)
-    executable="${CLI_ROOT}/node_modules/.bin/codex"
+    executable="${CODEX_NPM_PREFIX}/bin/codex"
+    # The built-in updater runs npm install -g; keep it in the same managed prefix.
+    export npm_config_prefix="$CODEX_NPM_PREFIX" NPM_CONFIG_PREFIX="$CODEX_NPM_PREFIX"
     # The worker's Clash HTTP port is local to this host. Set proxy variables
     # only for Codex so Claude and other SSH-launched workloads keep their
     # inherited environment unchanged, and never proxy loopback traffic.
@@ -207,6 +249,9 @@ fi
 [[ -d "$WORKSPACE" ]] || die "fixed workspace is missing"
 cd -- "$WORKSPACE"
 export PATH="$CONTROLLED_PATH"
+if [[ "$tool" == codex ]]; then
+  export PATH="${CODEX_NPM_PREFIX}/bin:$PATH"
+fi
 if (($# == 1)); then
   exec "$executable" --version
 fi
